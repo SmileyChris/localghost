@@ -5,6 +5,8 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.0-rc.2] - 2026-07-16
+
 ### Added
 
 - A self-contained Traefik 3.7.7 Compose project bound to loopback.

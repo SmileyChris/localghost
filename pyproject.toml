@@ -1,6 +1,6 @@
 [project]
 name = "local-dev-proxy"
-version = "0.1.0"
+version = "1.0.0rc2"
 description = "Connect local applications to a shared Traefik development proxy"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -9,7 +9,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "SmileyChris" }]
 keywords = ["docker", "compose", "traefik", "development", "proxy"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
   "Environment :: Console",
   "Intended Audience :: Developers",
   "Operating System :: OS Independent",

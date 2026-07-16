@@ -130,7 +130,7 @@ wheels = [
 
 [[package]]
 name = "local-dev-proxy"
-version = "0.1.0"
+version = "1.0.0rc2"
 source = { editable = "." }
 dependencies = [
     { name = "click" },

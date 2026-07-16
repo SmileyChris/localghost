@@ -107,15 +107,40 @@ uvx --isolated --from "$wheel" local-dev-proxy down
 
 CI performs the same wheel smoke test before the source integration suite.
 
+## PyPI authentication
+
+For releases from GitHub Actions, use PyPI Trusted Publishing (recommended).
+After configuring the repository, workflow, and environment in PyPI, `uv
+publish --trusted-publishing always` obtains a short-lived credential through
+GitHub Actions OIDC; no long-lived PyPI token is stored in GitHub.
+
+For a manual publish, provide a project-scoped PyPI API token to `uv`:
+
+```sh
+UV_PUBLISH_TOKEN=pypi-xxxxxxxx uv publish
+```
+
+`uv auth login https://upload.pypi.org/legacy/` is an alternative for storing
+the token in uv's credential store. Do not commit tokens or credentials. PyPI
+does not support account username-and-password uploads; use an API token.
+
 ## Release checklist
 
 1. Review dependency changes and security implications.
 2. Run static validation and the local integration suite.
-3. Pilot two independent checkouts with unique Compose project names (e.g. two checkouts of the same application).
-4. Update `CHANGELOG.md`, `pyproject.toml`, and all example version tags.
+3. Pilot two independent checkouts with unique Compose project names (e.g. two
+   checkouts of the same application).
+4. Update `CHANGELOG.md` and `pyproject.toml` version, and all example version
+   tags.
 5. Build with `uv build --no-sources` and test the resulting wheel with `uvx`.
 6. Exercise the lifecycle commands from the release-candidate wheel in CI.
-7. Publish the immutable SemVer tag, release notes, and matching PyPI package.
+7. Publish the immutable SemVer tag and GitHub release notes, then publish the
+   package to PyPI:
+   ```sh
+   rm -rf dist
+   uv build
+   uv publish
+   ```
 8. Re-run the documented quick-start and `uvx` commands using the published
    package.
 
