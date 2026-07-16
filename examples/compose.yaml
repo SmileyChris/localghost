@@ -1,0 +1,40 @@
+services:
+  web:
+    image: traefik/whoami:v1.11.0
+    expose:
+      # The unused extra port makes the explicit Traefik service port testable.
+      - "8080"
+    networks:
+      - default
+      - local-dev-proxy
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=local-dev-proxy
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.entrypoints=web
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.rule=Host(`${COMPOSE_PROJECT_NAME}.localhost`)
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.service=${COMPOSE_PROJECT_NAME}-web
+      - traefik.http.services.${COMPOSE_PROJECT_NAME}-web.loadbalancer.server.port=80
+
+  mailpit:
+    image: traefik/whoami:v1.11.0
+    networks:
+      - default
+      - local-dev-proxy
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=local-dev-proxy
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit.entrypoints=web
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit.rule=Host(`mailpit.${COMPOSE_PROJECT_NAME}.localhost`)
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit.service=${COMPOSE_PROJECT_NAME}-mailpit
+      - traefik.http.services.${COMPOSE_PROJECT_NAME}-mailpit.loadbalancer.server.port=80
+
+  unlabelled:
+    image: traefik/whoami:v1.11.0
+    networks:
+      - default
+      - local-dev-proxy
+
+networks:
+  local-dev-proxy:
+    external: true
+
