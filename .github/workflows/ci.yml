@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      tagged_compose_url:
+        description: Exact tagged Git Compose URL to exercise for a release candidate
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.15"
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run unit tests with coverage
+        run: >-
+          uv run --python ${{ matrix.python-version }} --frozen pytest
+          --ignore=tests/test_compose_contract.py
+          --cov=local_dev_proxy
+          --cov-branch
+          --cov-report=term-missing
+
+  integration:
+    needs: unit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      COMPOSE_VERSION: v5.1.4
+      PROXY_COMPOSE_FILE: ${{ inputs.tagged_compose_url || format('{0}/compose.yaml', github.workspace) }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.15"
+
+      - name: Install supported Docker Compose
+        run: |
+          mkdir -p "${HOME}/.docker/cli-plugins"
+          curl --fail --silent --show-error --location \
+            "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-x86_64" \
+            --output "${HOME}/.docker/cli-plugins/docker-compose"
+          chmod +x "${HOME}/.docker/cli-plugins/docker-compose"
+          docker compose version
+
+      - name: Validate shell scripts
+        run: |
+          bash -n scripts/integration-test.sh
+          bash -n tests/generator-test.sh
+          shellcheck scripts/integration-test.sh tests/generator-test.sh
+
+      - name: Check code and Compose contracts
+        run: |
+          uv run --frozen ruff check .
+          uv run --frozen pytest tests/test_compose_contract.py
+          ./tests/generator-test.sh
+
+      - name: Build Python package
+        run: uv build --no-sources
+
+      - name: Install and run the built wheel
+        run: |
+          wheel=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
+          test -n "${wheel}"
+          uvx --isolated --from "${wheel}" local-dev-proxy --help
+
+      - name: Run integration suite
+        run: ./scripts/integration-test.sh
