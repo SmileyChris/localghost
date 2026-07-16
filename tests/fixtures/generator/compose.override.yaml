@@ -1,0 +1,6 @@
+# Existing local settings must survive generator extension.
+services:
+  web:
+    environment:
+      DEBUG: "1"
+
