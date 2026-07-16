@@ -28,7 +28,7 @@ def test_proxy_compose_matches_the_public_contract() -> None:
     assert model["networks"]["local-dev-proxy"]["name"] == "local-dev-proxy"
 
     traefik = model["services"]["traefik"]
-    assert traefik["image"] == "traefik:v3.7.1"
+    assert traefik["image"] == "traefik:v3.7.7"
     assert traefik["restart"] == "unless-stopped"
     assert set(traefik["networks"]) == {"local-dev-proxy"}
 
