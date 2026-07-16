@@ -9,9 +9,7 @@ projects.
 Start the proxy before the first application. This creates the external network:
 
 ```sh
-docker compose \
-  -f https://github.com/SmileyChris/local-dev-proxy.git@v1.0.0 \
-  up -d
+uvx local-dev-proxy
 ```
 
 Compose automatically derives the project name from the checkout directory and

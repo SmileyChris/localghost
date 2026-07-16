@@ -5,7 +5,8 @@
 - `compose.yaml` is the stable public interface and must remain self-contained.
 - `examples/compose.yaml` supplies primary, secondary, and unlabelled fixtures.
 - `scripts/integration-test.sh` exercises the compatibility contract.
-- `src/local_dev_proxy/` contains the packaged Click CLI and override generator.
+- `src/local_dev_proxy/` contains the packaged Click CLI, bundled proxy Compose
+  definition, and override generator.
 - `pyproject.toml` and `uv.lock` define the build and locked development
   environment.
 - `.github/workflows/ci.yml` validates the project on Linux with Docker Compose
@@ -87,23 +88,24 @@ publication:
 
 ```sh
 uvx --from . local-dev-proxy --help
+uvx --from . local-dev-proxy down --help
 uvx --from . local-dev-proxy generate --help
 ```
 
 ## Release-candidate test
 
-The checked-in source test does not prove that Docker Compose can fetch a
-particular published Git reference. Before release, create a private or
-prerelease tag, then manually run the **CI** workflow with an exact Git Compose
-URL in its `tagged_compose_url` input:
+The checked-in source test does not prove that the packaged CLI contains the
+proxy definition it starts. Before release, build a candidate wheel, then run
+the lifecycle commands from that wheel:
 
-```text
-https://github.com/SmileyChris/local-dev-proxy.git@v1.0.0-rc.1
+```sh
+uv build --no-sources
+wheel=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
+uvx --isolated --from "$wheel" local-dev-proxy
+uvx --isolated --from "$wheel" local-dev-proxy down
 ```
 
-The workflow uses the remote proxy file while retaining the checked-out fixture
-and test script. A successful run exercises the same integration contract
-through the public consumption path.
+CI performs the same wheel smoke test before the source integration suite.
 
 ## Release checklist
 
@@ -112,10 +114,10 @@ through the public consumption path.
 3. Pilot two independent checkouts with unique Compose project names (e.g. two checkouts of the same application).
 4. Update `CHANGELOG.md`, `pyproject.toml`, and all example version tags.
 5. Build with `uv build --no-sources` and test the resulting wheel with `uvx`.
-6. Exercise the exact release-candidate Git URL in CI.
+6. Exercise the lifecycle commands from the release-candidate wheel in CI.
 7. Publish the immutable SemVer tag, release notes, and matching PyPI package.
 8. Re-run the documented quick-start and `uvx` commands using the published
-   versions.
+   package.
 
 Consumer-visible changes to fixed names, labels, hostname conventions, or
 lifecycle commands require a major version. Additive compatible features may be

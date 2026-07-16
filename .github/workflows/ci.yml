@@ -4,11 +4,6 @@ on:
   push:
   pull_request:
   workflow_dispatch:
-    inputs:
-      tagged_compose_url:
-        description: Exact tagged Git Compose URL to exercise for a release candidate
-        required: false
-        type: string
 
 permissions:
   contents: read
@@ -50,7 +45,6 @@ jobs:
     timeout-minutes: 15
     env:
       COMPOSE_VERSION: v5.1.4
-      PROXY_COMPOSE_FILE: ${{ inputs.tagged_compose_url || format('{0}/compose.yaml', github.workspace) }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -84,11 +78,13 @@ jobs:
       - name: Build Python package
         run: uv build --no-sources
 
-      - name: Install and run the built wheel
+      - name: Install and exercise the built wheel
         run: |
           wheel=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
           test -n "${wheel}"
           uvx --isolated --from "${wheel}" local-dev-proxy --help
+          uvx --isolated --from "${wheel}" local-dev-proxy
+          uvx --isolated --from "${wheel}" local-dev-proxy down
 
       - name: Run integration suite
         run: ./scripts/integration-test.sh

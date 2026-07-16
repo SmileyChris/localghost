@@ -34,28 +34,28 @@ Only run reviewed Traefik versions on machines where every user able to modify
 Docker container labels or images is already trusted. A restricted Docker
 socket proxy is a possible future hardening layer, but v1 does not promise one.
 
-## Remote Compose trust
+## Package trust
 
-A remote Compose file is executable host-level instruction. It can request
-privileged containers, Docker socket access, arbitrary host bind mounts, and
-published ports.
+A CLI package that starts Compose is executable host-level instruction. The
+bundled Compose file can request privileged containers, Docker socket access,
+arbitrary host bind mounts, and published ports.
 
 Before first use or an upgrade:
 
 1. Read the release notes.
-2. Inspect the exact tagged `compose.yaml` and repository history.
-3. Confirm the tag or commit belongs to the expected repository.
-4. Use an exact release tag, or a reviewed commit SHA for stronger immutability.
+2. Inspect the matching `compose.yaml` and repository history.
+3. Confirm the package belongs to the expected project.
+4. Use a reviewed package version when stronger immutability is required.
 
 For example:
 
 ```sh
-curl --fail --location \
-  https://raw.githubusercontent.com/SmileyChris/local-dev-proxy/v1.0.0/compose.yaml
+uvx local-dev-proxy@1.0.0
 ```
 
-Never use `main` or `latest` for a machine-wide shared proxy. Dependency update
-pull requests should be reviewed and pass the integration suite before release.
+The unpinned `uvx local-dev-proxy` command intentionally follows the current
+published release. Dependency update pull requests should be reviewed and pass
+the integration suite before release.
 
 ## Application responsibility
 

@@ -1,15 +1,10 @@
 # Troubleshooting
 
-Start with the proxy status and logs using the exact tag selected for your
-machine:
+Start with the proxy status and logs:
 
 ```sh
-docker compose \
-  -f https://github.com/SmileyChris/local-dev-proxy.git@v1.0.0 \
-  ps
-docker compose \
-  -f https://github.com/SmileyChris/local-dev-proxy.git@v1.0.0 \
-  logs --tail=100
+docker ps --filter label=com.docker.compose.project=local-dev-proxy
+docker logs --tail=100 local-dev-proxy-traefik-1
 ```
 
 ## External network not found
@@ -20,8 +15,8 @@ Typical error:
 network local-dev-proxy declared as external, but could not be found
 ```
 
-The proxy has not yet created its shared network. Run the tagged proxy `up -d`
-command once, then rerun the application's `docker compose up` command.
+The proxy has not yet created its shared network. Run `uvx local-dev-proxy`
+once, then rerun the application's `docker compose up` command.
 
 Do not change the application network to a normal, implicitly created network.
 That would create a project-scoped network that Traefik cannot share reliably.
@@ -30,7 +25,7 @@ That would create a project-scoped network that Traefik cannot share reliably.
 
 Consumer containers can run while the proxy container is stopped. Check that
 the proxy is running and healthy with `ps`, then inspect its logs. Reconcile it
-with the tagged `up -d` command if needed.
+with `uvx local-dev-proxy` if needed.
 
 Also confirm the URL uses the configured `LOCAL_DEV_PROXY_HTTP_PORT` when it is
 not 80.

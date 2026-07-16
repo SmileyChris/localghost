@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import importlib.resources as resources
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -27,10 +29,40 @@ from .generator import (
 )
 
 
-@click.group()
+@click.group(invoke_without_command=True)
 @click.version_option(package_name="local-dev-proxy")
-def cli() -> None:
+@click.pass_context
+def cli(ctx: click.Context) -> None:
     """Connect local applications to the shared development proxy."""
+    if ctx.invoked_subcommand is None:
+        _run_proxy("up")
+        port = os.environ.get("LOCAL_DEV_PROXY_HTTP_PORT", "80")
+        suffix = "" if port == "80" else f":{port}"
+        click.echo(f"Proxy is running at http://traefik.localhost{suffix}")
+        click.echo("To stop and remove it, run: local-dev-proxy down")
+
+
+@cli.command()
+def down() -> None:
+    """Stop and remove the shared development proxy."""
+    _run_proxy("down")
+    click.echo("Proxy stopped and removed.")
+
+
+def _run_proxy(action: str) -> None:
+    resource = resources.files("local_dev_proxy").joinpath("proxy_compose.yaml")
+    with resources.as_file(resource) as compose_file:
+        command = ["docker", "compose", "--file", str(compose_file), action]
+        if action == "up":
+            command.extend(["--detach", "--wait", "--wait-timeout", "60"])
+
+        try:
+            result = subprocess.run(command, check=False)
+        except FileNotFoundError as exc:
+            raise click.ClickException("docker is required") from exc
+
+    if result.returncode:
+        raise click.exceptions.Exit(result.returncode)
 
 
 @cli.command()

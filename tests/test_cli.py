@@ -1,8 +1,63 @@
 from pathlib import Path
+from subprocess import CompletedProcess
 
 from click.testing import CliRunner
 
 from local_dev_proxy.cli import cli
+
+
+def test_default_command_starts_the_bundled_proxy(monkeypatch) -> None:
+    commands = []
+
+    def run(command, **kwargs):
+        commands.append((command, kwargs))
+        return CompletedProcess(command, 0)
+
+    monkeypatch.setattr("local_dev_proxy.cli.subprocess.run", run)
+    runner = CliRunner()
+
+    result = runner.invoke(cli)
+
+    assert result.exit_code == 0, result.output
+    command, kwargs = commands[0]
+    assert command[:3] == ["docker", "compose", "--file"]
+    assert Path(command[3]).read_text(encoding="utf-8") == (
+        Path(__file__).parents[1] / "compose.yaml"
+    ).read_text(encoding="utf-8")
+    assert command[4:] == ["up", "--detach", "--wait", "--wait-timeout", "60"]
+    assert kwargs == {"check": False}
+    assert "Proxy is running at http://traefik.localhost" in result.output
+    assert "local-dev-proxy down" in result.output
+
+
+def test_down_stops_the_bundled_proxy(monkeypatch) -> None:
+    commands = []
+
+    def run(command, **kwargs):
+        commands.append((command, kwargs))
+        return CompletedProcess(command, 0)
+
+    monkeypatch.setattr("local_dev_proxy.cli.subprocess.run", run)
+    runner = CliRunner()
+
+    result = runner.invoke(cli, ["down"])
+
+    assert result.exit_code == 0, result.output
+    assert commands[0][0][4:] == ["down"]
+    assert "Proxy stopped and removed." in result.output
+
+
+def test_proxy_commands_report_missing_docker(monkeypatch) -> None:
+    def run(*args, **kwargs):
+        raise FileNotFoundError
+
+    monkeypatch.setattr("local_dev_proxy.cli.subprocess.run", run)
+    runner = CliRunner()
+
+    result = runner.invoke(cli)
+
+    assert result.exit_code != 0
+    assert "docker is required" in result.output
 
 
 def compose_model(

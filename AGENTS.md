@@ -67,8 +67,8 @@ uvx --from . local-dev-proxy --help
 - Treat changes to fixed names, hostname conventions, labels, or lifecycle
   commands as potential breaking changes; update the compatibility docs and
   tests in the same change.
-- Keep version examples on exact release tags or reviewed commit SHAs—never
-  `main` or `latest`.
+- The default bootstrap uses the current `uvx` package release. Document a
+  version-pinned `uvx` command when reproducibility or review is important.
 - Update `CHANGELOG.md`, `pyproject.toml`, docs, and release examples together
   for a release.
 

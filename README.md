@@ -8,19 +8,24 @@ This is local-development infrastructure, not a production proxy configuration.
 
 ## Quick start
 
-You need Docker Engine or Docker Desktop, Docker Compose 5.x, and loopback port
-80 available. Start the proxy without cloning this repository:
+You need Docker Engine or Docker Desktop, Docker Compose 5.x,
+[uv](https://docs.astral.sh/uv/getting-started/installation/), and loopback
+port 80 available. Start the proxy without cloning this repository:
 
 ```sh
-docker compose \
-  -f https://github.com/SmileyChris/local-dev-proxy.git@v1.0.0 \
-  up -d
+uvx local-dev-proxy
 ```
 
 Open [http://traefik.localhost](http://traefik.localhost) for the dashboard.
+The command creates or reconciles the proxy and waits for it to become healthy.
+To stop and remove it later, run:
 
-Always use an exact release tag or reviewed commit SHA—never `main` or a
-floating `latest` tag.
+```sh
+uvx local-dev-proxy down
+```
+
+`uvx local-dev-proxy` uses the current published CLI release. To hold a
+specific reviewed version, use `uvx local-dev-proxy@1.0.0` instead.
 
 ## Connect an application
 
@@ -71,7 +76,7 @@ Or generate the Compose integration interactively with
   inspection
 - [Troubleshooting](docs/troubleshooting.md) — common failures and diagnostic
   commands
-- [Security and trust](docs/security.md) — Docker socket and remote Compose
+- [Security and trust](docs/security.md) — Docker socket and package-trust
   risks
 - [Development and releases](docs/development.md) — fixtures, tests, CI, and
   release-candidate checks
