@@ -1,0 +1,42 @@
+name: local-dev-proxy
+
+services:
+  traefik:
+    image: traefik:v3.7.1
+    restart: unless-stopped
+    command:
+      - --api.dashboard=true
+      - --api.insecure=false
+      - --entrypoints.web.address=:80
+      - --global.checknewversion=false
+      - --global.sendanonymoususage=false
+      - --ping=true
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=local-dev-proxy
+    healthcheck:
+      test: [CMD, traefik, healthcheck, --ping]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    ports:
+      - 127.0.0.1:${LOCAL_DEV_PROXY_HTTP_PORT:-80}:80
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - local-dev-proxy
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=local-dev-proxy
+      - traefik.http.routers.local-dev-proxy-dashboard.entrypoints=web
+      - traefik.http.routers.local-dev-proxy-dashboard.middlewares=local-dev-proxy-dashboard-redirect
+      - traefik.http.routers.local-dev-proxy-dashboard.rule=Host(`traefik.localhost`)
+      - traefik.http.routers.local-dev-proxy-dashboard.service=api@internal
+      - traefik.http.middlewares.local-dev-proxy-dashboard-redirect.redirectregex.permanent=true
+      - traefik.http.middlewares.local-dev-proxy-dashboard-redirect.redirectregex.regex=^http://([^/]+)/?$
+      - traefik.http.middlewares.local-dev-proxy-dashboard-redirect.redirectregex.replacement=http://$${1}/dashboard/
+
+networks:
+  local-dev-proxy:
+    name: local-dev-proxy
