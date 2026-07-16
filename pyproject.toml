@@ -1,0 +1,65 @@
+[project]
+name = "local-dev-proxy"
+version = "0.1.0"
+description = "Connect local applications to a shared Traefik development proxy"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "SmileyChris" }]
+keywords = ["docker", "compose", "traefik", "development", "proxy"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Software Development",
+]
+dependencies = [
+  "click>=8.2,<9",
+  "ruamel-yaml>=0.18.10,<0.19",
+]
+
+[project.urls]
+Homepage = "https://github.com/SmileyChris/local-dev-proxy"
+Documentation = "https://github.com/SmileyChris/local-dev-proxy/tree/main/docs"
+Repository = "https://github.com/SmileyChris/local-dev-proxy"
+Issues = "https://github.com/SmileyChris/local-dev-proxy/issues"
+
+[project.scripts]
+local-dev-proxy = "local_dev_proxy.cli:cli"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.4,<10",
+  "pytest-cov>=6,<8",
+  "ruff>=0.11,<1",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.28,<0.12"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["local_dev_proxy"]
+
+[tool.coverage.report]
+fail_under = 95
+show_missing = true
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
