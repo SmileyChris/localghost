@@ -7,3 +7,7 @@ __pycache__/
 coverage.xml
 htmlcov/
 *.py[cod]
+
+# Local working documents (not committed)
+PLAN.md
+

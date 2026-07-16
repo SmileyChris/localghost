@@ -7,7 +7,7 @@ uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- A self-contained Traefik 3.7.1 Compose project bound to loopback.
+- A self-contained Traefik 3.7.7 Compose project bound to loopback.
 - The fixed `local-dev-proxy` shared Docker network.
 - An internal dashboard route at `http://traefik.localhost`.
 - Primary, secondary, and unlabelled consumer examples.

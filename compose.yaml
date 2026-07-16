@@ -2,7 +2,7 @@ name: local-dev-proxy
 
 services:
   traefik:
-    image: traefik:v3.7.1
+    image: traefik:v3.7.7
     restart: unless-stopped
     command:
       - --api.dashboard=true
