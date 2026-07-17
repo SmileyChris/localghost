@@ -4,10 +4,10 @@ set -Eeuo pipefail
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 PROXY_COMPOSE_FILE=${PROXY_COMPOSE_FILE:-"${ROOT_DIR}/compose.yaml"}
 EXAMPLE_COMPOSE_FILE="${ROOT_DIR}/examples/compose.yaml"
-PROJECT_A=${TEST_PROJECT_A:-ldp-fixture-a}
-PROJECT_B=${TEST_PROJECT_B:-ldp-fixture-b}
-HOST_PROJECT=${TEST_HOST_PROJECT:-ldp-fixture-host}
-DOCKERFILE_PROJECT=${TEST_DOCKERFILE_PROJECT:-ldp-fixture-dockerfile}
+PROJECT_A=${TEST_PROJECT_A:-localhost-fixture-a}
+PROJECT_B=${TEST_PROJECT_B:-localhost-fixture-b}
+HOST_PROJECT=${TEST_HOST_PROJECT:-localhost-fixture-host}
+DOCKERFILE_PROJECT=${TEST_DOCKERFILE_PROJECT:-localhost-fixture-dockerfile}
 DEFAULT_PORT=${TEST_DEFAULT_PORT:-80}
 ALTERNATE_PORT=${TEST_ALTERNATE_PORT:-18080}
 HOST_APP_PORT=${TEST_HOST_APP_PORT:-19090}
@@ -16,6 +16,7 @@ OWNS_RESOURCES=0
 HOST_DIR=''
 DOCKERFILE_DIR=''
 HOST_SERVER_PID=''
+HOST_RUN_PID=''
 
 log() {
   printf '\n==> %s\n' "$*"
@@ -27,7 +28,7 @@ fail() {
 }
 
 proxy() {
-  LOCAL_DEV_PROXY_HTTP_PORT="${ACTIVE_PORT}" \
+  LOCALHOST_HTTP_PORT="${ACTIVE_PORT}" \
     docker compose -f "${PROXY_COMPOSE_FILE}" "$@"
 }
 
@@ -51,6 +52,12 @@ dockerfile_app() {
 cleanup() {
   local exit_code=$?
   trap - EXIT INT TERM
+  # The foreground runner owns a bridge attached to the shared network. Stop
+  # it before taking down the proxy so Compose can remove that network too.
+  if [[ -n ${HOST_RUN_PID} ]]; then
+    kill "${HOST_RUN_PID}" >/dev/null 2>&1 || true
+    wait "${HOST_RUN_PID}" >/dev/null 2>&1 || true
+  fi
   if [[ ${OWNS_RESOURCES} == 1 ]]; then
     if [[ -n ${HOST_DIR} && -f ${HOST_DIR}/compose.yaml ]]; then
       host_bridge down --remove-orphans --volumes >/dev/null 2>&1 || true
@@ -143,14 +150,14 @@ command -v uv >/dev/null || fail 'uv is required'
 docker compose version >/dev/null || fail 'Docker Compose is required'
 docker info >/dev/null || fail 'A running Docker daemon is required'
 
-for project in local-dev-proxy "${PROJECT_A}" "${PROJECT_B}" "${HOST_PROJECT}" \
+for project in localhost "${PROJECT_A}" "${PROJECT_B}" "${HOST_PROJECT}" \
   "${DOCKERFILE_PROJECT}"; do
   if [[ -n $(docker ps -aq --filter "label=com.docker.compose.project=${project}") ]]; then
     fail "Compose project '${project}' already exists; remove it before running this destructive integration test"
   fi
 done
-if docker network inspect local-dev-proxy >/dev/null 2>&1; then
-  fail "Docker network 'local-dev-proxy' already exists; remove it before running this destructive integration test"
+if docker network inspect localhost-proxy >/dev/null 2>&1; then
+  fail "Docker network 'localhost-proxy' already exists; remove it before running this destructive integration test"
 fi
 OWNS_RESOURCES=1
 
@@ -163,10 +170,10 @@ missing_network_log=$(mktemp)
 if app "${PROJECT_A}" up -d >"${missing_network_log}" 2>&1; then
   fail 'Fixture unexpectedly started without the external proxy network'
 fi
-if ! grep -q 'local-dev-proxy' "${missing_network_log}" || \
+if ! grep -q 'localhost-proxy' "${missing_network_log}" || \
   ! grep -Eqi 'not( be)? found' "${missing_network_log}"; then
   sed -n '1,120p' "${missing_network_log}" >&2
-  fail 'Missing-network failure did not identify local-dev-proxy'
+  fail 'Missing-network failure did not identify localhost-proxy'
 fi
 rm -f "${missing_network_log}"
 app "${PROJECT_A}" down --remove-orphans >/dev/null 2>&1 || true
@@ -178,7 +185,7 @@ proxy up -d --wait --wait-timeout 90
 second_proxy_id=$(proxy ps -q traefik)
 assert_equal "${first_proxy_id}" "${second_proxy_id}" 'Idempotent proxy container ID'
 assert_equal 1 "$(proxy ps -q traefik | wc -l | tr -d ' ')" 'Proxy container count'
-assert_equal 1 "$(docker network ls --filter name=^local-dev-proxy$ --format '{{.Name}}' | wc -l | tr -d ' ')" 'Proxy network count'
+assert_equal 1 "$(docker network ls --filter name=^localhost-proxy$ --format '{{.Name}}' | wc -l | tr -d ' ')" 'Proxy network count'
 wait_for_healthy_proxy
 assert_loopback_publication "${second_proxy_id}" "${DEFAULT_PORT}"
 
@@ -197,32 +204,44 @@ wait_for_body "${PROJECT_A}.localhost" "Hostname: ${a_web_hostname}" >/dev/null
 wait_for_body "${PROJECT_B}.localhost" "Hostname: ${b_web_hostname}" >/dev/null
 wait_for_body "mailpit.${PROJECT_A}.localhost" "Hostname: ${a_mailpit_hostname}" >/dev/null
 
-log 'Generate and route a bridge to an HTTP application running on the host'
+log 'Run and clean up a foreground bridge to an HTTP application on the host'
 HOST_DIR=$(mktemp -d)
-python3 -m http.server "${HOST_APP_PORT}" \
-  --bind 0.0.0.0 \
-  --directory "${ROOT_DIR}/tests/fixtures/host-app" \
-  >"${HOST_DIR}/server.log" 2>&1 &
-HOST_SERVER_PID=$!
+(
+  cd "${HOST_DIR}"
+  exec uv run --frozen --project "${ROOT_DIR}" localhost run \
+  --name "${HOST_PROJECT}" --port "${HOST_APP_PORT}" -- \
+  python3 "${ROOT_DIR}/tests/fixtures/host-app/server.py" "${HOST_APP_PORT}"
+) >"${HOST_DIR}/run.log" 2>&1 &
+HOST_RUN_PID=$!
+wait_for_body "${HOST_PROJECT}.localhost" \
+  'localhost host bridge fixture' >/dev/null
+websocket_headers=$(curl --noproxy '*' --http1.1 --silent --dump-header - \
+  --output /dev/null --max-time 5 --header "Host: ${HOST_PROJECT}.localhost" \
+  --header 'Connection: Upgrade' --header 'Upgrade: websocket' \
+  --header 'Sec-WebSocket-Version: 13' \
+  --header 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+  "http://127.0.0.1:${ACTIVE_PORT}/")
+[[ ${websocket_headers} == *$'HTTP/1.1 101'* ]] || \
+  fail 'Foreground host bridge did not forward a WebSocket upgrade'
+host_run_bridge_id=$(docker ps -q --filter 'label=io.localhost.kind=host-run-bridge')
+[[ -n ${host_run_bridge_id} ]] || fail 'Foreground host bridge was not created'
+kill -TERM "${HOST_RUN_PID}"
+if wait "${HOST_RUN_PID}"; then
+  fail 'Foreground run command unexpectedly succeeded after SIGTERM'
+fi
+HOST_RUN_PID=''
 for attempt in $(seq 1 20); do
-  if curl --noproxy '*' --fail --silent --max-time 2 \
-    "http://127.0.0.1:${HOST_APP_PORT}/" >/dev/null 2>&1; then
+  if [[ -z $(docker ps -aq --filter "id=${host_run_bridge_id}") ]]; then
     break
   fi
   if [[ ${attempt} == 20 ]]; then
-    fail 'Host fixture HTTP server did not start'
+    fail 'Foreground host bridge was not removed after termination'
   fi
   sleep 1
 done
-(
-  cd "${HOST_DIR}"
-  COMPOSE_PROJECT_NAME="${HOST_PROJECT}" \
-    uv run --frozen --project "${ROOT_DIR}" local-dev-proxy generate \
-    --no-input --mode host --port "${HOST_APP_PORT}"
-)
-host_bridge up -d
-wait_for_body "${HOST_PROJECT}.localhost" \
-  'local-dev-proxy host bridge fixture' >/dev/null
+assert_equal "${second_proxy_id}" "$(proxy ps -q traefik)" \
+  'Proxy ID after foreground bridge removal'
+wait_for_body "${PROJECT_B}.localhost" "Hostname: ${b_web_hostname}" >/dev/null
 
 log 'Generate, build, and route an application from a Dockerfile'
 DOCKERFILE_DIR=$(mktemp -d)
@@ -231,7 +250,7 @@ cp "${ROOT_DIR}/tests/fixtures/dockerfile-app/Dockerfile" \
 (
   cd "${DOCKERFILE_DIR}"
   COMPOSE_PROJECT_NAME="${DOCKERFILE_PROJECT}" \
-    uv run --frozen --project "${ROOT_DIR}" local-dev-proxy generate \
+    uv run --frozen --project "${ROOT_DIR}" localhost generate \
     --no-input --mode dockerfile --port 80
 )
 dockerfile_app up -d --build

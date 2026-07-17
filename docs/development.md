@@ -5,16 +5,20 @@
 - `compose.yaml` is the stable public interface and must remain self-contained.
 - `examples/compose.yaml` supplies primary, secondary, and unlabelled fixtures.
 - `scripts/integration-test.sh` exercises the compatibility contract.
-- `src/local_dev_proxy/` contains the packaged Click CLI, bundled proxy Compose
+- `src/localhost/` contains the packaged Click CLI, bundled proxy Compose
   definition, and override generator.
 - `pyproject.toml` and `uv.lock` define the build and locked development
   environment.
 - `.github/workflows/ci.yml` validates the project on Linux with Docker Compose
-  5.1.4.
-- `.github/dependabot.yml` proposes reviewed Traefik and GitHub Actions updates.
+  5.1.4, which is the fixed CI baseline rather than a required user-side patch
+  version.
+- `.github/dependabot.yml` proposes reviewed Python, Traefik, and GitHub Actions
+  updates. The pinned Caddy host-bridge image lives in `generator.py`, so review
+  it explicitly during dependency maintenance.
 
 The proxy Compose file must not gain application-specific mounts, state, or
-configuration files. Consumers rely on the fixed project and network names.
+configuration files. Consumers rely on the fixed `localhost` project and
+`localhost-proxy` network names.
 
 ## Static validation
 
@@ -22,7 +26,7 @@ Resolve and validate both Compose files:
 
 ```sh
 docker compose -f compose.yaml config --quiet
-COMPOSE_PROJECT_NAME=ldp-fixture-a \
+COMPOSE_PROJECT_NAME=localhost-fixture-a \
   docker compose -f examples/compose.yaml config --quiet
 bash -n scripts/integration-test.sh
 uv run ruff check .
@@ -33,7 +37,7 @@ Review the fully rendered fixture configuration when changing interpolated
 labels:
 
 ```sh
-COMPOSE_PROJECT_NAME=ldp-fixture-a \
+COMPOSE_PROJECT_NAME=localhost-fixture-a \
   docker compose -f examples/compose.yaml config
 ```
 
@@ -45,10 +49,12 @@ Run:
 ./scripts/integration-test.sh
 ```
 
-The suite is destructive only to Docker resources named `local-dev-proxy`,
-`ldp-fixture-a`, and `ldp-fixture-b`. It refuses to begin if any of those
-resources already exist and cleans up resources it creates even after failure.
-Port 80 and the alternate test port 18080 must be available.
+The suite is destructive only to Docker resources named `localhost`,
+`localhost-proxy`,
+`localhost-fixture-a`, `localhost-fixture-b`, `localhost-fixture-host`, and
+`localhost-fixture-dockerfile`. It refuses to begin if any of those resources already
+exist and cleans up resources it creates even after failure. Ports 80, 18080,
+and 19090 must be available.
 
 Coverage includes:
 
@@ -80,16 +86,16 @@ public default is part of the release contract.
 Build both the source distribution and wheel:
 
 ```sh
-uv build
+uv build --no-sources
 ```
 
 Test the local package through the same isolated tool mechanism used after PyPI
 publication:
 
 ```sh
-uvx --from . local-dev-proxy --help
-uvx --from . local-dev-proxy down --help
-uvx --from . local-dev-proxy generate --help
+uvx --from . localhost --help
+uvx --from . localhost down --help
+uvx --from . localhost generate --help
 ```
 
 ## Release-candidate test
@@ -101,8 +107,8 @@ the lifecycle commands from that wheel:
 ```sh
 uv build --no-sources
 wheel=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
-uvx --isolated --from "$wheel" local-dev-proxy
-uvx --isolated --from "$wheel" local-dev-proxy down
+uvx --isolated --from "$wheel" localhost
+uvx --isolated --from "$wheel" localhost down
 ```
 
 CI performs the same wheel smoke test before the source integration suite.
@@ -126,25 +132,46 @@ does not support account username-and-password uploads; use an API token.
 
 ## Release checklist
 
-1. Review dependency changes and security implications.
+1. Review dependency changes and security implications, including the Traefik
+   proxy image and generated Caddy host-bridge image.
 2. Run static validation and the local integration suite.
 3. Pilot two independent checkouts with unique Compose project names (e.g. two
    checkouts of the same application).
 4. Update `CHANGELOG.md` and `pyproject.toml` version, and all example version
    tags.
-5. Build with `uv build --no-sources` and test the resulting wheel with `uvx`.
-6. Exercise the lifecycle commands from the release-candidate wheel in CI.
-7. Publish the immutable SemVer tag and GitHub release notes, then publish the
-   package to PyPI:
+5. Make a trial build with `uv build --no-sources`, test the resulting wheel
+   with `uvx`, and exercise the lifecycle commands from the release commit in
+   CI.
+6. After CI passes, use a clean checkout of that exact commit to build the final
+   artifacts once, smoke-test the wheel, and record both checksums:
    ```sh
+   test -z "$(git status --porcelain)"
    rm -rf dist
-   uv build
-   uv publish
+   uv build --no-sources
+   wheel=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
+   sdist=$(find dist -maxdepth 1 -name '*.tar.gz' -print -quit)
+   test -n "$wheel" && test -n "$sdist"
+   uvx --isolated --from "$wheel" localhost
+   uvx --isolated --from "$wheel" localhost down
+   sha256sum "$wheel" "$sdist"
    ```
-8. Re-run the documented quick-start and `uvx` commands using the published
-   package.
+7. Create the immutable SemVer tag and GitHub release for that commit. Publish
+   the exact artifacts from step 6 without rebuilding them:
+   ```sh
+   wheel=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
+   sdist=$(find dist -maxdepth 1 -name '*.tar.gz' -print -quit)
+   uv publish "$wheel" "$sdist"
+   ```
+8. Refresh and verify the exact published version, including its lifecycle;
+   then confirm a refreshed unpinned resolution selects the same version:
+   ```sh
+   uvx --refresh localhost@1.0.0 --version
+   uvx --refresh localhost@1.0.0
+   uvx localhost@1.0.0 down
+   uvx --refresh localhost --version
+   ```
 
 Consumer-visible changes to fixed names, labels, hostname conventions, or
 lifecycle commands require a major version. Additive compatible features may be
-minor releases; compatible fixes and documentation updates may be patch
-releases.
+minor releases; compatible fixes, reviewed image updates, and documentation
+updates may be patch releases.

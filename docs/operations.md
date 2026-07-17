@@ -6,24 +6,24 @@ applications are intentionally separate lifecycle domains.
 ## Start or reconcile
 
 ```sh
-uvx local-dev-proxy
+uvx localhost
 ```
 
 The command runs the Compose configuration bundled with the CLI. It is
-idempotent: running it again reconciles the existing `local-dev-proxy` Compose
+idempotent: running it again reconciles the existing `localhost` Compose
 project rather than creating another proxy, and waits for Traefik to become
 healthy.
 
 ## Inspect status and logs
 
 ```sh
-docker ps --filter label=com.docker.compose.project=local-dev-proxy
+docker ps --filter label=com.docker.compose.project=localhost
 ```
 
 The Traefik container should report `healthy`. Follow its logs with:
 
 ```sh
-docker logs -f local-dev-proxy-traefik-1
+docker logs -f localhost-traefik-1
 ```
 
 The dashboard at `http://traefik.localhost` shows discovered routers, services,
@@ -33,7 +33,7 @@ replace application logs when a backend itself is failing.
 ## Stop and remove
 
 ```sh
-uvx local-dev-proxy down
+uvx localhost down
 ```
 
 Compose removes the proxy container and attempts to remove its network. Docker
@@ -45,11 +45,11 @@ application and leaves the proxy running.
 
 ## Upgrade
 
-`uvx` uses its cached tool release by default. To fetch the latest published
-CLI and reconcile the proxy, run:
+The ordinary command may reuse a cached CLI release. To fetch the newest
+published release and reconcile the proxy when you choose, run:
 
 ```sh
-uvx --refresh local-dev-proxy
+uvx --refresh localhost
 ```
 
 The top-level project name and shared network name are fixed, so the new bundled
@@ -57,7 +57,7 @@ configuration updates the existing proxy. Consumer containers belong to other
 Compose projects and are not recreated or restarted.
 
 When stronger source immutability is required, use a reviewed package version,
-such as `uvx local-dev-proxy@1.0.0`.
+such as `uvx localhost@1.0.0`.
 
 ## Use another HTTP port
 
@@ -65,7 +65,7 @@ If loopback port 80 is occupied, consistently prefix every lifecycle command
 with the same override:
 
 ```sh
-LOCAL_DEV_PROXY_HTTP_PORT=8080 uvx local-dev-proxy
+LOCALHOST_HTTP_PORT=8080 uvx localhost
 ```
 
 The proxy still binds only to `127.0.0.1`. URLs include the selected port:

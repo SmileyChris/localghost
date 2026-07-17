@@ -1,20 +1,20 @@
 # Architecture
 
-Local Development Proxy separates a machine-wide concern from individual
-application checkouts. One long-lived Traefik container owns the host HTTP port;
-each application remains a separate Docker Compose project.
+`localhost` separates a machine-wide concern from individual application
+checkouts. One long-lived Traefik container owns the host HTTP port; each
+application remains a separate Docker Compose project.
 
 ## Ownership boundaries
 
 The proxy Compose project owns:
 
-- the fixed Compose project name `local-dev-proxy`;
+- the fixed Compose project name `localhost`;
 - one Traefik container;
-- the fixed Docker network `local-dev-proxy`; and
+- the fixed Docker network `localhost-proxy`; and
 - loopback publication of the configured HTTP port.
 
 An application Compose project owns its containers, default network, data, and
-application-specific configuration. It only references `local-dev-proxy` as an
+application-specific configuration. It only references `localhost-proxy` as an
 external network. Application lifecycle commands must never include the proxy
 Compose file, so stopping or rebuilding an application cannot recreate the
 proxy.
@@ -30,7 +30,7 @@ For a request to `http://my-project.localhost`:
 2. Docker forwards the loopback-bound host port to Traefik's `web` entrypoint.
 3. Traefik matches the request `Host` header against opted-in container labels.
 4. Traefik connects to the selected container over the shared
-   `local-dev-proxy` network and its explicitly labelled port.
+   `localhost-proxy` network and its explicitly labelled port.
 
 No application host port is needed in this path. Application containers may
 also retain their ordinary Compose default network for databases and other
@@ -42,7 +42,7 @@ Traefik reads Docker metadata through a read-only bind mount of
 `/var/run/docker.sock`. The Docker provider is configured with:
 
 - `exposedByDefault=false`, so unlabelled containers receive no route;
-- `network=local-dev-proxy`, so backend traffic uses the shared network; and
+- `network=localhost-proxy`, so backend traffic uses the shared network; and
 - explicit consumer labels for router rules and backend ports.
 
 The network setting controls Traefik's connection path; it does not prevent
@@ -61,7 +61,7 @@ those conditions or is not the desired hostname.
 | --- | --- | --- |
 | Primary service | `<project>.localhost` | `<project>-web` |
 | Secondary service | `<service>.<project>.localhost` | `<project>-<service>` |
-| Proxy dashboard | `traefik.localhost` | `local-dev-proxy-dashboard` |
+| Proxy dashboard | `traefik.localhost` | `localhost-dashboard` |
 
 These conventions make router and service identifiers unique across attached
 Compose projects. `.localhost` is used because it is reserved for loopback and
@@ -88,3 +88,13 @@ proxy configuration and gives the bridge an independent application lifecycle.
 
 The host process must listen on an interface reachable from Docker. Binding only
 to host loopback is generally insufficient.
+
+`localhost run` uses the same Caddy image but creates its Compose model
+in memory with a unique internal project and foreground ownership labels. Its
+literal `<name>-app` Traefik objects disappear with the child process; the
+shared Traefik container is retained. `generate --mode host` remains the
+persistent, user-managed alternative.
+
+The shared proxy is always started as the fixed `localhost` Compose
+project, even when a host application sets `COMPOSE_PROJECT_NAME` for its own
+route.

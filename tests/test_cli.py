@@ -1,33 +1,66 @@
 from pathlib import Path
 from subprocess import CompletedProcess
 
+import pytest
 from click.testing import CliRunner
 
-from local_dev_proxy.cli import cli
+from localhost.cli import cli
+from localhost.runner import RunPlan
 
 
 def test_default_command_starts_the_bundled_proxy(monkeypatch) -> None:
     commands = []
 
+    monkeypatch.setattr("localhost.cli.proxy_is_running", lambda: False)
+    monkeypatch.setattr("localhost.cli.active_routes", lambda: [])
+
     def run(command, **kwargs):
         commands.append((command, kwargs))
         return CompletedProcess(command, 0)
 
-    monkeypatch.setattr("local_dev_proxy.cli.subprocess.run", run)
+    monkeypatch.setattr("localhost.cli.subprocess.run", run)
     runner = CliRunner()
 
     result = runner.invoke(cli)
 
     assert result.exit_code == 0, result.output
     command, kwargs = commands[0]
-    assert command[:3] == ["docker", "compose", "--file"]
-    assert Path(command[3]).read_text(encoding="utf-8") == (
+    assert command[:5] == [
+        "docker",
+        "compose",
+        "--project-name",
+        "localhost",
+        "--file",
+    ]
+    assert Path(command[5]).read_text(encoding="utf-8") == (
         Path(__file__).parents[1] / "compose.yaml"
     ).read_text(encoding="utf-8")
-    assert command[4:] == ["up", "--detach", "--wait", "--wait-timeout", "60"]
-    assert kwargs == {"check": False}
-    assert "Proxy is running at http://traefik.localhost" in result.output
-    assert "local-dev-proxy down" in result.output
+    assert command[6:] == ["up", "--detach", "--wait", "--wait-timeout", "60"]
+    assert kwargs == {"check": False, "capture_output": True, "text": True}
+    assert "Started shared proxy at http://traefik.localhost" in result.output
+    assert "To stop and remove it, run: uvx localhost down" in result.output
+
+
+def test_default_command_reports_existing_proxy_and_routes(monkeypatch) -> None:
+    monkeypatch.setattr("localhost.cli.proxy_is_running", lambda: True)
+    monkeypatch.setattr(
+        "localhost.cli.active_routes",
+        lambda: [
+            type(
+                "Route", (), {"hostname": "demo.localhost", "location": "/work/demo"}
+            )()
+        ],
+    )
+    monkeypatch.setattr(
+        "localhost.cli.subprocess.run",
+        lambda command, **kwargs: CompletedProcess(command, 0),
+    )
+
+    result = CliRunner().invoke(cli)
+
+    assert result.exit_code == 0, result.output
+    assert "Shared proxy is already running" in result.output
+    assert "demo.localhost: /work/demo" in result.output
 
 
 def test_down_stops_the_bundled_proxy(monkeypatch) -> None:
@@ -37,27 +70,135 @@ def test_down_stops_the_bundled_proxy(monkeypatch) -> None:
         commands.append((command, kwargs))
         return CompletedProcess(command, 0)
 
-    monkeypatch.setattr("local_dev_proxy.cli.subprocess.run", run)
+    monkeypatch.setattr("localhost.cli.subprocess.run", run)
     runner = CliRunner()
 
     result = runner.invoke(cli, ["down"])
 
     assert result.exit_code == 0, result.output
-    assert commands[0][0][4:] == ["down"]
+    assert commands[0][0][6:] == ["down"]
     assert "Proxy stopped and removed." in result.output
 
 
+def test_proxy_command_preserves_docker_compose_failure_status(monkeypatch) -> None:
+    monkeypatch.setattr("localhost.cli.proxy_is_running", lambda: False)
+    monkeypatch.setattr(
+        "localhost.cli.subprocess.run",
+        lambda command, **kwargs: CompletedProcess(command, 17),
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(cli)
+
+    assert result.exit_code == 17
+    assert "Proxy is running" not in result.output
+
+
 def test_proxy_commands_report_missing_docker(monkeypatch) -> None:
+    monkeypatch.setattr("localhost.cli.proxy_is_running", lambda: False)
+
     def run(*args, **kwargs):
         raise FileNotFoundError
 
-    monkeypatch.setattr("local_dev_proxy.cli.subprocess.run", run)
+    monkeypatch.setattr("localhost.cli.subprocess.run", run)
     runner = CliRunner()
 
     result = runner.invoke(cli)
 
     assert result.exit_code != 0
     assert "docker is required" in result.output
+
+
+def test_proxy_port_defaults_when_the_environment_value_is_empty(monkeypatch) -> None:
+    monkeypatch.setattr("localhost.cli.proxy_is_running", lambda: False)
+    monkeypatch.setattr("localhost.cli.active_routes", lambda: [])
+    monkeypatch.setattr(
+        "localhost.cli.subprocess.run",
+        lambda command, **kwargs: CompletedProcess(command, 0),
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(cli, env={"LOCALHOST_HTTP_PORT": ""})
+
+    assert result.exit_code == 0, result.output
+    assert "http://traefik.localhost\n" in result.output
+
+
+def test_run_dry_run_prints_plan_without_starting(monkeypatch) -> None:
+    plan = RunPlan("demo", "custom", ("echo", "ok"), 3000, "session", "services: {}\n")
+    monkeypatch.setattr("localhost.cli.build_plan", lambda *args: plan)
+    monkeypatch.setattr(
+        "localhost.cli.find_route_collision",
+        lambda name: pytest.fail("inspected Docker"),
+    )
+    monkeypatch.setattr(
+        "localhost.cli.execute", lambda *args, **kwargs: pytest.fail("ran")
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(cli, ["run", "--dry-run", "--port", "3000", "--", "echo"])
+
+    assert result.exit_code == 0, result.output
+    assert "Public URL: http://demo.localhost" in result.output
+    assert "services: {}" in result.output
+
+
+def test_run_executes_and_refuses_collision(monkeypatch) -> None:
+    plan = RunPlan("demo", "custom", ("echo",), 3000, "session", "services: {}\n")
+    monkeypatch.setattr("localhost.cli.build_plan", lambda *args: plan)
+    monkeypatch.setattr("localhost.cli.find_route_collision", lambda name: None)
+    monkeypatch.setattr("localhost.cli.execute", lambda *args, **kwargs: 0)
+    result = CliRunner().invoke(cli, ["run", "--port", "3000", "--", "echo"])
+    assert result.exit_code == 0, result.output
+    assert "Starting foreground application" in result.output
+
+    monkeypatch.setattr("localhost.cli.find_route_collision", lambda name: "old")
+    result = CliRunner().invoke(cli, ["run", "--port", "3000", "--", "echo"])
+    assert result.exit_code != 0
+    assert "docker rm -f old" in result.output
+
+
+def test_run_uses_the_requested_application_directory(monkeypatch, tmp_path) -> None:
+    recorded = {}
+    plan = RunPlan("demo", "custom", ("echo",), 3000, "session", "services: {}\n")
+
+    def build(cwd, *args):
+        recorded["build_cwd"] = cwd
+        return plan
+
+    def execute(*args, **kwargs):
+        recorded["execute_cwd"] = kwargs["cwd"]
+        return 0
+
+    monkeypatch.setattr("localhost.cli.build_plan", build)
+    monkeypatch.setattr("localhost.cli.find_route_collision", lambda name: None)
+    monkeypatch.setattr("localhost.cli.execute", execute)
+
+    result = CliRunner().invoke(
+        cli, ["run", "-C", str(tmp_path), "--port", "3000", "--", "echo"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert recorded == {"build_cwd": tmp_path, "execute_cwd": tmp_path}
+
+
+@pytest.mark.parametrize("value", ["70000", "not-a-port"])
+def test_proxy_port_rejects_invalid_environment_values(monkeypatch, value) -> None:
+    called = False
+
+    def run(*args, **kwargs):
+        nonlocal called
+        called = True
+        return CompletedProcess([], 0)
+
+    monkeypatch.setattr("localhost.cli.subprocess.run", run)
+    runner = CliRunner()
+
+    result = runner.invoke(cli, env={"LOCALHOST_HTTP_PORT": value})
+
+    assert result.exit_code != 0
+    assert "integer from 1 to 65535" in result.output
+    assert called is False
 
 
 def compose_model(
@@ -74,12 +215,12 @@ def compose_model(
 
 
 def install_compose(monkeypatch, model: dict) -> None:
-    monkeypatch.setattr("local_dev_proxy.cli.resolve_compose", lambda files: model)
+    monkeypatch.setattr("localhost.cli.resolve_compose", lambda files: model)
 
 
 def test_interactive_user_can_choose_a_non_default_service(monkeypatch) -> None:
     install_compose(monkeypatch, compose_model())
-    monkeypatch.setattr("local_dev_proxy.cli._is_interactive", lambda _: True)
+    monkeypatch.setattr("localhost.cli._is_interactive", lambda _: True)
     runner = CliRunner()
 
     with runner.isolated_filesystem():
@@ -95,7 +236,7 @@ def test_interactive_user_can_choose_a_non_default_service(monkeypatch) -> None:
 
 def test_interactive_user_is_prompted_for_an_ambiguous_port(monkeypatch) -> None:
     install_compose(monkeypatch, compose_model(ports=(7000, 9000)))
-    monkeypatch.setattr("local_dev_proxy.cli._is_interactive", lambda _: True)
+    monkeypatch.setattr("localhost.cli._is_interactive", lambda _: True)
     runner = CliRunner()
 
     with runner.isolated_filesystem():
@@ -128,9 +269,7 @@ def test_explicit_unknown_service_lists_valid_choices(monkeypatch) -> None:
 
     with runner.isolated_filesystem():
         Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
-        result = runner.invoke(
-            cli, ["generate", "--no-input", "--service", "missing"]
-        )
+        result = runner.invoke(cli, ["generate", "--no-input", "--service", "missing"])
 
     assert result.exit_code != 0
     assert "choose one of: web, worker" in result.output
@@ -157,30 +296,75 @@ def test_dry_run_prints_yaml_without_writing(monkeypatch) -> None:
         result = runner.invoke(cli, ["generate", "--no-input", "--dry-run"])
 
         assert result.exit_code == 0, result.output
-        assert "local-dev-proxy:" in result.output
+        assert "localhost-proxy:" in result.output
+        assert not Path("compose.override.yaml").exists()
+
+
+def test_generate_rejects_options_for_the_wrong_project_mode(monkeypatch) -> None:
+    install_compose(monkeypatch, compose_model())
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        no_compose = runner.invoke(cli, ["generate", "--extend"])
+        assert no_compose.exit_code != 0
+        assert "--extend requires an existing Compose project" in no_compose.output
+
+        Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
+        compose = runner.invoke(cli, ["generate", "--mode", "host"])
+        assert compose.exit_code != 0
+        assert "--mode can only be used" in compose.output
+
+
+def test_compose_file_environment_selects_compose_mode(monkeypatch) -> None:
+    install_compose(monkeypatch, compose_model())
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli,
+            ["generate", "--no-input", "--dry-run"],
+            env={"COMPOSE_FILE": "custom.yaml"},
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "localhost-proxy:" in result.output
+
+
+def test_new_override_refuses_a_router_owned_by_another_service(monkeypatch) -> None:
+    model = compose_model()
+    model["services"]["worker"]["labels"] = {
+        "traefik.http.routers.sample-project-web.rule": (
+            "Host(`sample-project.localhost`)"
+        )
+    }
+    install_compose(monkeypatch, model)
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
+        result = runner.invoke(cli, ["generate", "--no-input", "--service", "web"])
+
+        assert result.exit_code != 0
+        assert "already defined for service 'worker'" in result.output
         assert not Path("compose.override.yaml").exists()
 
 
 def test_existing_override_requires_confirmation_or_extend(monkeypatch) -> None:
     install_compose(monkeypatch, compose_model())
-    monkeypatch.setattr("local_dev_proxy.cli._is_interactive", lambda _: True)
+    monkeypatch.setattr("localhost.cli._is_interactive", lambda _: True)
     runner = CliRunner()
 
     with runner.isolated_filesystem():
         Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
         original = "# existing\nservices: {}\n"
         Path("compose.override.yaml").write_text(original, encoding="utf-8")
-        declined = runner.invoke(
-            cli, ["generate", "--service", "web"], input="n\n"
-        )
+        declined = runner.invoke(cli, ["generate", "--service", "web"], input="n\n")
 
         assert declined.exit_code != 0
         assert "refusing to overwrite" in declined.output
         assert Path("compose.override.yaml").read_text(encoding="utf-8") == original
 
-        accepted = runner.invoke(
-            cli, ["generate", "--service", "web"], input="y\n"
-        )
+        accepted = runner.invoke(cli, ["generate", "--service", "web"], input="y\n")
 
         assert accepted.exit_code == 0, accepted.output
         assert "Backup:" in accepted.output
@@ -198,10 +382,10 @@ def test_existing_complete_override_reports_no_change(monkeypatch) -> None:
         assert first.exit_code == 0, first.output
 
         complete_model = compose_model()
-        complete_model["networks"]["local-dev-proxy"] = {"external": True}
+        complete_model["networks"]["localhost-proxy"] = {"external": True}
         complete_model["services"]["web"]["labels"] = {
             "traefik.enable": "true",
-            "traefik.docker.network": "local-dev-proxy",
+            "traefik.docker.network": "localhost-proxy",
             "traefik.http.routers.sample-project-web.entrypoints": "web",
             "traefik.http.routers.sample-project-web.rule": (
                 "Host(`sample-project.localhost`)"
@@ -297,7 +481,7 @@ def test_no_compose_mode_validates_inputs_and_refuses_overwrite() -> None:
 
 
 def test_no_compose_interactive_defaults_to_detected_dockerfile(monkeypatch) -> None:
-    monkeypatch.setattr("local_dev_proxy.cli._is_interactive", lambda _: True)
+    monkeypatch.setattr("localhost.cli._is_interactive", lambda _: True)
     runner = CliRunner()
 
     with runner.isolated_filesystem():

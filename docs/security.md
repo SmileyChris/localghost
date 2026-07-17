@@ -12,7 +12,7 @@ The v1 configuration reduces accidental exposure by:
 - serving the dashboard through `api@internal` on the loopback-bound `web`
   entrypoint;
 - setting `exposedByDefault=false` and requiring `traefik.enable=true`;
-- selecting the fixed `local-dev-proxy` network for backend traffic;
+- selecting the fixed `localhost-proxy` network for backend traffic;
 - pinning Traefik to an exact image version; and
 - disabling anonymous usage reporting and automatic version checks.
 
@@ -50,10 +50,11 @@ Before first use or an upgrade:
 For example:
 
 ```sh
-uvx local-dev-proxy@1.0.0
+uvx localhost@1.0.0
 ```
 
-The unpinned `uvx local-dev-proxy` command intentionally follows the current
+An unpinned `uvx localhost` invocation may reuse a cached release. Use
+`uvx --refresh localhost` when you intentionally want the newest
 published release. Dependency update pull requests should be reviewed and pass
 the integration suite before release.
 
@@ -79,6 +80,14 @@ The optional host bridge uses a pinned Caddy image and connects to
 interface; binding it to `0.0.0.0` may also expose that application port to the
 LAN. Prefer a Docker-specific host interface where available and use a host
 firewall on untrusted networks.
+
+The foreground `run` command executes detected Django runners and Vite package
+scripts with the checkout user's normal host permissions. Review application
+scripts as you would when running them directly.
+
+Managed host runs store their checkout path in a Docker label so the proxy's
+route listing can identify their location. Anyone with Docker inspection access
+can read that label; do not use a sensitive checkout path.
 
 Broader features require separate designs and threat analysis rather than ad
 hoc production adaptation of this local configuration.

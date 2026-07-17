@@ -4,7 +4,7 @@ Compose automatically merges `compose.override.yaml` with `compose.yaml`. The
 optional generator creates that local file, adding the most likely HTTP service
 to the shared proxy without modifying the application's base Compose file.
 
-The helper requires Docker Compose 5.x and
+The helper requires Docker Compose 5.x (CI tests 5.1.4) and
 [uv](https://docs.astral.sh/uv/getting-started/installation/). `uvx` installs the
 CLI and its Python dependencies into an isolated, cached environment.
 
@@ -13,7 +13,7 @@ CLI and its Python dependencies into an isolated, cached environment.
 From the application directory, run:
 
 ```sh
-uvx local-dev-proxy generate
+uvx localhost generate
 ```
 
 It resolves the application with `docker compose config`, chooses the most
@@ -28,7 +28,7 @@ docker compose up -d
 The generated override:
 
 - preserves the chosen service's existing network memberships;
-- adds the external `local-dev-proxy` network;
+- adds the external `localhost-proxy` network;
 - opts the service into Traefik;
 - creates a primary route at `<project>.localhost`;
 - selects an explicit container port; and
@@ -53,7 +53,7 @@ are preferred when there are several.
 Make either choice explicit when needed:
 
 ```sh
-uvx local-dev-proxy generate \
+uvx localhost generate \
   --service app \
   --port 8000
 ```
@@ -69,9 +69,9 @@ a filename.
 
 If `compose.override.yaml` already exists, the CLI offers to extend it. It uses
 round-trip YAML editing to retain comments and existing configuration, checks
-the resolved Compose model for conflicting network and Traefik settings, and
-creates a `.bak` backup before writing. It refuses changes when the existing
-configuration cannot be merged safely.
+both the resolved Compose model and on-disk override for conflicting network and
+Traefik settings, and creates a `.bak` backup before writing. It refuses changes
+when the existing configuration cannot be merged safely.
 
 For non-interactive use, pass `--extend` explicitly. Use another output file or
 `--dry-run` when you prefer to merge the result manually.
@@ -80,7 +80,7 @@ Compose only loads `compose.override.yaml` automatically. A different output
 name must be supplied explicitly alongside the base file:
 
 ```sh
-docker compose -f compose.yaml -f compose.local-dev-proxy.yaml up -d
+docker compose -f compose.yaml -f compose.localhost.yaml up -d
 ```
 
 If the override is personal rather than shared project configuration, add it to
@@ -99,7 +99,7 @@ The same command provides a guided path when the current directory has no
 Compose file:
 
 ```sh
-uvx local-dev-proxy generate
+uvx localhost generate
 ```
 
 If a `Dockerfile` exists, the default is a new `compose.yaml` with `build: .`,
@@ -110,7 +110,7 @@ For an application running directly on the host, choose `host`. The generated
 Compose project runs a pinned Caddy bridge between Traefik and the host port:
 
 ```sh
-uvx local-dev-proxy generate --mode host --port 3000
+uvx localhost generate --mode host --port 3000
 ```
 
 The host process must listen on a Docker-reachable interface such as `0.0.0.0`;
@@ -125,3 +125,41 @@ networks.
 
 For scripts and other non-interactive use, pass `--no-input` together with
 `--mode` and `--port`.
+
+## Run a host-native server
+
+`run` is the ephemeral alternative to persistent `generate --mode host`: it
+writes no Compose file in the checkout, starts a foreground application and an
+owned Caddy bridge, then removes that bridge when the application exits. The
+shared Traefik proxy remains running.
+
+```sh
+uvx localhost run
+uvx localhost run --framework django --name review-123 --port 8010
+uvx localhost run --port 3000 -- npm run custom-dev -- --port 3000
+uv run localhost run --directory /path/to/application
+```
+
+It detects Django from `manage.py` and Vite from a `package.json` dev script
+with a Vite dependency. Django uses the project runner (uv, Poetry, Pipenv, or
+a virtualenv); Vite uses the declared or locked package manager. An ambiguous
+project needs `--framework`; custom commands always need `--port`. Detected
+servers bind to `0.0.0.0`, which can expose the raw development port to a LAN,
+and run package scripts with your normal host permissions.
+
+`--name` takes precedence over `COMPOSE_PROJECT_NAME`, then `.env`, then the
+normalized checkout name. Detected applications use port 8000 (Django) or 5173
+(Vite), choosing the next free port when needed; an explicit `--port` is strict
+and fails if occupied. `--dry-run` performs no Docker inspection or startup.
+
+The command removes its bridge on normal exit, Ctrl+C, or SIGTERM, while leaving
+the shared proxy running. It refuses an existing route instead of replacing it;
+see [route collisions](troubleshooting.md#route-already-exists).
+
+Django projects must allow the `<name>.localhost` host and configure CSRF
+trusted origins as appropriate. Vite's HTTP, HMR, and WebSocket traffic all
+pass through the bridge; `.localhost` needs no additional Vite host allowlist.
+For Django, `run` checks the loaded settings when it can and warns if the host
+or HTTP origin is absent; startup still proceeds when settings cannot load.
+Use `--dry-run` to print the chosen framework, command, URL, port, and bridge
+YAML without starting Docker or the application.

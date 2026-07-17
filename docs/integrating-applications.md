@@ -6,10 +6,11 @@ projects.
 
 ## Prerequisites
 
-Start the proxy before the first application. This creates the external network:
+Start the proxy before the first application. This creates the external
+`localhost-proxy` network:
 
 ```sh
-uvx local-dev-proxy
+uvx localhost
 ```
 
 Compose automatically derives the project name from the checkout directory and
@@ -37,17 +38,17 @@ services:
   web:
     networks:
       - default
-      - local-dev-proxy
+      - localhost-proxy
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=local-dev-proxy"
+      - "traefik.docker.network=localhost-proxy"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.entrypoints=web"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.rule=Host(`${COMPOSE_PROJECT_NAME}.localhost`)"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.service=${COMPOSE_PROJECT_NAME}-web"
       - "traefik.http.services.${COMPOSE_PROJECT_NAME}-web.loadbalancer.server.port=8000"
 
 networks:
-  local-dev-proxy:
+  localhost-proxy:
     external: true
 ```
 
@@ -75,17 +76,17 @@ services:
     image: axllent/mailpit:v1.27.7 # Choose and review the version used by your project.
     networks:
       - default
-      - local-dev-proxy
+      - localhost-proxy
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=local-dev-proxy"
+      - "traefik.docker.network=localhost-proxy"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit.entrypoints=web"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit.rule=Host(`mailpit.${COMPOSE_PROJECT_NAME}.localhost`)"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit.service=${COMPOSE_PROJECT_NAME}-mailpit"
       - "traefik.http.services.${COMPOSE_PROJECT_NAME}-mailpit.loadbalancer.server.port=8025"
 
 networks:
-  local-dev-proxy:
+  localhost-proxy:
     external: true
 ```
 
@@ -135,7 +136,7 @@ browser.
 
 ## Failure behavior
 
-Because `local-dev-proxy` is declared external, application startup fails if
+Because `localhost-proxy` is declared external, application startup fails if
 the proxy network has never been created. This is intentional: the application
 must not silently create a private network with the same name. Start the proxy,
 then rerun `docker compose up` for the application.

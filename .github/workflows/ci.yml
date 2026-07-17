@@ -35,7 +35,7 @@ jobs:
         run: >-
           uv run --python ${{ matrix.python-version }} --frozen pytest
           --ignore=tests/test_compose_contract.py
-          --cov=local_dev_proxy
+          --cov=localhost
           --cov-branch
           --cov-report=term-missing
 
@@ -82,9 +82,9 @@ jobs:
         run: |
           wheel=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
           test -n "${wheel}"
-          uvx --isolated --from "${wheel}" local-dev-proxy --help
-          uvx --isolated --from "${wheel}" local-dev-proxy
-          uvx --isolated --from "${wheel}" local-dev-proxy down
+          uvx --isolated --from "${wheel}" localhost --help
+          uvx --isolated --from "${wheel}" localhost
+          uvx --isolated --from "${wheel}" localhost down
 
       - name: Run integration suite
         run: ./scripts/integration-test.sh

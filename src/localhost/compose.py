@@ -34,9 +34,12 @@ def resolve_compose(files: tuple[Path, ...]) -> dict[str, Any]:
         )
 
     try:
-        return json.loads(result.stdout)
+        model = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise click.ClickException("Docker Compose returned invalid JSON") from exc
+    if not isinstance(model, dict):
+        raise click.ClickException("Docker Compose returned a non-object JSON model")
+    return model
 
 
 def declared_ports(service: dict[str, Any]) -> list[int]:

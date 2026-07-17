@@ -12,6 +12,7 @@ from pathlib import Path
 import click
 
 from .compose import resolve_compose
+from .feedback import info, routes, run_plan, success, warning
 from .generator import (
     Candidate,
     choose_port,
@@ -24,45 +25,161 @@ from .generator import (
     render_override,
     validate_project_name,
     validate_project_name_value,
+    validate_proxy_configuration,
     write_extended,
     write_new,
+)
+from .routes import active_routes, proxy_is_running
+from .runner import (
+    RunPlan,
+    build_plan,
+    django_settings_warnings,
+    execute,
+    find_route_collision,
 )
 
 
 @click.group(invoke_without_command=True)
-@click.version_option(package_name="local-dev-proxy")
+@click.version_option(package_name="localhost")
 @click.pass_context
 def cli(ctx: click.Context) -> None:
     """Connect local applications to the shared development proxy."""
     if ctx.invoked_subcommand is None:
-        _run_proxy("up")
-        port = os.environ.get("LOCAL_DEV_PROXY_HTTP_PORT", "80")
-        suffix = "" if port == "80" else f":{port}"
-        click.echo(f"Proxy is running at http://traefik.localhost{suffix}")
-        click.echo("To stop and remove it, run: local-dev-proxy down")
+        port = _proxy_http_port()
+        was_running = proxy_is_running()
+        _run_proxy("up", already_running=was_running)
+        suffix = "" if port == 80 else f":{port}"
+        if was_running:
+            success(f"Shared proxy is already running at http://traefik.localhost{suffix}")
+        else:
+            success(f"Started shared proxy at http://traefik.localhost{suffix}")
+        try:
+            routes((route.hostname, route.location) for route in active_routes())
+        except click.ClickException as exc:
+            warning("Route listing unavailable", [exc.message])
+        info("To stop and remove it, run: uvx localhost down")
 
 
 @cli.command()
 def down() -> None:
     """Stop and remove the shared development proxy."""
     _run_proxy("down")
-    click.echo("Proxy stopped and removed.")
+    success("Proxy stopped and removed.")
 
 
-def _run_proxy(action: str) -> None:
-    resource = resources.files("local_dev_proxy").joinpath("proxy_compose.yaml")
+@cli.command()
+@click.option("name", "--name", help="Public project name used for NAME.localhost.")
+@click.option(
+    "working_directory",
+    "--directory",
+    "-C",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Application directory to detect and run (defaults to the current directory).",
+)
+@click.option(
+    "framework",
+    "--framework",
+    type=click.Choice(["django", "vite"]),
+    help="Resolve otherwise ambiguous framework detection.",
+)
+@click.option("port", "--port", type=click.IntRange(1, 65535), help="Host HTTP port.")
+@click.option(
+    "dry_run",
+    "--dry-run",
+    is_flag=True,
+    help="Print the plan without starting anything.",
+)
+@click.argument("command", nargs=-1, type=click.UNPROCESSED)
+def run(
+    name: str | None,
+    working_directory: Path | None,
+    framework: str | None,
+    port: int | None,
+    dry_run: bool,
+    command: tuple[str, ...],
+) -> None:
+    """Run a detected host application behind an ephemeral local bridge."""
+    cwd = working_directory or Path.cwd()
+    plan = build_plan(cwd, name, framework, port, command)
+    if dry_run:
+        _print_run_plan(plan, dry_run=True)
+        return
+    collision = find_route_collision(plan.name)
+    if collision:
+        raise click.ClickException(
+            f"{plan.name}.localhost is already claimed by container {collision}; "
+            f"remove it with: docker rm -f {collision}"
+        )
+    django_warnings = django_settings_warnings(plan, cwd)
+    if django_warnings:
+        warning("Django settings", django_warnings)
+    _print_run_plan(plan, dry_run=False)
+    status = execute(plan, lambda: _run_proxy("up"), cwd=cwd)
+    if status:
+        raise click.exceptions.Exit(status)
+    success("Application stopped.")
+
+
+def _print_run_plan(plan: RunPlan, dry_run: bool) -> None:
+    suffix = "" if _proxy_http_port() == 80 else f":{_proxy_http_port()}"
+    run_plan(
+        framework=plan.framework,
+        command=plan.command,
+        port=plan.port,
+        url=f"http://{plan.name}.localhost{suffix}",
+        dry_run=dry_run,
+    )
+    if dry_run:
+        click.echo(plan.bridge_yaml, nl=False)
+    else:
+        info("Starting foreground application; press Ctrl+C to stop it.")
+
+
+def _run_proxy(action: str, *, already_running: bool = False) -> None:
+    resource = resources.files("localhost").joinpath("proxy_compose.yaml")
     with resources.as_file(resource) as compose_file:
-        command = ["docker", "compose", "--file", str(compose_file), action]
+        command = [
+            "docker",
+            "compose",
+            "--project-name",
+            "localhost",
+            "--file",
+            str(compose_file),
+            action,
+        ]
         if action == "up":
             command.extend(["--detach", "--wait", "--wait-timeout", "60"])
 
+        verb = "Reconciling" if already_running else "Starting"
+        if action == "down":
+            verb = "Stopping"
+        info(f"{verb} shared proxy…")
         try:
-            result = subprocess.run(command, check=False)
+            result = subprocess.run(
+                command, check=False, capture_output=True, text=True
+            )
         except FileNotFoundError as exc:
             raise click.ClickException("docker is required") from exc
 
     if result.returncode:
+        detail = (result.stderr or "").strip() or (result.stdout or "").strip()
+        if detail:
+            click.echo(detail, err=True)
         raise click.exceptions.Exit(result.returncode)
+
+
+def _proxy_http_port() -> int:
+    value = os.environ.get("LOCALHOST_HTTP_PORT") or "80"
+    if not value.isascii() or not value.isdecimal():
+        raise click.ClickException(
+            "LOCALHOST_HTTP_PORT must be an integer from 1 to 65535"
+        )
+    port = int(value)
+    if not 1 <= port <= 65535:
+        raise click.ClickException(
+            "LOCALHOST_HTTP_PORT must be an integer from 1 to 65535"
+        )
+    return port
 
 
 @cli.command()
@@ -120,6 +237,8 @@ def generate(
     """Generate Compose configuration for the current application."""
     interactive = _is_interactive(no_input)
     if not files and not _has_compose_file():
+        if extend:
+            raise click.ClickException("--extend requires an existing Compose project")
         _generate_without_compose(
             service_name=service_name,
             port=port,
@@ -129,6 +248,11 @@ def generate(
             interactive=interactive,
         )
         return
+
+    if mode is not None:
+        raise click.ClickException(
+            "--mode can only be used when no Compose file is present"
+        )
 
     output = output or Path("compose.override.yaml")
     output_exists = output.exists()
@@ -141,6 +265,7 @@ def generate(
     candidates = rank_services(model, project_name)
     candidate = _select_candidate(candidates, service_name, interactive)
     selected_port = _select_port(candidate, port, interactive)
+    validate_proxy_configuration(model, project_name, candidate, selected_port)
 
     if output_exists:
         should_extend = extend or dry_run
@@ -162,26 +287,26 @@ def generate(
             click.echo(render_override(document), nl=False)
         elif changed:
             backup = write_extended(output, document)
-            click.echo(
+            success(
                 f"Extended {output} for service '{candidate.name}' on container "
                 f"port {selected_port}."
             )
-            click.echo(f"Backup: {backup}")
+            info(f"Backup: {backup}")
         else:
-            click.echo(f"{output} already contains the requested proxy configuration.")
+            info(f"{output} already contains the requested proxy configuration.")
     else:
         document = create_override(project_name, candidate, selected_port)
         if dry_run:
             click.echo(render_override(document), nl=False)
         else:
             write_new(output, document)
-            click.echo(
+            success(
                 f"Created {output} for service '{candidate.name}' on container "
                 f"port {selected_port}."
             )
 
     if not dry_run:
-        click.echo(
+        info(
             "Review the override, ignore it in Git if local-only, then run "
             "docker compose up."
         )
@@ -236,17 +361,17 @@ def _generate_without_compose(
         return
 
     write_new(output, document)
-    click.echo(f"Created {output} for the {description}.")
+    success(f"Created {output} for the {description}.")
     if mode == "host":
-        click.echo(
+        info(
             "Ensure the host process listens on a Docker-reachable interface "
             "such as 0.0.0.0."
         )
-    click.echo("Start the shared proxy, then run docker compose up.")
+    info("Start the shared proxy, then run docker compose up.")
 
 
 def _has_compose_file() -> bool:
-    return any(
+    return bool(os.environ.get("COMPOSE_FILE")) or any(
         Path(filename).is_file()
         for filename in (
             "compose.yaml",
@@ -291,7 +416,7 @@ def _select_candidate(
 
     likely = candidates[0]
     if not interactive:
-        click.echo(f"Selected likely service: {likely.name}", err=True)
+        info(f"Selected likely service: {likely.name}", err=True)
         return likely
 
     click.echo("Services:")

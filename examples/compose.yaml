@@ -6,10 +6,10 @@ services:
       - "8080"
     networks:
       - default
-      - local-dev-proxy
+      - localhost-proxy
     labels:
       - traefik.enable=true
-      - traefik.docker.network=local-dev-proxy
+      - traefik.docker.network=localhost-proxy
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.entrypoints=web
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.rule=Host(`${COMPOSE_PROJECT_NAME}.localhost`)
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.service=${COMPOSE_PROJECT_NAME}-web
@@ -19,10 +19,10 @@ services:
     image: traefik/whoami:v1.11.0
     networks:
       - default
-      - local-dev-proxy
+      - localhost-proxy
     labels:
       - traefik.enable=true
-      - traefik.docker.network=local-dev-proxy
+      - traefik.docker.network=localhost-proxy
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit.entrypoints=web
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit.rule=Host(`mailpit.${COMPOSE_PROJECT_NAME}.localhost`)
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit.service=${COMPOSE_PROJECT_NAME}-mailpit
@@ -32,9 +32,8 @@ services:
     image: traefik/whoami:v1.11.0
     networks:
       - default
-      - local-dev-proxy
+      - localhost-proxy
 
 networks:
-  local-dev-proxy:
+  localhost-proxy:
     external: true
-

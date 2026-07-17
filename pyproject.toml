@@ -1,15 +1,15 @@
 [project]
-name = "local-dev-proxy"
-version = "1.0.0rc2"
-description = "Connect local applications to a shared Traefik development proxy"
+name = "localhost"
+version = "1.0.0"
+description = "Serve local applications at friendly .localhost URLs"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "SmileyChris" }]
-keywords = ["docker", "compose", "traefik", "development", "proxy"]
+keywords = ["localhost", "docker", "compose", "traefik", "development", "proxy"]
 classifiers = [
-  "Development Status :: 4 - Beta",
+  "Development Status :: 5 - Production/Stable",
   "Environment :: Console",
   "Intended Audience :: Developers",
   "Operating System :: OS Independent",
@@ -22,17 +22,18 @@ classifiers = [
 ]
 dependencies = [
   "click>=8.2,<9",
+  "rich>=13.9,<15",
   "ruamel-yaml>=0.18.10,<0.19",
 ]
 
 [project.urls]
-Homepage = "https://github.com/SmileyChris/local-dev-proxy"
-Documentation = "https://github.com/SmileyChris/local-dev-proxy/tree/main/docs"
-Repository = "https://github.com/SmileyChris/local-dev-proxy"
-Issues = "https://github.com/SmileyChris/local-dev-proxy/issues"
+Homepage = "https://github.com/SmileyChris/localhost"
+Documentation = "https://github.com/SmileyChris/localhost/tree/main/docs"
+Repository = "https://github.com/SmileyChris/localhost"
+Issues = "https://github.com/SmileyChris/localhost/issues"
 
 [project.scripts]
-local-dev-proxy = "local_dev_proxy.cli:cli"
+localhost = "localhost.cli:cli"
 
 [dependency-groups]
 dev = [
@@ -51,7 +52,7 @@ testpaths = ["tests"]
 
 [tool.coverage.run]
 branch = true
-source = ["local_dev_proxy"]
+source = ["localhost"]
 
 [tool.coverage.report]
 fail_under = 95
