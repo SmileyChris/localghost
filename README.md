@@ -1,9 +1,9 @@
-# localhost
+# Localhost Proxy
 
-Use friendly `.localhost` URLs for local Docker Compose projects and host-native
-development servers. `localhost` keeps one small, loopback-only
-[Traefik](https://traefik.io/traefik/) proxy running while each application
-keeps its own lifecycle.
+Localhost Proxy gives local Docker Compose projects and host-native development
+servers friendly `.localhost` URLs. The `localhost` command keeps one small,
+loopback-only [Traefik](https://traefik.io/traefik/) proxy running while each
+application keeps its own lifecycle.
 
 This is local-development infrastructure, not a production proxy configuration.
 The proxy's Compose project is `localhost`; containers connect through the

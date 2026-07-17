@@ -1,4 +1,4 @@
-# Generating a local override
+# Generating a Localhost Proxy override
 
 Compose automatically merges `compose.override.yaml` with `compose.yaml`. The
 optional generator creates that local file, adding the most likely HTTP service

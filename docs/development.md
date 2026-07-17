@@ -1,4 +1,4 @@
-# Development and releases
+# Developing Localhost Proxy
 
 ## Repository layout
 

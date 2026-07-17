@@ -1,4 +1,4 @@
-# Troubleshooting
+# Troubleshooting Localhost Proxy
 
 Start with the proxy status and logs:
 

@@ -1,4 +1,4 @@
-# Integrating applications
+# Integrating applications with Localhost Proxy
 
 An application joins the proxy's external Docker network and describes its
 routes using Traefik labels. The proxy and application remain separate Compose

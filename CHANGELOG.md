@@ -15,10 +15,10 @@ uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- Established `localhost` as the PyPI project, executable, Python namespace,
-  and Docker Compose project. Its shared Docker network is
-  `localhost-proxy`; no compatibility alias is provided because the package
-  has not been published.
+- Established Localhost Proxy with `localhost` as its PyPI project,
+  executable, Python namespace, and Docker Compose project. The shared Docker
+  network is `localhost-proxy`; no compatibility alias is provided because
+  the package has not been published.
 - Renamed the HTTP-port override to `LOCALHOST_HTTP_PORT` and host-bridge
   ownership labels to the `io.localhost` namespace.
 

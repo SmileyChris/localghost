@@ -1,6 +1,6 @@
-# Architecture
+# Localhost Proxy architecture
 
-`localhost` separates a machine-wide concern from individual application
+Localhost Proxy separates a machine-wide concern from individual application
 checkouts. One long-lived Traefik container owns the host HTTP port; each
 application remains a separate Docker Compose project.
 

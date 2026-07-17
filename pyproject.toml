@@ -1,7 +1,7 @@
 [project]
 name = "localhost"
 version = "1.0.0"
-description = "Serve local applications at friendly .localhost URLs"
+description = "Localhost Proxy serves local applications at friendly .localhost URLs"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"

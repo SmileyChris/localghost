@@ -1,4 +1,4 @@
-# Security and trust
+# Localhost Proxy security and trust
 
 This project is designed for a trusted local development machine. It is not a
 production security design and should not be exposed to a LAN or the internet.
