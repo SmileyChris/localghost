@@ -6,6 +6,7 @@ from click.testing import CliRunner
 
 from localhost.cli import cli
 from localhost.runner import RunPlan
+from localhost.trust import PublicCertificate
 
 
 def test_default_command_starts_the_bundled_proxy(monkeypatch) -> None:
@@ -32,9 +33,9 @@ def test_default_command_starts_the_bundled_proxy(monkeypatch) -> None:
         "localhost",
         "--file",
     ]
-    assert Path(command[5]).read_text(encoding="utf-8") == (
-        Path(__file__).parents[1] / "compose.yaml"
-    ).read_text(encoding="utf-8")
+    bundled = Path(command[5]).read_text(encoding="utf-8")
+    assert "context: ." in bundled
+    assert "image: localhost-traefik:v3.7.7" in bundled
     assert command[6:] == ["up", "--detach", "--wait", "--wait-timeout", "60"]
     assert kwargs == {"check": False, "capture_output": True, "text": True}
     assert "Started shared proxy at http://traefik.localhost" in result.output
@@ -63,6 +64,30 @@ def test_default_command_reports_existing_proxy_and_routes(monkeypatch) -> None:
     assert "demo.localhost: /work/demo" in result.output
 
 
+def test_status_reports_proxy_state_without_reconciling(monkeypatch) -> None:
+    monkeypatch.setattr("localhost.cli.proxy_is_running", lambda: False)
+    monkeypatch.setattr(
+        "localhost.cli._https_configured", lambda: False
+    )
+    monkeypatch.setattr(
+        "localhost.cli._run_proxy", lambda *args, **kwargs: pytest.fail("reconciled")
+    )
+
+    result = CliRunner().invoke(cli, ["--status"])
+
+    assert result.exit_code == 0, result.output
+    assert "Proxy: stopped" in result.output
+    assert "HTTPS configuration: HTTP only" in result.output
+    assert "localhost trust --status" in result.output
+
+
+def test_status_cannot_be_combined_with_a_subcommand() -> None:
+    result = CliRunner().invoke(cli, ["--status", "down"])
+
+    assert result.exit_code != 0
+    assert "cannot be combined" in result.output
+
+
 def test_down_stops_the_bundled_proxy(monkeypatch) -> None:
     commands = []
 
@@ -78,6 +103,95 @@ def test_down_stops_the_bundled_proxy(monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     assert commands[0][0][6:] == ["down"]
     assert "Proxy stopped and removed." in result.output
+
+
+def test_trust_configures_a_stopped_proxy_without_starting_it(
+    monkeypatch, tmp_path
+) -> None:
+    commands = []
+    certificate = PublicCertificate(b"public root", "SHA256:" + "A" * 64)
+    monkeypatch.setattr("localhost.cli.proxy_is_running", lambda: False)
+    monkeypatch.setattr("localhost.cli._bootstrap_public_root", lambda: certificate)
+
+    class Installer:
+        def install(self):
+            return None
+
+    monkeypatch.setattr("localhost.cli.MkcertInstaller", lambda path: Installer())
+    monkeypatch.setattr("localhost.cli.ZenNssInstaller", lambda path: Installer())
+    def run(command, **kwargs):
+        commands.append(command)
+        return CompletedProcess(command, 0)
+
+    monkeypatch.setattr("localhost.cli.subprocess.run", run)
+
+    result = CliRunner().invoke(
+        cli, ["trust"], env={"LOCALHOST_STATE_DIR": str(tmp_path)}
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "https-enabled").is_file()
+    assert "public-root fingerprint: SHA256:" in result.output
+    assert commands == []
+    assert "Run `localhost` to start the proxy." in result.output
+
+
+def test_trust_restarts_a_running_proxy_when_https_becomes_configured(
+    monkeypatch, tmp_path
+) -> None:
+    commands = []
+    certificate = PublicCertificate(b"public root", "SHA256:" + "A" * 64)
+    monkeypatch.setattr("localhost.cli.proxy_is_running", lambda: True)
+    monkeypatch.setattr("localhost.cli._bootstrap_public_root", lambda: certificate)
+
+    class Installer:
+        def install(self):
+            return None
+
+    monkeypatch.setattr("localhost.cli.MkcertInstaller", lambda path: Installer())
+    monkeypatch.setattr("localhost.cli.ZenNssInstaller", lambda path: Installer())
+
+    def run(command, **kwargs):
+        commands.append(command)
+        return CompletedProcess(command, 0)
+
+    monkeypatch.setattr("localhost.cli.subprocess.run", run)
+    result = CliRunner().invoke(
+        cli, ["trust"], env={"LOCALHOST_STATE_DIR": str(tmp_path)}
+    )
+
+    assert result.exit_code == 0, result.output
+    assert any("proxy_compose_https.yaml" in item for item in commands[0])
+    assert "--force-recreate" in commands[0]
+
+
+def test_trust_remove_disables_https_before_mutating_managed_stores(
+    monkeypatch, tmp_path
+) -> None:
+    commands = []
+    (tmp_path / "rootCA.pem").write_bytes(b"public root")
+    (tmp_path / "https-enabled").touch()
+    monkeypatch.setattr("localhost.cli.proxy_is_running", lambda: False)
+
+    class Installer:
+        def uninstall(self):
+            return None
+
+    monkeypatch.setattr("localhost.cli.MkcertInstaller", lambda path: Installer())
+    monkeypatch.setattr("localhost.cli.ZenNssInstaller", lambda path: Installer())
+    def run(command, **kwargs):
+        commands.append(command)
+        return CompletedProcess(command, 0)
+
+    monkeypatch.setattr("localhost.cli.subprocess.run", run)
+
+    result = CliRunner().invoke(
+        cli, ["trust", "--remove"], env={"LOCALHOST_STATE_DIR": str(tmp_path)}
+    )
+
+    assert result.exit_code == 0, result.output
+    assert not (tmp_path / "https-enabled").exists()
+    assert commands == []
 
 
 def test_proxy_command_preserves_docker_compose_failure_status(monkeypatch) -> None:
@@ -390,8 +504,21 @@ def test_existing_complete_override_reports_no_change(monkeypatch) -> None:
             "traefik.http.routers.sample-project-web.rule": (
                 "Host(`sample-project.localhost`)"
             ),
-            "traefik.http.routers.sample-project-web.service": "sample-project-web",
-            "traefik.http.services.sample-project-web.loadbalancer.server.port": "8000",
+                "traefik.http.routers.sample-project-web.service": "sample-project-web",
+                (
+                    "traefik.http.routers.sample-project-web-secure.entrypoints"
+                ): "websecure",
+                "traefik.http.routers.sample-project-web-secure.rule": (
+                    "Host(`sample-project.localhost`)"
+                ),
+                (
+                    "traefik.http.routers.sample-project-web-secure.service"
+                ): "sample-project-web",
+                "traefik.http.routers.sample-project-web-secure.tls": "true",
+                (
+                    "traefik.http.services.sample-project-web."
+                    "loadbalancer.server.port"
+                ): "8000",
         }
         install_compose(monkeypatch, complete_model)
         second = runner.invoke(cli, ["generate", "--no-input", "--extend"])

@@ -2,7 +2,10 @@ name: localhost
 
 services:
   traefik:
-    image: traefik:v3.7.7
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: localhost-traefik:v3.7.7
     restart: unless-stopped
     command:
       - --api.dashboard=true

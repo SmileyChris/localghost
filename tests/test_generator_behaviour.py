@@ -153,9 +153,20 @@ def test_extending_a_complete_override_is_idempotent() -> None:
                     "traefik.enable": "true",
                     "traefik.docker.network": "localhost-proxy",
                     "traefik.http.routers.shop-web.entrypoints": "web",
-                    "traefik.http.routers.shop-web.rule": "Host(`shop.localhost`)",
-                    "traefik.http.routers.shop-web.service": "shop-web",
-                    "traefik.http.services.shop-web.loadbalancer.server.port": "8000",
+                        "traefik.http.routers.shop-web.rule": "Host(`shop.localhost`)",
+                        "traefik.http.routers.shop-web.service": "shop-web",
+                        "traefik.http.routers.shop-web-secure.entrypoints": (
+                            "websecure"
+                        ),
+                        "traefik.http.routers.shop-web-secure.rule": (
+                            "Host(`shop.localhost`)"
+                        ),
+                        "traefik.http.routers.shop-web-secure.service": "shop-web",
+                        "traefik.http.routers.shop-web-secure.tls": "true",
+                        (
+                            "traefik.http.services.shop-web."
+                            "loadbalancer.server.port"
+                        ): "8000",
                 }
             }
         },

@@ -13,6 +13,10 @@ services:
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.entrypoints=web
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.rule=Host(`${COMPOSE_PROJECT_NAME}.localhost`)
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.service=${COMPOSE_PROJECT_NAME}-web
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web-secure.entrypoints=websecure
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web-secure.rule=Host(`${COMPOSE_PROJECT_NAME}.localhost`)
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web-secure.service=${COMPOSE_PROJECT_NAME}-web
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-web-secure.tls=true
       - traefik.http.services.${COMPOSE_PROJECT_NAME}-web.loadbalancer.server.port=80
 
   mailpit:
@@ -26,6 +30,10 @@ services:
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit.entrypoints=web
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit.rule=Host(`mailpit.${COMPOSE_PROJECT_NAME}.localhost`)
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit.service=${COMPOSE_PROJECT_NAME}-mailpit
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit-secure.entrypoints=websecure
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit-secure.rule=Host(`mailpit.${COMPOSE_PROJECT_NAME}.localhost`)
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit-secure.service=${COMPOSE_PROJECT_NAME}-mailpit
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit-secure.tls=true
       - traefik.http.services.${COMPOSE_PROJECT_NAME}-mailpit.loadbalancer.server.port=80
 
   unlabelled:

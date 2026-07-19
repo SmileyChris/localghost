@@ -29,6 +29,41 @@ stop and remove it later, run:
 uvx localhost down
 ```
 
+To inspect the proxy without starting or reconciling it, run:
+
+```sh
+uvx localhost --status
+```
+
+## Optional trusted HTTPS
+
+HTTP is always available. On an interactive first start, `localhost` offers to
+enable HTTPS; it explains the trust-store change before `mkcert` asks for
+system authorization. You can also opt in explicitly:
+
+```sh
+uvx localhost trust
+```
+
+The command bootstraps a local constrained CA in Docker, exports only its
+public root to your local state directory, and installs that root through
+`mkcert` into the system and NSS stores. Private root and intermediate keys are
+not exported. It also handles detected Zen browser NSS profiles. If `mkcert` is
+not installed, the prompt is declined, or setup fails, the proxy remains
+HTTP-only and prints the same command for retrying.
+
+Running `trust` while the proxy is already running reconciles it to HTTPS after
+the root is installed. When the proxy is stopped, `trust` only changes trust
+state; run `localhost` when you are ready to start it.
+
+Use `uvx localhost trust --status` to show the public-root fingerprint and
+current mode. To return to HTTP-only operation and remove this exact root from the
+managed stores:
+
+```sh
+uvx localhost trust --remove
+```
+
 `uvx` may reuse a cached CLI release. Fetch the newest published release when
 you need it with:
 
@@ -57,6 +92,10 @@ services:
       - "traefik.enable=true"
       - "traefik.docker.network=localhost-proxy"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.rule=Host(`${COMPOSE_PROJECT_NAME}.localhost`)"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web-secure.entrypoints=websecure"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web-secure.rule=Host(`${COMPOSE_PROJECT_NAME}.localhost`)"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web-secure.service=${COMPOSE_PROJECT_NAME}-web"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web-secure.tls=true"
       - "traefik.http.services.${COMPOSE_PROJECT_NAME}-web.loadbalancer.server.port=8000"
 
 networks:

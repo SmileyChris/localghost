@@ -7,6 +7,14 @@ uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Optional trusted HTTPS: a locally built pinned Traefik image bundles the
+  source-loaded provider, `localhost trust`, `localhost trust --remove`, and
+  `localhost trust --status` manage the public
+  root through mkcert, and failed/declined setup remains HTTP-only.
+- `localhost --status` reports proxy state and routes without reconciling it;
+  `localhost trust --status` remains the detailed public-root check.
+- Generated and host-run routes include a `websecure` TLS router that becomes
+  active after HTTPS is enabled.
 - `localhost run`, a fileless foreground Django and Vite host-server
   workflow with an ephemeral, pinned Caddy bridge.
 - Consistent terminal feedback for proxy lifecycle, generated configuration, and

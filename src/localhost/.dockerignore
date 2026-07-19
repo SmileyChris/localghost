@@ -1,0 +1,3 @@
+__pycache__/
+*.py[cod]
+traefik_plugin/src/github.com/SmileyChris/traefik-localhost-ca/*_test.go

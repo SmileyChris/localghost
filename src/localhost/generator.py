@@ -424,6 +424,12 @@ def _resolved_labels(project: str, service: str, port: int) -> dict[str, str]:
         f"traefik.http.routers.{object_name}.entrypoints": "web",
         f"traefik.http.routers.{object_name}.rule": f"Host(`{project}.localhost`)",
         f"traefik.http.routers.{object_name}.service": object_name,
+        f"traefik.http.routers.{object_name}-secure.entrypoints": "websecure",
+        f"traefik.http.routers.{object_name}-secure.rule": (
+            f"Host(`{project}.localhost`)"
+        ),
+        f"traefik.http.routers.{object_name}-secure.service": object_name,
+        f"traefik.http.routers.{object_name}-secure.tls": "true",
         f"traefik.http.services.{object_name}.loadbalancer.server.port": str(port),
     }
 
@@ -441,6 +447,13 @@ def _dynamic_labels(project: str, service: str, port: int) -> dict[str, str]:
             "Host(`${COMPOSE_PROJECT_NAME}.localhost`)"
         ),
         (f"traefik.http.routers.{object_name}.service={object_name}"),
+        (f"traefik.http.routers.{object_name}-secure.entrypoints=websecure"),
+        (
+            f"traefik.http.routers.{object_name}-secure.rule="
+            "Host(`${COMPOSE_PROJECT_NAME}.localhost`)"
+        ),
+        (f"traefik.http.routers.{object_name}-secure.service={object_name}"),
+        (f"traefik.http.routers.{object_name}-secure.tls=true"),
         (f"traefik.http.services.{object_name}.loadbalancer.server.port={port}"),
     ]
     return dict(zip(resolved, values, strict=True))
@@ -536,6 +549,9 @@ def _validate_label_collisions(
 ) -> None:
     desired_rule_key = next(key for key in desired if key.endswith(".rule"))
     desired_rule = desired[desired_rule_key]
+    desired_rules = {
+        key: value for key, value in desired.items() if key.endswith(".rule")
+    }
     object_name = desired_rule_key.removeprefix(
         "traefik.http.routers."
     ).removesuffix(".rule")
@@ -558,8 +574,8 @@ def _validate_label_collisions(
 
         if (
             key.endswith(".rule")
-            and value == desired_rule
-            and (service_name != selected_service or key != desired_rule_key)
+            and value in desired_rules.values()
+            and (service_name != selected_service or key not in desired_rules)
         ):
             raise click.ClickException(
                 f"existing router label '{key}' already uses {desired_rule}"

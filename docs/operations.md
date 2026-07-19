@@ -14,6 +14,51 @@ idempotent: running it again reconciles the existing `localhost` Compose
 project rather than creating another proxy, and waits for Traefik to become
 healthy.
 
+To inspect the current proxy state and routes without starting or reconciling
+it, run:
+
+```sh
+uvx localhost --status
+```
+
+## Optional trusted HTTPS
+
+The proxy begins HTTP-only. In an interactive terminal, the first start offers
+to enable HTTPS and names the public root fingerprint before any privilege
+prompt appears. The explicit equivalent is:
+
+```sh
+uvx localhost trust
+```
+
+`trust` runs `mkcert` with `TRUST_STORES=system,nss` and a `CAROOT` containing
+only this proxy's exported `rootCA.pem`. The private root and the online
+intermediate remain in Docker volumes. It also imports the exact public root
+into detected Zen NSS profiles, because Zen is not reliably discovered by
+mkcert. A missing `mkcert`, declined authorization, or failed verification
+leaves HTTPS unpublished and HTTP working.
+
+When the proxy is already running, a successful trust change reconciles it to
+the corresponding HTTP or HTTPS configuration. Neither `trust` nor `trust
+--remove` starts a stopped proxy.
+
+Check the state without modifying a trust store:
+
+```sh
+uvx localhost trust --status
+```
+
+To disable the HTTPS listener and remove only this root from the stores managed
+by the command:
+
+```sh
+uvx localhost trust --remove
+```
+
+Restart browsers after trust changes when their NSS implementation requires it.
+Leaf certificates are issued and renewed by the bundled Traefik local provider;
+renewal does not invoke `sudo`, change the root, or require browser action.
+
 ## Inspect status and logs
 
 ```sh
@@ -77,6 +122,9 @@ http://traefik.localhost:8080
 
 Framework origin allowlists must include the non-default port. Use the same
 environment prefix whenever you reconcile the proxy.
+
+When HTTPS is enabled, `LOCALHOST_HTTPS_PORT` similarly changes its loopback
+port (default `443`). Use the matching `https://` URL and allowlist that port.
 
 ## Inspect the local checkout
 

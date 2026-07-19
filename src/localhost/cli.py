@@ -5,8 +5,12 @@ from __future__ import annotations
 import importlib.resources as resources
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import click
@@ -37,22 +41,38 @@ from .runner import (
     execute,
     find_route_collision,
 )
+from .trust import MkcertInstaller, PublicCertificate, TrustError, ZenNssInstaller
 
 
 @click.group(invoke_without_command=True)
 @click.version_option(package_name="localhost")
+@click.option(
+    "show_status",
+    "--status",
+    is_flag=True,
+    help="Report proxy state without starting or changing anything.",
+)
 @click.pass_context
-def cli(ctx: click.Context) -> None:
+def cli(ctx: click.Context, show_status: bool) -> None:
     """Connect local applications to the shared development proxy."""
+    if show_status:
+        if ctx.invoked_subcommand is not None:
+            raise click.UsageError("--status cannot be combined with a subcommand")
+        _proxy_status()
+        return
     if ctx.invoked_subcommand is None:
-        port = _proxy_http_port()
+        _proxy_http_port()
         was_running = proxy_is_running()
-        _run_proxy("up", already_running=was_running)
-        suffix = "" if port == 80 else f":{port}"
+        https_enabled = _ensure_https_or_warn()
+        _run_proxy("up", already_running=was_running, https_enabled=https_enabled)
+        scheme = "https" if https_enabled else "http"
+        port = _proxy_https_port() if https_enabled else _proxy_http_port()
+        default_port = 443 if https_enabled else 80
+        suffix = "" if port == default_port else f":{port}"
         if was_running:
-            success(f"Shared proxy is already running at http://traefik.localhost{suffix}")
+            success(f"Shared proxy is already running at {scheme}://traefik.localhost{suffix}")
         else:
-            success(f"Started shared proxy at http://traefik.localhost{suffix}")
+            success(f"Started shared proxy at {scheme}://traefik.localhost{suffix}")
         try:
             routes((route.hostname, route.location) for route in active_routes())
         except click.ClickException as exc:
@@ -60,11 +80,102 @@ def cli(ctx: click.Context) -> None:
         info("To stop and remove it, run: uvx localhost down")
 
 
+def _proxy_status() -> None:
+    """Report only observable proxy state; never reconcile the proxy."""
+    running = proxy_is_running()
+    click.echo(f"Proxy: {'running' if running else 'stopped'}")
+    https_state = "enabled" if _https_configured() else "HTTP only"
+    click.echo(f"HTTPS configuration: {https_state}")
+    if running:
+        try:
+            routes((route.hostname, route.location) for route in active_routes())
+        except click.ClickException as exc:
+            warning("Route listing unavailable", [exc.message])
+    click.echo("For public-root details, run: localhost trust --status")
+
+
 @cli.command()
 def down() -> None:
     """Stop and remove the shared development proxy."""
-    _run_proxy("down")
+    _run_proxy("down", https_enabled=_https_configured())
     success("Proxy stopped and removed.")
+
+
+@cli.command()
+@click.option(
+    "remove",
+    "--remove",
+    is_flag=True,
+    help="Remove the managed root and disable HTTPS.",
+)
+@click.option(
+    "show_status",
+    "--status",
+    is_flag=True,
+    help="Show the managed public-root state without changing it.",
+)
+def trust(remove: bool, show_status: bool) -> None:
+    """Install, remove, or inspect this proxy's public development root."""
+    if remove and show_status:
+        raise click.UsageError("--remove and --status cannot be used together")
+    if show_status:
+        _trust_status()
+        return
+    if remove:
+        _remove_trust()
+        return
+    was_configured = _https_configured()
+    was_running = proxy_is_running()
+    _enable_https()
+    if was_running and not was_configured:
+        _run_proxy("up", already_running=True, https_enabled=True)
+        success("Trusted HTTPS is enabled for the running shared proxy.")
+    elif was_running:
+        success("The shared proxy was already configured for HTTPS.")
+    else:
+        success("Trusted HTTPS is configured. Run `localhost` to start the proxy.")
+
+
+def _remove_trust() -> None:
+    """Disable HTTPS before removing only the managed public root."""
+    was_configured = _https_configured()
+    was_running = proxy_is_running()
+    _trust_marker().unlink(missing_ok=True)
+    if was_running and was_configured:
+        _run_proxy(
+            "up",
+            already_running=True,
+            https_enabled=False,
+            force_recreate=True,
+        )
+    certificate_path = _public_root_path()
+    if certificate_path.exists():
+        try:
+            ZenNssInstaller(certificate_path).uninstall()
+            MkcertInstaller(certificate_path).uninstall()
+        except TrustError as exc:
+            raise click.ClickException(str(exc)) from exc
+    if was_running and was_configured:
+        success("HTTPS is disabled and the local root was removed from managed stores.")
+    else:
+        success("The local root was removed from managed stores.")
+
+
+def _trust_status() -> None:
+    """Show the local HTTPS state without changing trust stores."""
+    certificate_path = _public_root_path()
+    if not certificate_path.exists():
+        click.echo("HTTPS: disabled (no local public root has been bootstrapped)")
+        return
+    try:
+        certificate = PublicCertificate.parse(certificate_path.read_bytes())
+    except TrustError as exc:
+        raise click.ClickException(f"invalid local public root: {exc}") from exc
+    state = "enabled" if _https_configured() else "disabled"
+    click.echo(f"HTTPS: {state}")
+    click.echo(f"Public root: {certificate_path}")
+    click.echo(f"Fingerprint: {certificate.fingerprint}")
+    click.echo("Managed stores: system,nss; Zen profiles when present")
 
 
 @cli.command()
@@ -114,19 +225,27 @@ def run(
     if django_warnings:
         warning("Django settings", django_warnings)
     _print_run_plan(plan, dry_run=False)
-    status = execute(plan, lambda: _run_proxy("up"), cwd=cwd)
+    status = execute(
+        plan,
+        lambda: _run_proxy("up", https_enabled=_https_configured()),
+        cwd=cwd,
+    )
     if status:
         raise click.exceptions.Exit(status)
     success("Application stopped.")
 
 
 def _print_run_plan(plan: RunPlan, dry_run: bool) -> None:
-    suffix = "" if _proxy_http_port() == 80 else f":{_proxy_http_port()}"
+    https_enabled = _https_configured()
+    port = _proxy_https_port() if https_enabled else _proxy_http_port()
+    default_port = 443 if https_enabled else 80
+    suffix = "" if port == default_port else f":{port}"
+    scheme = "https" if https_enabled else "http"
     run_plan(
         framework=plan.framework,
         command=plan.command,
         port=plan.port,
-        url=f"http://{plan.name}.localhost{suffix}",
+        url=f"{scheme}://{plan.name}.localhost{suffix}",
         dry_run=dry_run,
     )
     if dry_run:
@@ -135,9 +254,15 @@ def _print_run_plan(plan: RunPlan, dry_run: bool) -> None:
         info("Starting foreground application; press Ctrl+C to stop it.")
 
 
-def _run_proxy(action: str, *, already_running: bool = False) -> None:
-    resource = resources.files("localhost").joinpath("proxy_compose.yaml")
-    with resources.as_file(resource) as compose_file:
+def _run_proxy(
+    action: str,
+    *,
+    already_running: bool = False,
+    https_enabled: bool = False,
+    force_recreate: bool = False,
+) -> None:
+    with _proxy_resource_directory() as resource_root:
+        compose_file = resource_root / "proxy_compose.yaml"
         command = [
             "docker",
             "compose",
@@ -147,8 +272,12 @@ def _run_proxy(action: str, *, already_running: bool = False) -> None:
             str(compose_file),
             action,
         ]
+        if https_enabled:
+            command[6:6] = ["--file", str(resource_root / "proxy_compose_https.yaml")]
         if action == "up":
             command.extend(["--detach", "--wait", "--wait-timeout", "60"])
+            if https_enabled or force_recreate:
+                command.append("--force-recreate")
 
         verb = "Reconciling" if already_running else "Starting"
         if action == "down":
@@ -168,16 +297,165 @@ def _run_proxy(action: str, *, already_running: bool = False) -> None:
         raise click.exceptions.Exit(result.returncode)
 
 
+def _state_directory() -> Path:
+    configured = os.environ.get("LOCALHOST_STATE_DIR")
+    if configured:
+        return Path(configured)
+    state_home = os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")
+    return Path(state_home) / "localhost"
+
+
+def _public_root_path() -> Path:
+    return _state_directory() / "rootCA.pem"
+
+
+def _trust_marker() -> Path:
+    return _state_directory() / "https-enabled"
+
+
+def _https_configured() -> bool:
+    return _public_root_path().is_file() and _trust_marker().is_file()
+
+
+def _ensure_https_or_warn() -> bool:
+    if _https_configured():
+        return True
+    if _is_interactive(False) and click.confirm(
+        "HTTPS is not enabled. Install this proxy's local development root now?",
+        default=False,
+    ):
+        _enable_https()
+        return True
+    warning(
+        "HTTPS disabled",
+        [
+            "HTTP remains available.",
+            "Run `localhost trust` interactively to install the local root "
+            "and enable HTTPS.",
+        ],
+    )
+    return False
+
+
+def _enable_https() -> None:
+    certificate = _bootstrap_public_root()
+    certificate_path = _public_root_path()
+    click.echo(
+        "HTTPS setup needs system authorization now. mkcert will install only this "
+        "proxy's public root into the system and browser NSS stores "
+        "(TRUST_STORES=system,nss).\n"
+        f"  public-root fingerprint: {certificate.fingerprint}\n"
+        f"  public-root file: {certificate_path}\n"
+        "  private root and intermediate keys are not exported or passed to mkcert."
+    )
+    try:
+        MkcertInstaller(certificate_path).install()
+        ZenNssInstaller(certificate_path).install()
+    except TrustError as exc:
+        _trust_marker().unlink(missing_ok=True)
+        raise click.ClickException(f"HTTPS remains disabled: {exc}") from exc
+    _trust_marker().parent.mkdir(parents=True, exist_ok=True)
+    _trust_marker().touch(mode=0o600, exist_ok=True)
+
+
+def _bootstrap_public_root() -> PublicCertificate:
+    with _proxy_resource_directory() as resource_root:
+        command = [
+            "docker",
+            "compose",
+            "--project-name",
+            "localhost",
+            "--file",
+            str(resource_root / "proxy_compose.yaml"),
+            "--file",
+            str(resource_root / "proxy_compose_https.yaml"),
+            "run",
+            "--rm",
+            "bootstrap",
+            "--print-root",
+        ]
+        try:
+            result = subprocess.run(command, check=False, capture_output=True)
+        except FileNotFoundError as exc:
+            raise click.ClickException("docker is required") from exc
+    if result.returncode:
+        detail = (result.stderr or result.stdout).decode(errors="replace").strip()
+        raise click.ClickException(
+            detail or "could not bootstrap the local certificate authority"
+        )
+    try:
+        certificate = PublicCertificate.parse(result.stdout)
+    except TrustError as exc:
+        raise click.ClickException(
+            f"bootstrap returned an invalid public root: {exc}"
+        ) from exc
+    _write_public_root(_public_root_path(), certificate.pem)
+    return certificate
+
+
+def _write_public_root(path: Path, value: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=".root-", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(value)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, 0o644)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+@contextmanager
+def _proxy_resource_directory() -> Iterator[Path]:
+    """Provide a real directory for Compose's relative build context.
+
+    Installed wheels are normally unpacked, but a zip-based importer cannot be
+    passed to Docker. Python 3.11 cannot materialize a resource directory with
+    ``importlib.resources.as_file``, so copy the small bundled build context
+    when necessary.
+    """
+    resource_root = resources.files("localhost")
+    if isinstance(resource_root, Path):
+        yield resource_root
+        return
+    with tempfile.TemporaryDirectory(prefix="localhost-proxy-") as temporary:
+        destination = Path(temporary) / "localhost"
+        _copy_resource_tree(resource_root, destination)
+        yield destination
+
+
+def _copy_resource_tree(source, destination: Path) -> None:
+    if source.is_dir():
+        destination.mkdir(parents=True, exist_ok=True)
+        for child in source.iterdir():
+            _copy_resource_tree(child, destination / child.name)
+        return
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with source.open("rb") as input_stream, destination.open("wb") as output_stream:
+        shutil.copyfileobj(input_stream, output_stream)
+
+
 def _proxy_http_port() -> int:
-    value = os.environ.get("LOCALHOST_HTTP_PORT") or "80"
+    return _environment_port("LOCALHOST_HTTP_PORT", 80)
+
+
+def _proxy_https_port() -> int:
+    return _environment_port("LOCALHOST_HTTPS_PORT", 443)
+
+
+def _environment_port(name: str, default: int) -> int:
+    value = os.environ.get(name) or str(default)
     if not value.isascii() or not value.isdecimal():
         raise click.ClickException(
-            "LOCALHOST_HTTP_PORT must be an integer from 1 to 65535"
+            f"{name} must be an integer from 1 to 65535"
         )
     port = int(value)
     if not 1 <= port <= 65535:
         raise click.ClickException(
-            "LOCALHOST_HTTP_PORT must be an integer from 1 to 65535"
+            f"{name} must be an integer from 1 to 65535"
         )
     return port
 

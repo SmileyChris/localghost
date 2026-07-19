@@ -28,7 +28,11 @@ def test_proxy_compose_matches_the_public_contract() -> None:
     assert model["networks"]["localhost-proxy"]["name"] == "localhost-proxy"
 
     traefik = model["services"]["traefik"]
-    assert traefik["image"] == "traefik:v3.7.7"
+    assert traefik["image"] == "localhost-traefik:v3.7.7"
+    assert traefik["build"] == {
+        "context": str(ROOT / "src" / "localhost"),
+        "dockerfile": "Dockerfile",
+    }
     assert traefik["restart"] == "unless-stopped"
     assert set(traefik["networks"]) == {"localhost-proxy"}
 

@@ -69,11 +69,25 @@ containers. Do not attach sensitive or untrusted workloads casually. Keep
 databases and internal dependencies only on application-private networks unless
 they specifically need the shared network.
 
+## HTTPS trust
+
+HTTPS is an explicit local-development opt-in. `localhost trust` asks mkcert to
+install one public development root into the system and NSS stores; it prints
+the root fingerprint and explains the scope before the operating system asks
+for authorization. The private root and intermediate signing keys are never
+passed to mkcert or written to the host state directory.
+
+The command keeps HTTP available when trust setup cannot complete. `localhost
+trust --remove` first disables the HTTPS listener, then removes the exact root
+selected by its fingerprint. Browser trust anchors are powerful: enable this
+only on a machine where you trust the installed package and its local Docker
+users.
+
 ## Out of scope for v1
 
-V1 does not include HTTPS, local certificate management, authentication for the
-dashboard, a general project generator, or a restricted socket proxy. The CLI's
-scaffolding is limited to local Compose integration.
+V1 does not include public ACME, non-`.localhost` certificates, authentication
+for the dashboard, or a restricted socket proxy. The CLI's scaffolding is
+limited to local Compose integration.
 
 The optional host bridge uses a pinned Caddy image and connects to
 `host.docker.internal`. A host application must listen on a Docker-reachable
