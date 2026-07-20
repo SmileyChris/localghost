@@ -55,7 +55,7 @@ jobs:
           version: "0.11.15"
 
       - name: Install Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: src/localghost/traefik_plugin/src/github.com/SmileyChris/traefik-localghost-ca/go.mod
           cache-dependency-path: src/localghost/traefik_plugin/src/github.com/SmileyChris/traefik-localghost-ca/go.sum
