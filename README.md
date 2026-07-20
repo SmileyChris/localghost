@@ -1,4 +1,14 @@
 # localghost
+
+Localghost gives local servers friendly `.localhost` URLs instead of port
+numbers:
+
+- `https://storefront.localhost`
+- `https://admin.storefront.localhost`
+- `https://blog.localhost`
+
+Just a single local proxy routing all your development apps by hostname.
+
 ```
           ▒█████████████▒
         ███▒           ▒███░
@@ -20,14 +30,9 @@
   ▒█████▓     ▒█████▓     ▒██████
 ```
 
-Localghost gives local servers (whether Docker Compose or host-native)
-friendly `.localhost` URLs. The `localghost` command keeps one small,
-loopback-only [Traefik](https://traefik.io/traefik/) proxy running while each
-application keeps its own lifecycle.
-
-This is local-development infrastructure, not a production proxy configuration.
-The proxy runs as the `localghost` Compose project on the shared `localghost`
-Docker network.
+This is local-development infrastructure, not a production proxy. It runs a
+single, loopback-only [Traefik](https://traefik.io/traefik/) proxy as the
+`localghost` Compose project on the shared `localghost` Docker network.
 
 ## Quick start
 
