@@ -168,9 +168,16 @@ does not support account username-and-password uploads; use an API token.
    tags.
 5. Make a trial build with `uv build --no-sources`, test the resulting wheel
    with `uvx`, and exercise the lifecycle commands from the release commit in
-   CI.
-6. After CI passes, use a clean checkout of that exact commit to build the final
-   artifacts once, smoke-test the wheel, and record both checksums:
+   CI. Push that exact commit to `main`, then wait for its CI run to succeed.
+   When documentation changed, also wait for the GitHub Pages deployment to
+   succeed:
+   ```sh
+   gh run list --commit "$(git rev-parse HEAD)"
+   gh run watch <run-id>
+   ```
+6. After those workflows pass, use a clean checkout of that exact commit to
+   build the final artifacts once, smoke-test the wheel, and record both
+   checksums:
    ```sh
    test -z "$(git status --porcelain)"
    rm -rf dist
@@ -182,21 +189,32 @@ does not support account username-and-password uploads; use an API token.
    uvx --isolated --from "$wheel" localghost down
    sha256sum "$wheel" "$sdist"
    ```
-7. Create the immutable SemVer tag and GitHub release for that commit. Publish
-   the exact artifacts from step 6 without rebuilding them:
+7. Create the immutable SemVer tag and GitHub release for that commit, attaching
+   the exact artifacts from step 6. Patch-release notes should be short and
+   front-facing: one summary sentence, 3–6 practical highlights, and an
+   `uvx --refresh localghost` upgrade command. Reserve a full introduction and
+   CLI reference for major releases.
    ```sh
-   wheel=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
-   sdist=$(find dist -maxdepth 1 -name '*.tar.gz' -print -quit)
+   git tag -a v<version> -m "v<version>"
+   git push origin v<version>
+   gh release create v<version> "$wheel" "$sdist" \
+     --title "localghost v<version>" --notes-file <release-notes.md>
+   ```
+8. Publish the exact artifacts from step 6 without rebuilding them:
+   ```sh
    uv publish "$wheel" "$sdist"
    ```
-8. Refresh and verify the exact published version, including its lifecycle;
-   then confirm a refreshed unpinned resolution selects the same version:
+9. Wait for the published version to resolve from PyPI, then refresh and verify
+   its lifecycle. Confirm a refreshed unpinned resolution selects the same
+   version:
    ```sh
-   uvx --refresh localghost@1.0.0 --version
-   uvx --refresh localghost@1.0.0
-   uvx localghost@1.0.0 down
+   uvx --refresh localghost@<version> --version
+   uvx --refresh localghost@<version>
+   uvx localghost@<version> down
    uvx --refresh localghost --version
    ```
+   PyPI propagation can take a short time; retry the exact-version check until
+   it resolves rather than assuming an upload is immediately available.
 
 Consumer-visible changes to fixed names, labels, hostname conventions, or
 lifecycle commands require a major version. Additive compatible features may be
