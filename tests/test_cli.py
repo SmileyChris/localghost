@@ -1,6 +1,7 @@
 from pathlib import Path
 from subprocess import CompletedProcess
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -68,6 +69,23 @@ def test_default_command_reports_existing_proxy_and_routes(monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     assert "Shared proxy is already ready" in result.output
     assert "demo.localhost: /work/demo" in result.output
+
+
+def test_default_command_warns_when_route_listing_is_unavailable(monkeypatch) -> None:
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
+    monkeypatch.setattr(
+        "localghost.cli.active_routes",
+        lambda: (_ for _ in ()).throw(click.ClickException("inspect failed")),
+    )
+    monkeypatch.setattr(
+        "localghost.cli.subprocess.run",
+        lambda command, **kwargs: CompletedProcess(command, 0),
+    )
+
+    result = CliRunner().invoke(cli)
+
+    assert result.exit_code == 0, result.output
+    assert "inspect failed" in result.output
 
 
 def test_first_launch_introduces_localghost_before_the_https_prompt(
@@ -231,13 +249,16 @@ def test_proxy_command_preserves_docker_compose_failure_status(monkeypatch) -> N
     monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
     monkeypatch.setattr(
         "localghost.cli.subprocess.run",
-        lambda command, **kwargs: CompletedProcess(command, 17),
+        lambda command, **kwargs: CompletedProcess(
+            command, 17, "", "compose failed"
+        ),
     )
     runner = CliRunner()
 
     result = runner.invoke(cli)
 
     assert result.exit_code == 17
+    assert "compose failed" in result.output
     assert "Proxy is running" not in result.output
 
 
@@ -303,6 +324,35 @@ def test_run_executes_and_refuses_collision(monkeypatch) -> None:
     result = CliRunner().invoke(cli, ["run", "--port", "3000", "--", "echo"])
     assert result.exit_code != 0
     assert "docker rm -f old" in result.output
+
+
+def test_run_uses_effective_origin_for_django_warning_and_preserves_status(
+    monkeypatch,
+) -> None:
+    plan = RunPlan("demo", "django", ("echo",), 3000, "session", "services: {}\n")
+    recorded = {}
+    monkeypatch.setattr("localghost.cli.build_plan", lambda *args: plan)
+    monkeypatch.setattr("localghost.cli.find_route_collision", lambda name: None)
+    monkeypatch.setattr("localghost.cli._https_configured", lambda: True)
+
+    def settings_warnings(plan, cwd, *, public_origin):
+        recorded["origin"] = public_origin
+        return ["Django origin needs updating"]
+
+    monkeypatch.setattr(
+        "localghost.cli.django_settings_warnings", settings_warnings
+    )
+    monkeypatch.setattr("localghost.cli.execute", lambda *args, **kwargs: 7)
+
+    result = CliRunner().invoke(
+        cli,
+        ["run", "--port", "3000", "--", "echo"],
+        env={"LOCALGHOST_HTTPS_PORT": "8443"},
+    )
+
+    assert result.exit_code == 7
+    assert recorded["origin"] == "https://demo.localhost:8443"
+    assert "Django origin needs updating" in result.output
 
 
 def test_run_uses_the_requested_application_directory(monkeypatch, tmp_path) -> None:

@@ -284,6 +284,68 @@ def test_enable_https_rolls_back_partial_trust_installation(
     assert not (tmp_path / "https-enabled").exists()
 
 
+def test_enable_https_retains_an_existing_configuration_on_refresh_failure(
+    monkeypatch, tmp_path
+) -> None:
+    (tmp_path / "rootCA.pem").write_bytes(CERTIFICATE_PEM)
+    marker = tmp_path / "https-enabled"
+    marker.touch()
+    certificate = PublicCertificate.parse(CERTIFICATE_PEM)
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
+    monkeypatch.setattr("localghost.cli._bootstrap_public_root", lambda: certificate)
+
+    class Installer:
+        def install(self):
+            raise TrustError("refresh failed")
+
+        def uninstall(self):
+            pytest.fail("existing trust was rolled back")
+
+    monkeypatch.setattr("localghost.cli.MkcertInstaller", lambda path: Installer())
+
+    result = CliRunner().invoke(
+        cli, ["trust"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+    )
+
+    assert result.exit_code != 0
+    assert "existing HTTPS configuration was retained" in result.output
+    assert marker.exists()
+
+
+def test_enable_https_reports_incomplete_automatic_rollback(
+    monkeypatch, tmp_path
+) -> None:
+    certificate = PublicCertificate.parse(CERTIFICATE_PEM)
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
+    monkeypatch.setattr("localghost.cli._bootstrap_public_root", lambda: certificate)
+
+    class Mkcert:
+        def install(self):
+            raise TrustError("installation failed")
+
+        def uninstall(self):
+            raise TrustError("mkcert cleanup failed")
+
+    class Zen:
+        def install(self):
+            pytest.fail("Zen install should not run")
+
+        def uninstall(self):
+            raise TrustError("Zen cleanup failed")
+
+    monkeypatch.setattr("localghost.cli.MkcertInstaller", lambda path: Mkcert())
+    monkeypatch.setattr("localghost.cli.ZenNssInstaller", lambda path: Zen())
+
+    result = CliRunner().invoke(
+        cli, ["trust"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+    )
+
+    assert result.exit_code != 0
+    assert "automatic trust rollback also failed" in result.output
+    assert "Zen NSS: Zen cleanup failed" in result.output
+    assert "mkcert: mkcert cleanup failed" in result.output
+
+
 def test_bootstrap_writes_public_root_atomically(monkeypatch, tmp_path) -> None:
     command = []
 
