@@ -16,7 +16,18 @@ from pathlib import Path
 import click
 
 from .compose import resolve_compose
-from .feedback import info, routes, run_plan, success, warning
+from .feedback import (
+    action,
+    choices,
+    details,
+    info,
+    next_actions,
+    routes,
+    run_plan,
+    success,
+    title,
+    warning,
+)
 from .generator import (
     Candidate,
     choose_port,
@@ -43,6 +54,8 @@ from .runner import (
 )
 from .trust import MkcertInstaller, PublicCertificate, TrustError, ZenNssInstaller
 
+TRAEFIK_IMAGE = "localghost-traefik:v3.7.7"
+
 
 @click.group(invoke_without_command=True)
 @click.version_option(package_name="localghost")
@@ -58,11 +71,14 @@ def cli(ctx: click.Context, show_status: bool) -> None:
     if show_status:
         if ctx.invoked_subcommand is not None:
             raise click.UsageError("--status cannot be combined with a subcommand")
+        title()
         _proxy_status()
         return
     if ctx.invoked_subcommand is None:
         _proxy_http_port()
         was_running = proxy_is_running()
+        first_launch = not _managed_image_is_available()
+        title(welcome=first_launch)
         https_enabled = _ensure_https_or_warn()
         _run_proxy("up", already_running=was_running, https_enabled=https_enabled)
         scheme = "https" if https_enabled else "http"
@@ -70,33 +86,39 @@ def cli(ctx: click.Context, show_status: bool) -> None:
         default_port = 443 if https_enabled else 80
         suffix = "" if port == default_port else f":{port}"
         if was_running:
-            success(f"Shared proxy is already running at {scheme}://traefik.localhost{suffix}")
+            success(f"Shared proxy is already ready at {scheme}://traefik.localhost{suffix}")
         else:
-            success(f"Started shared proxy at {scheme}://traefik.localhost{suffix}")
+            success(f"Shared proxy is ready at {scheme}://traefik.localhost{suffix}")
         try:
             routes((route.hostname, route.location) for route in active_routes())
         except click.ClickException as exc:
             warning("Route listing unavailable", [exc.message])
-        info("To stop and remove it, run: uvx localghost down")
+        next_actions()
 
 
 def _proxy_status() -> None:
     """Report only observable proxy state; never reconcile the proxy."""
     running = proxy_is_running()
-    click.echo(f"Proxy: {'running' if running else 'stopped'}")
     https_state = "enabled" if _https_configured() else "HTTP only"
-    click.echo(f"HTTPS configuration: {https_state}")
+    details(
+        [
+            ("Proxy", "running" if running else "stopped"),
+            ("HTTPS configuration", https_state),
+        ],
+        title="Localghost status",
+    )
     if running:
         try:
             routes((route.hostname, route.location) for route in active_routes())
         except click.ClickException as exc:
             warning("Route listing unavailable", [exc.message])
-    click.echo("For public-root details, run: localghost trust --status")
+    action("Trust details", "localghost trust --status")
 
 
 @cli.command()
 def down() -> None:
     """Stop and remove the shared development proxy."""
+    title()
     _run_proxy("down", https_enabled=_https_configured())
     success("Proxy stopped and removed.")
 
@@ -118,6 +140,7 @@ def trust(remove: bool, show_status: bool) -> None:
     """Install, remove, or inspect this proxy's public development root."""
     if remove and show_status:
         raise click.UsageError("--remove and --status cannot be used together")
+    title()
     if show_status:
         _trust_status()
         return
@@ -133,7 +156,8 @@ def trust(remove: bool, show_status: bool) -> None:
     elif was_running:
         success("The shared proxy was already configured for HTTPS.")
     else:
-        success("Trusted HTTPS is configured. Run `localghost` to start the proxy.")
+        success("Trusted HTTPS is configured.")
+        action("Start the proxy", "localghost")
 
 
 def _remove_trust() -> None:
@@ -165,17 +189,25 @@ def _trust_status() -> None:
     """Show the local HTTPS state without changing trust stores."""
     certificate_path = _public_root_path()
     if not certificate_path.exists():
-        click.echo("HTTPS: disabled (no local public root has been bootstrapped)")
+        details(
+            [("HTTPS", "disabled (no local public root has been bootstrapped)")],
+            title="Trust status",
+        )
         return
     try:
         certificate = PublicCertificate.parse(certificate_path.read_bytes())
     except TrustError as exc:
         raise click.ClickException(f"invalid local public root: {exc}") from exc
     state = "enabled" if _https_configured() else "disabled"
-    click.echo(f"HTTPS: {state}")
-    click.echo(f"Public root: {certificate_path}")
-    click.echo(f"Fingerprint: {certificate.fingerprint}")
-    click.echo("Managed stores: system,nss; Zen profiles when present")
+    details(
+        [
+            ("HTTPS", state),
+            ("Public root", str(certificate_path)),
+            ("Fingerprint", certificate.fingerprint),
+            ("Managed stores", "system,nss; Zen profiles when present"),
+        ],
+        title="Trust status",
+    )
 
 
 @cli.command()
@@ -215,6 +247,7 @@ def run(
     if dry_run:
         _print_run_plan(plan, dry_run=True)
         return
+    title()
     collision = find_route_collision(plan.name)
     if collision:
         raise click.ClickException(
@@ -293,7 +326,7 @@ def _run_proxy(
     if result.returncode:
         detail = (result.stderr or "").strip() or (result.stdout or "").strip()
         if detail:
-            click.echo(detail, err=True)
+            warning("Proxy command failed", [detail])
         raise click.exceptions.Exit(result.returncode)
 
 
@@ -317,11 +350,24 @@ def _https_configured() -> bool:
     return _public_root_path().is_file() and _trust_marker().is_file()
 
 
+def _managed_image_is_available() -> bool:
+    """Use Docker's image cache as the first-launch cue for interactive feedback."""
+    try:
+        result = subprocess.run(
+            ["docker", "image", "inspect", TRAEFIK_IMAGE],
+            check=False,
+            capture_output=True,
+        )
+    except FileNotFoundError:
+        return False
+    return result.returncode == 0
+
+
 def _ensure_https_or_warn() -> bool:
     if _https_configured():
         return True
     if _is_interactive(False) and click.confirm(
-        "HTTPS is not enabled. Install this proxy's local development root now?",
+        "HTTPS is optional. Enable trusted https://*.localhost URLs now?",
         default=False,
     ):
         _enable_https()
@@ -329,10 +375,14 @@ def _ensure_https_or_warn() -> bool:
     warning(
         "HTTPS disabled",
         [
-            "HTTP remains available.",
-            "Run `localghost trust` interactively to install the local root "
-            "and enable HTTPS.",
+            "HTTP remains available for your local apps.",
         ],
+    )
+    action(
+        "Enable HTTPS",
+        "localghost trust",
+        " interactively to install the local root and enable HTTPS.",
+        err=True,
     )
     return False
 
@@ -340,13 +390,16 @@ def _ensure_https_or_warn() -> bool:
 def _enable_https() -> None:
     certificate = _bootstrap_public_root()
     certificate_path = _public_root_path()
-    click.echo(
-        "HTTPS setup needs system authorization now. mkcert will install only this "
-        "proxy's public root into the system and browser NSS stores "
-        "(TRUST_STORES=system,nss).\n"
-        f"  public-root fingerprint: {certificate.fingerprint}\n"
-        f"  public-root file: {certificate_path}\n"
-        "  private root and intermediate keys are not exported or passed to mkcert."
+    details(
+        [
+            ("Authorization", "system authorization is required now"),
+            ("Installer", "mkcert, limited to this proxy's public root"),
+            ("Trust stores", "system,nss"),
+            ("public-root fingerprint", certificate.fingerprint),
+            ("public-root file", str(certificate_path)),
+            ("private keys", "not exported or passed to mkcert"),
+        ],
+        title="HTTPS setup",
     )
     try:
         MkcertInstaller(certificate_path).install()
@@ -513,6 +566,8 @@ def generate(
     no_input: bool,
 ) -> None:
     """Generate Compose configuration for the current application."""
+    if not dry_run:
+        title()
     interactive = _is_interactive(no_input)
     if not files and not _has_compose_file():
         if extend:
@@ -687,9 +742,9 @@ def _select_candidate(
         try:
             return by_name[requested]
         except KeyError as exc:
-            choices = ", ".join(sorted(by_name))
+            available = ", ".join(sorted(by_name))
             raise click.ClickException(
-                f"service '{requested}' does not exist; choose one of: {choices}"
+                f"service '{requested}' does not exist; choose one of: {available}"
             ) from exc
 
     likely = candidates[0]
@@ -697,11 +752,19 @@ def _select_candidate(
         info(f"Selected likely service: {likely.name}", err=True)
         return likely
 
-    click.echo("Services:")
-    for candidate in candidates:
-        ports = ", ".join(str(port) for port in candidate.ports) or "none declared"
-        marker = " (likely)" if candidate is likely else ""
-        click.echo(f"  {candidate.name}: ports {ports}{marker}")
+    choices(
+        "Services",
+        (
+            (
+                candidate.name,
+                "ports " + ", ".join(str(port) for port in candidate.ports)
+                if candidate.ports
+                else "no declared ports",
+                candidate is likely,
+            )
+            for candidate in candidates
+        ),
+    )
     selected = click.prompt(
         "Service",
         default=likely.name,

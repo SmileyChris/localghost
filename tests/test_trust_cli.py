@@ -82,8 +82,8 @@ def test_default_command_uses_configured_https_and_custom_port(
 
     assert result.exit_code == 0, result.output
     assert "https://traefik.localhost:8443" in result.output
-    assert any("proxy_compose_https.yaml" in item for item in commands[0])
-    assert "--force-recreate" in commands[0]
+    assert any("proxy_compose_https.yaml" in item for item in commands[1])
+    assert "--force-recreate" in commands[1]
 
 
 def test_interactive_start_can_enable_https(monkeypatch) -> None:
@@ -91,6 +91,7 @@ def test_interactive_start_can_enable_https(monkeypatch) -> None:
     monkeypatch.setattr("localghost.cli._https_configured", lambda: False)
     monkeypatch.setattr("localghost.cli._is_interactive", lambda no_input: True)
     monkeypatch.setattr("localghost.cli._enable_https", lambda: enabled.append(True))
+    monkeypatch.setattr("localghost.cli._managed_image_is_available", lambda: False)
     monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
     monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
     monkeypatch.setattr("localghost.cli.active_routes", lambda: [])
@@ -99,7 +100,7 @@ def test_interactive_start_can_enable_https(monkeypatch) -> None:
 
     assert result.exit_code == 0, result.output
     assert enabled == [True]
-    assert "Started shared proxy at https://" in result.output
+    assert "Shared proxy is ready at https://" in result.output
 
 
 def test_proxy_status_reports_running_route_failure(monkeypatch) -> None:

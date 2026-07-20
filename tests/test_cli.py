@@ -25,7 +25,11 @@ def test_default_command_starts_the_bundled_proxy(monkeypatch) -> None:
     result = runner.invoke(cli)
 
     assert result.exit_code == 0, result.output
-    command, kwargs = commands[0]
+    assert commands[0] == (
+        ["docker", "image", "inspect", "localghost-traefik:v3.7.7"],
+        {"check": False, "capture_output": True},
+    )
+    command, kwargs = commands[1]
     assert command[:5] == [
         "docker",
         "compose",
@@ -38,8 +42,10 @@ def test_default_command_starts_the_bundled_proxy(monkeypatch) -> None:
     assert "image: localghost-traefik:v3.7.7" in bundled
     assert command[6:] == ["up", "--detach", "--wait", "--wait-timeout", "60"]
     assert kwargs == {"check": False, "capture_output": True, "text": True}
-    assert "Started shared proxy at http://traefik.localhost" in result.output
-    assert "To stop and remove it, run: uvx localghost down" in result.output
+    assert "Shared proxy is ready at http://traefik.localhost" in result.output
+    assert "Stop the proxy: uvx localghost down" in result.output
+    assert "Add a route: uvx localghost generate for Docker Compose" in result.output
+    assert "uvx localghost run for a local app." in " ".join(result.output.split())
 
 
 def test_default_command_reports_existing_proxy_and_routes(monkeypatch) -> None:
@@ -60,8 +66,35 @@ def test_default_command_reports_existing_proxy_and_routes(monkeypatch) -> None:
     result = CliRunner().invoke(cli)
 
     assert result.exit_code == 0, result.output
-    assert "Shared proxy is already running" in result.output
+    assert "Shared proxy is already ready" in result.output
     assert "demo.localhost: /work/demo" in result.output
+
+
+def test_first_launch_introduces_localghost_before_the_https_prompt(
+    monkeypatch,
+) -> None:
+    events = []
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
+    monkeypatch.setattr("localghost.cli.active_routes", lambda: [])
+    monkeypatch.setattr("localghost.cli._managed_image_is_available", lambda: False)
+    monkeypatch.setattr("localghost.cli._https_configured", lambda: False)
+    monkeypatch.setattr("localghost.cli._is_interactive", lambda no_input: True)
+    monkeypatch.setattr(
+        "localghost.cli.title", lambda *, welcome: events.append(("title", welcome))
+    )
+    monkeypatch.setattr(
+        "localghost.cli.click.confirm",
+        lambda prompt, default: events.append(("prompt", prompt)) or False,
+    )
+    monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
+
+    result = CliRunner().invoke(cli)
+
+    assert result.exit_code == 0, result.output
+    assert events == [
+        ("title", True),
+        ("prompt", "HTTPS is optional. Enable trusted https://*.localhost URLs now?"),
+    ]
 
 
 def test_status_reports_proxy_state_without_reconciling(monkeypatch) -> None:
@@ -133,7 +166,7 @@ def test_trust_configures_a_stopped_proxy_without_starting_it(
     assert (tmp_path / "https-enabled").is_file()
     assert "public-root fingerprint: SHA256:" in result.output
     assert commands == []
-    assert "Run `localghost` to start the proxy." in result.output
+    assert "Start the proxy: localghost" in result.output
 
 
 def test_trust_restarts_a_running_proxy_when_https_becomes_configured(

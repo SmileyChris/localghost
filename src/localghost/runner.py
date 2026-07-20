@@ -17,6 +17,7 @@ from pathlib import Path
 import click
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
+from .feedback import warning
 from .generator import (
     DNS_SAFE_PROJECT,
     HOST_BRIDGE_IMAGE,
@@ -370,9 +371,9 @@ def execute(
             except Exception as exc:  # preserve the child status below
                 cleanup_error = exc
     if cleanup_error:
-        click.echo(
-            f"Warning: failed to remove bridge '{plan.project}': {cleanup_error}",
-            err=True,
+        warning(
+            "Bridge cleanup failed",
+            [f"Could not remove bridge '{plan.project}': {cleanup_error}"],
         )
         if status == 0:
             return 1

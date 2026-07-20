@@ -5,7 +5,7 @@ class Console:
     def __init__(self):
         self.items = []
 
-    def print(self, item):
+    def print(self, item="", **kwargs):
         self.items.append(item)
 
 
@@ -50,6 +50,53 @@ def test_rich_feedback_uses_compact_components(monkeypatch):
     assert len(console.items) == 3
 
 
+def test_title_uses_the_localghost_wordmark_in_interactive_terminals(monkeypatch):
+    console = Console()
+    monkeypatch.setattr(feedback, "_rich_terminal", lambda err: True)
+    monkeypatch.setattr(feedback, "_console", lambda err: console)
+
+    feedback.title(welcome=True)
+
+    assert len(console.items) == 3
+    assert console.items[1] == ""
+    assert console.items[2] == "Easy .localhost URLs for your local apps."
+
+
+def test_title_keeps_the_gap_without_a_welcome_message(monkeypatch):
+    console = Console()
+    monkeypatch.setattr(feedback, "_rich_terminal", lambda err: True)
+    monkeypatch.setattr(feedback, "_console", lambda err: console)
+
+    feedback.title()
+
+    assert len(console.items) == 2
+    assert console.items[1] == ""
+
+
+def test_next_actions_use_plain_text_outside_interactive_terminals(monkeypatch):
+    standard = Console()
+    monkeypatch.setattr(feedback, "_rich_terminal", lambda err: False)
+    monkeypatch.setattr(feedback, "_console", lambda err: standard)
+
+    feedback.next_actions()
+
+    assert standard.items == [
+        "Stop the proxy: uvx localghost down",
+        "Add a route: uvx localghost generate for Docker Compose, or "
+        "uvx localghost run for a local app.",
+    ]
+
+
+def test_choices_use_plain_text_outside_interactive_terminals(monkeypatch):
+    standard = Console()
+    monkeypatch.setattr(feedback, "_rich_terminal", lambda err: False)
+    monkeypatch.setattr(feedback, "_console", lambda err: standard)
+
+    feedback.choices("Services", [("web", "ports 8000", True)])
+
+    assert standard.items == ["Services:\n  web: ports 8000 (likely)"]
+
+
 def test_routes_are_plain_or_a_table(monkeypatch):
     standard = Console()
     monkeypatch.setattr(feedback, "_rich_terminal", lambda err: False)
@@ -63,4 +110,4 @@ def test_routes_are_plain_or_a_table(monkeypatch):
 
     monkeypatch.setattr(feedback, "_rich_terminal", lambda err: True)
     feedback.routes([("demo.localhost", "/work/demo")])
-    assert len(standard.items) == 3
+    assert len(standard.items) == 5
