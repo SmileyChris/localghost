@@ -189,8 +189,8 @@ does not support account username-and-password uploads; use an API token.
    uvx --isolated --from "$wheel" localghost down
    sha256sum "$wheel" "$sdist"
    ```
-7. Create the immutable SemVer tag and GitHub release for that commit, attaching
-   the exact artifacts from step 6. Patch-release notes should be short and
+7. Create the immutable SemVer tag and a draft GitHub release for that commit,
+   attaching the exact artifacts from step 6. Patch-release notes should be short and
    front-facing: one summary sentence, 3–6 practical highlights, and an
    `uvx --refresh localghost` upgrade command. Reserve a full introduction and
    CLI reference for major releases.
@@ -198,7 +198,7 @@ does not support account username-and-password uploads; use an API token.
    git tag -a v<version> -m "v<version>"
    git push origin v<version>
    gh release create v<version> "$wheel" "$sdist" \
-     --title "localghost v<version>" --notes-file <release-notes.md>
+     --draft --title "localghost v<version>" --notes-file <release-notes.md>
    ```
 8. Publish the exact artifacts from step 6 without rebuilding them:
    ```sh
@@ -215,6 +215,10 @@ does not support account username-and-password uploads; use an API token.
    ```
    PyPI propagation can take a short time; retry the exact-version check until
    it resolves rather than assuming an upload is immediately available.
+10. Publish the GitHub release draft only after the PyPI verification succeeds:
+    ```sh
+    gh release edit v<version> --draft=false
+    ```
 
 Consumer-visible changes to fixed names, labels, hostname conventions, or
 lifecycle commands require a major version. Additive compatible features may be
