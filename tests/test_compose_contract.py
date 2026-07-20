@@ -23,7 +23,7 @@ def compose_model(*paths: Path, **environment: str) -> dict:
 
 def test_proxy_compose_matches_the_public_contract() -> None:
     model = compose_model(
-        ROOT / "compose.yaml", LOCALGHOST_HTTP_PORT="18081"
+        ROOT / "compose.yaml", LOCALGHOST_HTTP_PORT="18081", LOCALGHOST_IMAGE_TAG="v1.0.1"
     )
 
     assert model["name"] == "localghost"
@@ -32,7 +32,7 @@ def test_proxy_compose_matches_the_public_contract() -> None:
     assert model["networks"]["localghost"]["name"] == "localghost"
 
     traefik = model["services"]["traefik"]
-    assert traefik["image"] == "localghost-traefik:v3.7.7"
+    assert traefik["image"] == "localghost-traefik:v1.0.1"
     assert traefik["build"] == {
         "context": str(ROOT / "src" / "localghost"),
         "dockerfile": "Dockerfile",

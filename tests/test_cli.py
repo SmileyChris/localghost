@@ -5,7 +5,7 @@ import click
 import pytest
 from click.testing import CliRunner
 
-from localghost.cli import cli
+from localghost.cli import LOCALGHOST_VERSION, cli
 from localghost.runner import RunPlan
 from localghost.trust import PublicCertificate
 
@@ -27,7 +27,7 @@ def test_default_command_starts_the_bundled_proxy(monkeypatch) -> None:
 
     assert result.exit_code == 0, result.output
     assert commands[0] == (
-        ["docker", "image", "inspect", "localghost-traefik:v3.7.7"],
+        ["docker", "image", "inspect", f"localghost-traefik:v{LOCALGHOST_VERSION}"],
         {"check": False, "capture_output": True},
     )
     command, kwargs = commands[1]
@@ -40,9 +40,12 @@ def test_default_command_starts_the_bundled_proxy(monkeypatch) -> None:
     ]
     bundled = Path(command[5]).read_text(encoding="utf-8")
     assert "context: ." in bundled
-    assert "image: localghost-traefik:v3.7.7" in bundled
+    assert "image: localghost-traefik:${LOCALGHOST_IMAGE_TAG}" in bundled
     assert command[6:] == ["up", "--detach", "--wait", "--wait-timeout", "60"]
-    assert kwargs == {"check": False, "capture_output": True, "text": True}
+    assert kwargs["check"] is False
+    assert kwargs["capture_output"] is True
+    assert kwargs["text"] is True
+    assert kwargs["env"]["LOCALGHOST_IMAGE_TAG"] == f"v{LOCALGHOST_VERSION}"
     assert "Shared proxy is ready at http://traefik.localhost" in result.output
     assert "Stop the proxy: uvx localghost down" in result.output
     assert "Add a route: uvx localghost generate for Docker Compose" in result.output

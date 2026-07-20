@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.resources as resources
+from importlib.metadata import version as package_version
 import os
 import re
 import shutil
@@ -54,7 +55,8 @@ from .runner import (
 )
 from .trust import MkcertInstaller, PublicCertificate, TrustError, ZenNssInstaller
 
-TRAEFIK_IMAGE = "localghost-traefik:v3.7.7"
+LOCALGHOST_VERSION = package_version("localghost")
+TRAEFIK_IMAGE = f"localghost-traefik:v{LOCALGHOST_VERSION}"
 
 
 @click.group(invoke_without_command=True)
@@ -324,8 +326,10 @@ def _run_proxy(
             verb = "Stopping"
         info(f"{verb} shared proxy…")
         try:
+            environment = os.environ.copy()
+            environment["LOCALGHOST_IMAGE_TAG"] = f"v{LOCALGHOST_VERSION}"
             result = subprocess.run(
-                command, check=False, capture_output=True, text=True
+                command, check=False, capture_output=True, text=True, env=environment
             )
         except FileNotFoundError as exc:
             raise click.ClickException("docker is required") from exc
