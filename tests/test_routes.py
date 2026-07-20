@@ -56,6 +56,20 @@ def test_proxy_running_uses_fixed_project_labels(monkeypatch):
     assert "label=com.docker.compose.project=localghost" in recorded[0]
 
 
+def test_routes_are_scoped_to_the_fixed_shared_network(monkeypatch):
+    recorded = []
+
+    def run(command, **kwargs):
+        recorded.append(command)
+        return CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(routes.subprocess, "run", run)
+
+    assert routes.active_routes() == []
+    assert "label=traefik.enable=true" in recorded[0]
+    assert "network=localghost" in recorded[0]
+
+
 def test_routes_handle_empty_and_unusual_container_metadata(monkeypatch):
     monkeypatch.setattr(
         routes.subprocess,

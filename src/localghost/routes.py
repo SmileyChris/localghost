@@ -36,7 +36,14 @@ def proxy_is_running() -> bool:
 def active_routes() -> list[Route]:
     """Return directly declared host routes for running opted-in containers."""
     listed = _docker(
-        ["ps", "--quiet", "--filter", "label=traefik.enable=true"]
+        [
+            "ps",
+            "--quiet",
+            "--filter",
+            "label=traefik.enable=true",
+            "--filter",
+            "network=localghost",
+        ]
     )
     identifiers = listed.stdout.split()
     if not identifiers:
