@@ -21,6 +21,8 @@ DOCKERFILE_DIR=''
 HOST_SERVER_PID=''
 HOST_RUN_PID=''
 PUBLIC_ROOT_FILE=''
+LOCALGHOST_IMAGE_TAG="v$(uv run --frozen localghost --version)"
+export LOCALGHOST_IMAGE_TAG
 
 log() {
   printf '\n==> %s\n' "$*"
