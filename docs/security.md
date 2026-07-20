@@ -83,6 +83,13 @@ selected by its fingerprint. Browser trust anchors are powerful: enable this
 only on a machine where you trust the installed package and its local Docker
 users.
 
+Removing host trust does not delete the private CA Docker volumes or the public
+root copy in Localghost's host state directory. This is intentional so a later
+opt-in can reuse the same root, but it means `localghost down` and `localghost
+trust --remove` are not complete data removal. Follow the
+[complete-removal procedure](operations.md#stop-and-remove) after removing the
+public root from host trust stores.
+
 ## Out of scope for v1
 
 V1 does not include public ACME, non-`.localhost` certificates, authentication

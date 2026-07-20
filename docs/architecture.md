@@ -11,7 +11,9 @@ The proxy Compose project owns:
 - the fixed Compose project name `localghost`;
 - one Traefik container;
 - the fixed Docker network `localghost`; and
-- loopback publication of the configured HTTP port.
+- loopback publication of the configured HTTP port;
+- optional loopback publication of the configured HTTPS port; and
+- persistent private CA volumes when trusted HTTPS has been bootstrapped.
 
 An application Compose project owns its containers, default network, data, and
 application-specific configuration. It only references `localghost` as an
@@ -77,6 +79,20 @@ nor published.
 The Traefik container health check calls `traefik healthcheck --ping` against
 the enabled internal ping endpoint. Health describes the proxy process; it does
 not guarantee that every consumer application is healthy or correctly labelled.
+
+## Optional HTTPS path
+
+HTTP remains the baseline entrypoint. After `localghost trust` installs the
+proxy's public development root, the proxy also publishes the `websecure`
+entrypoint on loopback and loads its local certificate provider. The private
+root and online signer stay in Docker volumes; only the public root is copied to
+host state and passed to trust-store tooling.
+
+Applications opt into HTTPS with a second, project-scoped router using the same
+hostname and backend service as the HTTP router. The secure router selects the
+`websecure` entrypoint and sets `tls=true`. The generator and checked-in examples
+include both routers, so enabling or disabling the proxy's HTTPS configuration
+does not require regenerating application configuration.
 
 ## Host-native applications
 

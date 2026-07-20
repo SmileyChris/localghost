@@ -45,7 +45,7 @@ contract, project naming, secondary services, and host-native workflows.
 ## Optional trusted HTTPS
 
 HTTP is always available. To install Localghost's local development root and
-enable HTTPS:
+enable HTTPS, first install `mkcert`, then run:
 
 ```sh
 uvx localghost trust

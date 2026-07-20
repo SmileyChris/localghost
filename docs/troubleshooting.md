@@ -88,6 +88,26 @@ Stop the conflicting listener if appropriate, or use
 [Operating the proxy](operations.md#use-another-http-port). The proxy binds to
 `127.0.0.1`, but a process bound to `0.0.0.0:80` still conflicts with it.
 
+## HTTP works but HTTPS does not
+
+Inspect the managed trust and listener state first:
+
+```sh
+uvx localghost trust --status
+uvx localghost --status
+```
+
+HTTPS requires `mkcert`, an installed Localghost public root, and a running proxy
+with the `websecure` entrypoint enabled. The application also needs a secure
+router with `websecure`, its normal `Host(...)` rule and service, and `tls=true`.
+Generated configurations include this router; compare hand-written labels with
+[Optional HTTPS](integrating-applications.md#optional-https).
+
+If a custom `LOCALGHOST_HTTPS_PORT` is configured, include it in the URL. When
+only a browser rejects the certificate, restart it and recheck its system or NSS
+trust store. When every client fails to connect, inspect the proxy logs and host
+port publication instead.
+
 ## Hostname resolution or HTTP proxy problems
 
 `.localhost` is a special-use loopback domain, but local resolver or corporate

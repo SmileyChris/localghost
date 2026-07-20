@@ -23,9 +23,10 @@ uvx localghost --status
 
 ## Optional trusted HTTPS
 
-The proxy begins HTTP-only. In an interactive terminal, the first start offers
-to enable HTTPS and names the public root fingerprint before any privilege
-prompt appears. The explicit equivalent is:
+The proxy begins HTTP-only. Trusted HTTPS requires `mkcert` on the host. In an
+interactive terminal, the first start offers to enable HTTPS and names the
+public root fingerprint before any privilege prompt appears. The explicit
+equivalent is:
 
 ```sh
 uvx localghost trust
@@ -59,6 +60,10 @@ Restart browsers after trust changes when their NSS implementation requires it.
 Leaf certificates are issued and renewed by the bundled Traefik local provider;
 renewal does not invoke `sudo`, change the root, or require browser action.
 
+Generated routes include matching `web` and `websecure` routers. Hand-written
+application labels need the secure router explicitly; see
+[Optional HTTPS for integrations](integrating-applications.md#optional-https).
+
 ## Inspect status and logs
 
 ```sh
@@ -84,6 +89,35 @@ uvx localghost down
 Compose removes the proxy container and attempts to remove its network. Docker
 will retain the network if running consumer containers still have endpoints on
 it. Stop those applications before removing the shared network completely.
+
+`down` deliberately preserves the `localghost_localghost-ca-root` and
+`localghost_localghost-ca-signer` Docker volumes. This keeps the same trusted
+root available when the proxy is restarted, avoiding another host trust-store
+change. `trust --remove` disables HTTPS and removes the public root from the
+managed host stores, but leaves those private Docker volumes and the public
+`rootCA.pem` copy in Localghost's state directory available for an intentional
+re-enable.
+
+For complete removal, remove host trust first, stop the proxy, then delete the
+two CA volumes:
+
+```sh
+uvx localghost trust --remove
+uvx localghost down
+docker volume rm \
+  localghost_localghost-ca-root \
+  localghost_localghost-ca-signer
+```
+
+Finally, delete the Localghost state directory if no other state has been added
+there. It is `LOCALGHOST_STATE_DIR` when that override is set, otherwise
+`${XDG_STATE_HOME:-$HOME/.local/state}/localghost`. The retained `rootCA.pem` is
+public, but removing it completes the local cleanup.
+
+Deleting the CA volumes is irreversible. A later `localghost trust` creates a
+new root and requires that new public root to be installed. If Docker reports a
+volume is in use, stop remaining `localghost` project containers before
+retrying; do not force-remove a volume from a running proxy.
 
 Running `docker compose down` inside an application checkout affects only that
 application and leaves the proxy running.

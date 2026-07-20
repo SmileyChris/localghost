@@ -45,6 +45,10 @@ services:
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.entrypoints=web"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.rule=Host(`${COMPOSE_PROJECT_NAME}.localhost`)"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.service=${COMPOSE_PROJECT_NAME}-web"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web-secure.entrypoints=websecure"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web-secure.rule=Host(`${COMPOSE_PROJECT_NAME}.localhost`)"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web-secure.service=${COMPOSE_PROJECT_NAME}-web"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web-secure.tls=true"
       - "traefik.http.services.${COMPOSE_PROJECT_NAME}-web.loadbalancer.server.port=8000"
 
 networks:
@@ -83,6 +87,10 @@ services:
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit.entrypoints=web"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit.rule=Host(`mailpit.${COMPOSE_PROJECT_NAME}.localhost`)"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit.service=${COMPOSE_PROJECT_NAME}-mailpit"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit-secure.entrypoints=websecure"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit-secure.rule=Host(`mailpit.${COMPOSE_PROJECT_NAME}.localhost`)"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit-secure.service=${COMPOSE_PROJECT_NAME}-mailpit"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit-secure.tls=true"
       - "traefik.http.services.${COMPOSE_PROJECT_NAME}-mailpit.loadbalancer.server.port=8025"
 
 networks:
@@ -95,6 +103,32 @@ For a checkout named `my-project`, the URL is
 
 Repeat the pattern for other browser-facing tools. The service segment and the
 router/service identifiers must be distinct within the project.
+
+## Optional HTTPS
+
+Each example defines two routers for the same hostname and backend service. The
+ordinary router uses the always-available `web` entrypoint. The `-secure` router
+uses `websecure` with TLS and becomes active after `localghost trust` enables
+the proxy's HTTPS configuration. Keeping both routers means HTTP continues to
+work after HTTPS is enabled.
+
+The generator adds both routers automatically. For hand-written integration,
+include all four `-secure` labels shown above: entrypoint, rule, service, and
+`tls=true`. A secure router without an explicit service label can be associated
+with the wrong backend when a container defines multiple routers or services.
+
+Install `mkcert`, then enable and inspect trust with:
+
+```sh
+uvx localghost trust
+uvx localghost trust --status
+```
+
+Use `https://<project>.localhost` for the primary service and
+`https://<service>.<project>.localhost` for secondary services. HTTP remains
+available at the corresponding `http://` URLs. See
+[Operating localghost](operations.md#optional-trusted-https) for trust-store,
+port, and removal details.
 
 ## Multiple checkouts
 
@@ -122,6 +156,16 @@ For Django, a checkout named `my-project` normally needs:
 ```python
 ALLOWED_HOSTS = ["my-project.localhost"]
 CSRF_TRUSTED_ORIGINS = ["http://my-project.localhost"]
+```
+
+When using HTTPS, allow its origin instead, or allow both origins when the
+application is intentionally used over both schemes:
+
+```python
+CSRF_TRUSTED_ORIGINS = [
+    "http://my-project.localhost",
+    "https://my-project.localhost",
+]
 ```
 
 When the proxy uses a non-default port, the browser origin includes it:
