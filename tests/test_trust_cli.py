@@ -196,6 +196,28 @@ def test_trust_remove_reports_store_failure(monkeypatch, tmp_path) -> None:
     assert "store failed" in result.output
 
 
+def test_trust_remove_keeps_marker_when_proxy_reconciliation_fails(
+    monkeypatch, tmp_path
+) -> None:
+    (tmp_path / "rootCA.pem").write_bytes(CERTIFICATE_PEM)
+    marker = tmp_path / "https-enabled"
+    marker.touch()
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: True)
+    monkeypatch.setattr(
+        "localghost.cli._run_proxy",
+        lambda *args, **kwargs: (_ for _ in ()).throw(click.exceptions.Exit(9)),
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        ["trust", "--remove"],
+        env={"LOCALGHOST_STATE_DIR": str(tmp_path)},
+    )
+
+    assert result.exit_code == 9
+    assert marker.exists()
+
+
 def test_enable_https_clears_marker_when_installation_fails(
     monkeypatch, tmp_path
 ) -> None:
@@ -208,6 +230,9 @@ def test_enable_https_clears_marker_when_installation_fails(
         def install(self):
             raise TrustError("authorization denied")
 
+        def uninstall(self):
+            return None
+
     monkeypatch.setattr("localghost.cli.MkcertInstaller", lambda path: Installer())
 
     result = CliRunner().invoke(
@@ -217,6 +242,46 @@ def test_enable_https_clears_marker_when_installation_fails(
     assert result.exit_code != 0
     assert "HTTPS remains disabled" in result.output
     assert not marker.exists()
+
+
+def test_enable_https_rolls_back_partial_trust_installation(
+    monkeypatch, tmp_path
+) -> None:
+    certificate = PublicCertificate.parse(CERTIFICATE_PEM)
+    monkeypatch.setattr("localghost.cli._bootstrap_public_root", lambda: certificate)
+    events = []
+
+    class Mkcert:
+        def install(self):
+            events.append("mkcert install")
+
+        def uninstall(self):
+            events.append("mkcert uninstall")
+
+    class Zen:
+        def install(self):
+            events.append("zen install")
+            raise TrustError("Zen installation failed")
+
+        def uninstall(self):
+            events.append("zen uninstall")
+
+    monkeypatch.setattr("localghost.cli.MkcertInstaller", lambda path: Mkcert())
+    monkeypatch.setattr("localghost.cli.ZenNssInstaller", lambda path: Zen())
+
+    result = CliRunner().invoke(
+        cli, ["trust"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+    )
+
+    assert result.exit_code != 0
+    assert events == [
+        "mkcert install",
+        "zen install",
+        "zen uninstall",
+        "mkcert uninstall",
+    ]
+    assert "HTTPS remains disabled" in result.output
+    assert not (tmp_path / "https-enabled").exists()
 
 
 def test_bootstrap_writes_public_root_atomically(monkeypatch, tmp_path) -> None:

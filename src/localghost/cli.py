@@ -164,7 +164,6 @@ def _remove_trust() -> None:
     """Disable HTTPS before removing only the managed public root."""
     was_configured = _https_configured()
     was_running = proxy_is_running()
-    _trust_marker().unlink(missing_ok=True)
     if was_running and was_configured:
         _run_proxy(
             "up",
@@ -172,6 +171,7 @@ def _remove_trust() -> None:
             https_enabled=False,
             force_recreate=True,
         )
+    _trust_marker().unlink(missing_ok=True)
     certificate_path = _public_root_path()
     if certificate_path.exists():
         try:
@@ -388,6 +388,7 @@ def _ensure_https_or_warn() -> bool:
 
 
 def _enable_https() -> None:
+    was_configured = _https_configured()
     certificate = _bootstrap_public_root()
     certificate_path = _public_root_path()
     details(
@@ -401,12 +402,33 @@ def _enable_https() -> None:
         ],
         title="HTTPS setup",
     )
+    mkcert_installer = MkcertInstaller(certificate_path)
+    zen_installer = ZenNssInstaller(certificate_path)
     try:
-        MkcertInstaller(certificate_path).install()
-        ZenNssInstaller(certificate_path).install()
+        mkcert_installer.install()
+        zen_installer.install()
     except TrustError as exc:
+        if was_configured:
+            raise click.ClickException(
+                f"existing HTTPS configuration was retained, but trust refresh "
+                f"failed: {exc}"
+            ) from exc
         _trust_marker().unlink(missing_ok=True)
-        raise click.ClickException(f"HTTPS remains disabled: {exc}") from exc
+        rollback_errors = []
+        for name, installer in (
+            ("Zen NSS", zen_installer),
+            ("mkcert", mkcert_installer),
+        ):
+            try:
+                installer.uninstall()
+            except TrustError as rollback_exc:
+                rollback_errors.append(f"{name}: {rollback_exc}")
+        message = f"HTTPS remains disabled: {exc}"
+        if rollback_errors:
+            message += "; automatic trust rollback also failed: " + "; ".join(
+                rollback_errors
+            )
+        raise click.ClickException(message) from exc
     _trust_marker().parent.mkdir(parents=True, exist_ok=True)
     _trust_marker().touch(mode=0o600, exist_ok=True)
 
