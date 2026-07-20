@@ -368,7 +368,7 @@ wait_for_https_body "${PROJECT_B}.localhost" \
   "Hostname: ${b_web_hostname}" >/dev/null
 wait_for_body "${PROJECT_B}.localhost" "Hostname: ${b_web_hostname}" >/dev/null
 secure_dashboard_headers=$(
-  curl --noproxy '*' --silent --dump-header - --output /dev/null \
+  curl --noproxy '*' --http1.1 --silent --dump-header - --output /dev/null \
     --max-time 5 --cacert "${PUBLIC_ROOT_FILE}" \
     --resolve "traefik.localhost:${HTTPS_PORT}:127.0.0.1" \
     "https://traefik.localhost:${HTTPS_PORT}/"
