@@ -247,9 +247,10 @@ log 'Run and clean up a foreground bridge to an HTTP application on the host'
 HOST_DIR=$(mktemp -d)
 (
   cd "${HOST_DIR}"
-  exec uv run --frozen --project "${ROOT_DIR}" localghost run \
-  --name "${HOST_PROJECT}" --port "${HOST_APP_PORT}" -- \
-  python3 "${ROOT_DIR}/tests/fixtures/host-app/server.py" "${HOST_APP_PORT}"
+  exec env LOCALGHOST_STATE_DIR="${HOST_DIR}/localghost-state" \
+    uv run --frozen --project "${ROOT_DIR}" localghost run \
+    --name "${HOST_PROJECT}" --port "${HOST_APP_PORT}" -- \
+    python3 "${ROOT_DIR}/tests/fixtures/host-app/server.py" "${HOST_APP_PORT}"
 ) >"${HOST_DIR}/run.log" 2>&1 &
 HOST_RUN_PID=$!
 wait_for_body "${HOST_PROJECT}.localhost" \
