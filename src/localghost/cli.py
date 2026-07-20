@@ -60,7 +60,7 @@ TRAEFIK_IMAGE = f"localghost-traefik:v{LOCALGHOST_VERSION}"
 
 
 @click.group(invoke_without_command=True)
-@click.version_option(package_name="localghost")
+@click.version_option(package_name="localghost", message="%(version)s")
 @click.option(
     "show_status",
     "--status",

@@ -25,7 +25,8 @@ configuration files. Consumers rely on the fixed `localghost` project and
 Resolve and validate both Compose files:
 
 ```sh
-docker compose -f compose.yaml config --quiet
+LOCALGHOST_IMAGE_TAG="v$(uv run localghost --version)" \
+  docker compose -f compose.yaml config --quiet
 COMPOSE_PROJECT_NAME=localghost-fixture-a \
   docker compose -f examples/compose.yaml config --quiet
 bash -n scripts/integration-test.sh

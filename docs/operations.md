@@ -165,13 +165,13 @@ port (default `443`). Use the matching `https://` URL and allowlist that port.
 Contributors working from a clone can validate the resolved configuration:
 
 ```sh
-docker compose -f compose.yaml config
+LOCALGHOST_IMAGE_TAG=v1.0.1 docker compose -f compose.yaml config
 ```
 
 To confirm the actual host binding of a running local checkout:
 
 ```sh
-container_id=$(docker compose -f compose.yaml ps -q traefik)
+container_id=$(LOCALGHOST_IMAGE_TAG=v1.0.1 docker compose -f compose.yaml ps -q traefik)
 docker port "$container_id" 80/tcp
 ```
 
