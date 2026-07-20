@@ -4,7 +4,7 @@ from subprocess import CompletedProcess
 import click
 import pytest
 
-from localhost.compose import declared_ports, resolve_compose
+from localghost.compose import declared_ports, resolve_compose
 
 
 def test_declared_ports_combines_compose_and_traefik_sources() -> None:
@@ -27,7 +27,7 @@ def test_resolve_compose_builds_repeated_file_arguments(monkeypatch) -> None:
         calls.append((command, kwargs))
         return CompletedProcess(command, 0, json.dumps({"name": "project"}), "")
 
-    monkeypatch.setattr("localhost.compose.subprocess.run", run)
+    monkeypatch.setattr("localghost.compose.subprocess.run", run)
 
     assert resolve_compose(("base.yaml", "local.yaml")) == {"name": "project"}
     assert calls[0][0] == [
@@ -54,7 +54,7 @@ def test_resolve_compose_reports_command_and_json_errors(
     monkeypatch, result, message
 ) -> None:
     monkeypatch.setattr(
-        "localhost.compose.subprocess.run", lambda *a, **k: result
+        "localghost.compose.subprocess.run", lambda *a, **k: result
     )
 
     with pytest.raises(click.ClickException, match=message):
@@ -65,7 +65,7 @@ def test_resolve_compose_reports_missing_docker(monkeypatch) -> None:
     def missing(*args, **kwargs):
         raise FileNotFoundError
 
-    monkeypatch.setattr("localhost.compose.subprocess.run", missing)
+    monkeypatch.setattr("localghost.compose.subprocess.run", missing)
 
     with pytest.raises(click.ClickException, match="docker is required"):
         resolve_compose(())
@@ -73,7 +73,7 @@ def test_resolve_compose_reports_missing_docker(monkeypatch) -> None:
 
 def test_resolve_compose_requires_a_json_object(monkeypatch) -> None:
     monkeypatch.setattr(
-        "localhost.compose.subprocess.run",
+        "localghost.compose.subprocess.run",
         lambda *a, **k: CompletedProcess([], 0, "[]", ""),
     )
 

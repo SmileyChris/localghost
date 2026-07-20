@@ -1,4 +1,4 @@
-# Localhost Proxy security and trust
+# Localghost security and trust
 
 This project is designed for a trusted local development machine. It is not a
 production security design and should not be exposed to a LAN or the internet.
@@ -12,7 +12,7 @@ The v1 configuration reduces accidental exposure by:
 - serving the dashboard through `api@internal` on the loopback-bound `web`
   entrypoint;
 - setting `exposedByDefault=false` and requiring `traefik.enable=true`;
-- selecting the fixed `localhost-proxy` network for backend traffic;
+- selecting the fixed `localghost` network for backend traffic;
 - pinning Traefik to an exact image version; and
 - disabling anonymous usage reporting and automatic version checks.
 
@@ -50,11 +50,11 @@ Before first use or an upgrade:
 For example:
 
 ```sh
-uvx localhost@1.0.0
+uvx localghost@1.0.0
 ```
 
-An unpinned `uvx localhost` invocation may reuse a cached release. Use
-`uvx --refresh localhost` when you intentionally want the newest
+An unpinned `uvx localghost` invocation may reuse a cached release. Use
+`uvx --refresh localghost` when you intentionally want the newest
 published release. Dependency update pull requests should be reviewed and pass
 the integration suite before release.
 
@@ -71,13 +71,13 @@ they specifically need the shared network.
 
 ## HTTPS trust
 
-HTTPS is an explicit local-development opt-in. `localhost trust` asks mkcert to
+HTTPS is an explicit local-development opt-in. `localghost trust` asks mkcert to
 install one public development root into the system and NSS stores; it prints
 the root fingerprint and explains the scope before the operating system asks
 for authorization. The private root and intermediate signing keys are never
 passed to mkcert or written to the host state directory.
 
-The command keeps HTTP available when trust setup cannot complete. `localhost
+The command keeps HTTP available when trust setup cannot complete. `localghost
 trust --remove` first disables the HTTPS listener, then removes the exact root
 selected by its fingerprint. Browser trust anchors are powerful: enable this
 only on a machine where you trust the installed package and its local Docker

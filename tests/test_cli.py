@@ -4,22 +4,22 @@ from subprocess import CompletedProcess
 import pytest
 from click.testing import CliRunner
 
-from localhost.cli import cli
-from localhost.runner import RunPlan
-from localhost.trust import PublicCertificate
+from localghost.cli import cli
+from localghost.runner import RunPlan
+from localghost.trust import PublicCertificate
 
 
 def test_default_command_starts_the_bundled_proxy(monkeypatch) -> None:
     commands = []
 
-    monkeypatch.setattr("localhost.cli.proxy_is_running", lambda: False)
-    monkeypatch.setattr("localhost.cli.active_routes", lambda: [])
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
+    monkeypatch.setattr("localghost.cli.active_routes", lambda: [])
 
     def run(command, **kwargs):
         commands.append((command, kwargs))
         return CompletedProcess(command, 0)
 
-    monkeypatch.setattr("localhost.cli.subprocess.run", run)
+    monkeypatch.setattr("localghost.cli.subprocess.run", run)
     runner = CliRunner()
 
     result = runner.invoke(cli)
@@ -30,22 +30,22 @@ def test_default_command_starts_the_bundled_proxy(monkeypatch) -> None:
         "docker",
         "compose",
         "--project-name",
-        "localhost",
+        "localghost",
         "--file",
     ]
     bundled = Path(command[5]).read_text(encoding="utf-8")
     assert "context: ." in bundled
-    assert "image: localhost-traefik:v3.7.7" in bundled
+    assert "image: localghost-traefik:v3.7.7" in bundled
     assert command[6:] == ["up", "--detach", "--wait", "--wait-timeout", "60"]
     assert kwargs == {"check": False, "capture_output": True, "text": True}
     assert "Started shared proxy at http://traefik.localhost" in result.output
-    assert "To stop and remove it, run: uvx localhost down" in result.output
+    assert "To stop and remove it, run: uvx localghost down" in result.output
 
 
 def test_default_command_reports_existing_proxy_and_routes(monkeypatch) -> None:
-    monkeypatch.setattr("localhost.cli.proxy_is_running", lambda: True)
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: True)
     monkeypatch.setattr(
-        "localhost.cli.active_routes",
+        "localghost.cli.active_routes",
         lambda: [
             type(
                 "Route", (), {"hostname": "demo.localhost", "location": "/work/demo"}
@@ -53,7 +53,7 @@ def test_default_command_reports_existing_proxy_and_routes(monkeypatch) -> None:
         ],
     )
     monkeypatch.setattr(
-        "localhost.cli.subprocess.run",
+        "localghost.cli.subprocess.run",
         lambda command, **kwargs: CompletedProcess(command, 0),
     )
 
@@ -65,12 +65,12 @@ def test_default_command_reports_existing_proxy_and_routes(monkeypatch) -> None:
 
 
 def test_status_reports_proxy_state_without_reconciling(monkeypatch) -> None:
-    monkeypatch.setattr("localhost.cli.proxy_is_running", lambda: False)
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
     monkeypatch.setattr(
-        "localhost.cli._https_configured", lambda: False
+        "localghost.cli._https_configured", lambda: False
     )
     monkeypatch.setattr(
-        "localhost.cli._run_proxy", lambda *args, **kwargs: pytest.fail("reconciled")
+        "localghost.cli._run_proxy", lambda *args, **kwargs: pytest.fail("reconciled")
     )
 
     result = CliRunner().invoke(cli, ["--status"])
@@ -78,7 +78,7 @@ def test_status_reports_proxy_state_without_reconciling(monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     assert "Proxy: stopped" in result.output
     assert "HTTPS configuration: HTTP only" in result.output
-    assert "localhost trust --status" in result.output
+    assert "localghost trust --status" in result.output
 
 
 def test_status_cannot_be_combined_with_a_subcommand() -> None:
@@ -95,7 +95,7 @@ def test_down_stops_the_bundled_proxy(monkeypatch) -> None:
         commands.append((command, kwargs))
         return CompletedProcess(command, 0)
 
-    monkeypatch.setattr("localhost.cli.subprocess.run", run)
+    monkeypatch.setattr("localghost.cli.subprocess.run", run)
     runner = CliRunner()
 
     result = runner.invoke(cli, ["down"])
@@ -110,30 +110,30 @@ def test_trust_configures_a_stopped_proxy_without_starting_it(
 ) -> None:
     commands = []
     certificate = PublicCertificate(b"public root", "SHA256:" + "A" * 64)
-    monkeypatch.setattr("localhost.cli.proxy_is_running", lambda: False)
-    monkeypatch.setattr("localhost.cli._bootstrap_public_root", lambda: certificate)
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
+    monkeypatch.setattr("localghost.cli._bootstrap_public_root", lambda: certificate)
 
     class Installer:
         def install(self):
             return None
 
-    monkeypatch.setattr("localhost.cli.MkcertInstaller", lambda path: Installer())
-    monkeypatch.setattr("localhost.cli.ZenNssInstaller", lambda path: Installer())
+    monkeypatch.setattr("localghost.cli.MkcertInstaller", lambda path: Installer())
+    monkeypatch.setattr("localghost.cli.ZenNssInstaller", lambda path: Installer())
     def run(command, **kwargs):
         commands.append(command)
         return CompletedProcess(command, 0)
 
-    monkeypatch.setattr("localhost.cli.subprocess.run", run)
+    monkeypatch.setattr("localghost.cli.subprocess.run", run)
 
     result = CliRunner().invoke(
-        cli, ["trust"], env={"LOCALHOST_STATE_DIR": str(tmp_path)}
+        cli, ["trust"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
     )
 
     assert result.exit_code == 0, result.output
     assert (tmp_path / "https-enabled").is_file()
     assert "public-root fingerprint: SHA256:" in result.output
     assert commands == []
-    assert "Run `localhost` to start the proxy." in result.output
+    assert "Run `localghost` to start the proxy." in result.output
 
 
 def test_trust_restarts_a_running_proxy_when_https_becomes_configured(
@@ -141,23 +141,23 @@ def test_trust_restarts_a_running_proxy_when_https_becomes_configured(
 ) -> None:
     commands = []
     certificate = PublicCertificate(b"public root", "SHA256:" + "A" * 64)
-    monkeypatch.setattr("localhost.cli.proxy_is_running", lambda: True)
-    monkeypatch.setattr("localhost.cli._bootstrap_public_root", lambda: certificate)
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: True)
+    monkeypatch.setattr("localghost.cli._bootstrap_public_root", lambda: certificate)
 
     class Installer:
         def install(self):
             return None
 
-    monkeypatch.setattr("localhost.cli.MkcertInstaller", lambda path: Installer())
-    monkeypatch.setattr("localhost.cli.ZenNssInstaller", lambda path: Installer())
+    monkeypatch.setattr("localghost.cli.MkcertInstaller", lambda path: Installer())
+    monkeypatch.setattr("localghost.cli.ZenNssInstaller", lambda path: Installer())
 
     def run(command, **kwargs):
         commands.append(command)
         return CompletedProcess(command, 0)
 
-    monkeypatch.setattr("localhost.cli.subprocess.run", run)
+    monkeypatch.setattr("localghost.cli.subprocess.run", run)
     result = CliRunner().invoke(
-        cli, ["trust"], env={"LOCALHOST_STATE_DIR": str(tmp_path)}
+        cli, ["trust"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
     )
 
     assert result.exit_code == 0, result.output
@@ -171,22 +171,22 @@ def test_trust_remove_disables_https_before_mutating_managed_stores(
     commands = []
     (tmp_path / "rootCA.pem").write_bytes(b"public root")
     (tmp_path / "https-enabled").touch()
-    monkeypatch.setattr("localhost.cli.proxy_is_running", lambda: False)
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
 
     class Installer:
         def uninstall(self):
             return None
 
-    monkeypatch.setattr("localhost.cli.MkcertInstaller", lambda path: Installer())
-    monkeypatch.setattr("localhost.cli.ZenNssInstaller", lambda path: Installer())
+    monkeypatch.setattr("localghost.cli.MkcertInstaller", lambda path: Installer())
+    monkeypatch.setattr("localghost.cli.ZenNssInstaller", lambda path: Installer())
     def run(command, **kwargs):
         commands.append(command)
         return CompletedProcess(command, 0)
 
-    monkeypatch.setattr("localhost.cli.subprocess.run", run)
+    monkeypatch.setattr("localghost.cli.subprocess.run", run)
 
     result = CliRunner().invoke(
-        cli, ["trust", "--remove"], env={"LOCALHOST_STATE_DIR": str(tmp_path)}
+        cli, ["trust", "--remove"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
     )
 
     assert result.exit_code == 0, result.output
@@ -195,9 +195,9 @@ def test_trust_remove_disables_https_before_mutating_managed_stores(
 
 
 def test_proxy_command_preserves_docker_compose_failure_status(monkeypatch) -> None:
-    monkeypatch.setattr("localhost.cli.proxy_is_running", lambda: False)
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
     monkeypatch.setattr(
-        "localhost.cli.subprocess.run",
+        "localghost.cli.subprocess.run",
         lambda command, **kwargs: CompletedProcess(command, 17),
     )
     runner = CliRunner()
@@ -209,12 +209,12 @@ def test_proxy_command_preserves_docker_compose_failure_status(monkeypatch) -> N
 
 
 def test_proxy_commands_report_missing_docker(monkeypatch) -> None:
-    monkeypatch.setattr("localhost.cli.proxy_is_running", lambda: False)
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
 
     def run(*args, **kwargs):
         raise FileNotFoundError
 
-    monkeypatch.setattr("localhost.cli.subprocess.run", run)
+    monkeypatch.setattr("localghost.cli.subprocess.run", run)
     runner = CliRunner()
 
     result = runner.invoke(cli)
@@ -224,15 +224,15 @@ def test_proxy_commands_report_missing_docker(monkeypatch) -> None:
 
 
 def test_proxy_port_defaults_when_the_environment_value_is_empty(monkeypatch) -> None:
-    monkeypatch.setattr("localhost.cli.proxy_is_running", lambda: False)
-    monkeypatch.setattr("localhost.cli.active_routes", lambda: [])
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
+    monkeypatch.setattr("localghost.cli.active_routes", lambda: [])
     monkeypatch.setattr(
-        "localhost.cli.subprocess.run",
+        "localghost.cli.subprocess.run",
         lambda command, **kwargs: CompletedProcess(command, 0),
     )
     runner = CliRunner()
 
-    result = runner.invoke(cli, env={"LOCALHOST_HTTP_PORT": ""})
+    result = runner.invoke(cli, env={"LOCALGHOST_HTTP_PORT": ""})
 
     assert result.exit_code == 0, result.output
     assert "http://traefik.localhost\n" in result.output
@@ -240,13 +240,13 @@ def test_proxy_port_defaults_when_the_environment_value_is_empty(monkeypatch) ->
 
 def test_run_dry_run_prints_plan_without_starting(monkeypatch) -> None:
     plan = RunPlan("demo", "custom", ("echo", "ok"), 3000, "session", "services: {}\n")
-    monkeypatch.setattr("localhost.cli.build_plan", lambda *args: plan)
+    monkeypatch.setattr("localghost.cli.build_plan", lambda *args: plan)
     monkeypatch.setattr(
-        "localhost.cli.find_route_collision",
+        "localghost.cli.find_route_collision",
         lambda name: pytest.fail("inspected Docker"),
     )
     monkeypatch.setattr(
-        "localhost.cli.execute", lambda *args, **kwargs: pytest.fail("ran")
+        "localghost.cli.execute", lambda *args, **kwargs: pytest.fail("ran")
     )
     runner = CliRunner()
 
@@ -259,14 +259,14 @@ def test_run_dry_run_prints_plan_without_starting(monkeypatch) -> None:
 
 def test_run_executes_and_refuses_collision(monkeypatch) -> None:
     plan = RunPlan("demo", "custom", ("echo",), 3000, "session", "services: {}\n")
-    monkeypatch.setattr("localhost.cli.build_plan", lambda *args: plan)
-    monkeypatch.setattr("localhost.cli.find_route_collision", lambda name: None)
-    monkeypatch.setattr("localhost.cli.execute", lambda *args, **kwargs: 0)
+    monkeypatch.setattr("localghost.cli.build_plan", lambda *args: plan)
+    monkeypatch.setattr("localghost.cli.find_route_collision", lambda name: None)
+    monkeypatch.setattr("localghost.cli.execute", lambda *args, **kwargs: 0)
     result = CliRunner().invoke(cli, ["run", "--port", "3000", "--", "echo"])
     assert result.exit_code == 0, result.output
     assert "Starting foreground application" in result.output
 
-    monkeypatch.setattr("localhost.cli.find_route_collision", lambda name: "old")
+    monkeypatch.setattr("localghost.cli.find_route_collision", lambda name: "old")
     result = CliRunner().invoke(cli, ["run", "--port", "3000", "--", "echo"])
     assert result.exit_code != 0
     assert "docker rm -f old" in result.output
@@ -284,9 +284,9 @@ def test_run_uses_the_requested_application_directory(monkeypatch, tmp_path) -> 
         recorded["execute_cwd"] = kwargs["cwd"]
         return 0
 
-    monkeypatch.setattr("localhost.cli.build_plan", build)
-    monkeypatch.setattr("localhost.cli.find_route_collision", lambda name: None)
-    monkeypatch.setattr("localhost.cli.execute", execute)
+    monkeypatch.setattr("localghost.cli.build_plan", build)
+    monkeypatch.setattr("localghost.cli.find_route_collision", lambda name: None)
+    monkeypatch.setattr("localghost.cli.execute", execute)
 
     result = CliRunner().invoke(
         cli, ["run", "-C", str(tmp_path), "--port", "3000", "--", "echo"]
@@ -305,10 +305,10 @@ def test_proxy_port_rejects_invalid_environment_values(monkeypatch, value) -> No
         called = True
         return CompletedProcess([], 0)
 
-    monkeypatch.setattr("localhost.cli.subprocess.run", run)
+    monkeypatch.setattr("localghost.cli.subprocess.run", run)
     runner = CliRunner()
 
-    result = runner.invoke(cli, env={"LOCALHOST_HTTP_PORT": value})
+    result = runner.invoke(cli, env={"LOCALGHOST_HTTP_PORT": value})
 
     assert result.exit_code != 0
     assert "integer from 1 to 65535" in result.output
@@ -329,12 +329,12 @@ def compose_model(
 
 
 def install_compose(monkeypatch, model: dict) -> None:
-    monkeypatch.setattr("localhost.cli.resolve_compose", lambda files: model)
+    monkeypatch.setattr("localghost.cli.resolve_compose", lambda files: model)
 
 
 def test_interactive_user_can_choose_a_non_default_service(monkeypatch) -> None:
     install_compose(monkeypatch, compose_model())
-    monkeypatch.setattr("localhost.cli._is_interactive", lambda _: True)
+    monkeypatch.setattr("localghost.cli._is_interactive", lambda _: True)
     runner = CliRunner()
 
     with runner.isolated_filesystem():
@@ -350,7 +350,7 @@ def test_interactive_user_can_choose_a_non_default_service(monkeypatch) -> None:
 
 def test_interactive_user_is_prompted_for_an_ambiguous_port(monkeypatch) -> None:
     install_compose(monkeypatch, compose_model(ports=(7000, 9000)))
-    monkeypatch.setattr("localhost.cli._is_interactive", lambda _: True)
+    monkeypatch.setattr("localghost.cli._is_interactive", lambda _: True)
     runner = CliRunner()
 
     with runner.isolated_filesystem():
@@ -410,7 +410,7 @@ def test_dry_run_prints_yaml_without_writing(monkeypatch) -> None:
         result = runner.invoke(cli, ["generate", "--no-input", "--dry-run"])
 
         assert result.exit_code == 0, result.output
-        assert "localhost-proxy:" in result.output
+        assert "localghost:" in result.output
         assert not Path("compose.override.yaml").exists()
 
 
@@ -441,7 +441,7 @@ def test_compose_file_environment_selects_compose_mode(monkeypatch) -> None:
         )
 
     assert result.exit_code == 0, result.output
-    assert "localhost-proxy:" in result.output
+    assert "localghost:" in result.output
 
 
 def test_new_override_refuses_a_router_owned_by_another_service(monkeypatch) -> None:
@@ -465,7 +465,7 @@ def test_new_override_refuses_a_router_owned_by_another_service(monkeypatch) -> 
 
 def test_existing_override_requires_confirmation_or_extend(monkeypatch) -> None:
     install_compose(monkeypatch, compose_model())
-    monkeypatch.setattr("localhost.cli._is_interactive", lambda _: True)
+    monkeypatch.setattr("localghost.cli._is_interactive", lambda _: True)
     runner = CliRunner()
 
     with runner.isolated_filesystem():
@@ -496,10 +496,10 @@ def test_existing_complete_override_reports_no_change(monkeypatch) -> None:
         assert first.exit_code == 0, first.output
 
         complete_model = compose_model()
-        complete_model["networks"]["localhost-proxy"] = {"external": True}
+        complete_model["networks"]["localghost"] = {"external": True}
         complete_model["services"]["web"]["labels"] = {
             "traefik.enable": "true",
-            "traefik.docker.network": "localhost-proxy",
+            "traefik.docker.network": "localghost",
             "traefik.http.routers.sample-project-web.entrypoints": "web",
             "traefik.http.routers.sample-project-web.rule": (
                 "Host(`sample-project.localhost`)"
@@ -608,7 +608,7 @@ def test_no_compose_mode_validates_inputs_and_refuses_overwrite() -> None:
 
 
 def test_no_compose_interactive_defaults_to_detected_dockerfile(monkeypatch) -> None:
-    monkeypatch.setattr("localhost.cli._is_interactive", lambda _: True)
+    monkeypatch.setattr("localghost.cli._is_interactive", lambda _: True)
     runner = CliRunner()
 
     with runner.isolated_filesystem():

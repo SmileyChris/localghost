@@ -2,8 +2,8 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from localhost.cli import cli
-from localhost.generator import choose_port, rank_services
+from localghost.cli import cli
+from localghost.generator import choose_port, rank_services
 
 
 def compose_model() -> dict:
@@ -26,7 +26,7 @@ def test_web_service_and_http_port_are_preferred() -> None:
 
 def test_generate_writes_an_override(monkeypatch) -> None:
     monkeypatch.setattr(
-        "localhost.cli.resolve_compose", lambda files: compose_model()
+        "localghost.cli.resolve_compose", lambda files: compose_model()
     )
     runner = CliRunner()
 
@@ -37,14 +37,14 @@ def test_generate_writes_an_override(monkeypatch) -> None:
         assert result.exit_code == 0, result.output
         override = Path("compose.override.yaml").read_text(encoding="utf-8")
         assert "web:" in override
-        assert "localhost-proxy:" in override
+        assert "localghost:" in override
         assert "${COMPOSE_PROJECT_NAME}-web.rule" in override
         assert "loadbalancer.server.port=8000" in override
 
 
 def test_existing_override_is_extended_and_backed_up(monkeypatch) -> None:
     monkeypatch.setattr(
-        "localhost.cli.resolve_compose", lambda files: compose_model()
+        "localghost.cli.resolve_compose", lambda files: compose_model()
     )
     runner = CliRunner()
 
@@ -60,7 +60,7 @@ def test_existing_override_is_extended_and_backed_up(monkeypatch) -> None:
         override = Path("compose.override.yaml").read_text(encoding="utf-8")
         assert "# keep me" in override
         assert "DEBUG: '1'" in override
-        assert "localhost-proxy" in override
+        assert "localghost" in override
         assert Path("compose.override.yaml.bak").exists()
 
 

@@ -4,7 +4,7 @@ import click
 import pytest
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
-from localhost.generator import (
+from localghost.generator import (
     Candidate,
     choose_port,
     create_override,
@@ -90,7 +90,7 @@ def test_port_selection_only_guesses_when_the_choice_is_clear(
 def test_new_override_preserves_service_networks_and_uses_dynamic_names() -> None:
     selected = Candidate(
         name="Web.API",
-        service={"networks": {"backend": None, "localhost-proxy": None}},
+        service={"networks": {"backend": None, "localghost": None}},
         ports=(8080,),
         score=0,
     )
@@ -98,7 +98,7 @@ def test_new_override_preserves_service_networks_and_uses_dynamic_names() -> Non
     rendered = render_override(create_override("shop", selected, 8080))
 
     assert "backend:" in rendered
-    assert rendered.count("localhost-proxy:") == 2
+    assert rendered.count("localghost:") == 2
     assert "${COMPOSE_PROJECT_NAME}-web-api.rule" in rendered
     assert "Host(`${COMPOSE_PROJECT_NAME}.localhost`)" in rendered
 
@@ -128,7 +128,7 @@ def test_existing_override_collections_are_extended_in_place(
     assert extend_override(document, model, "shop", candidate(), 8000) is True
     rendered = render_override(document)
     assert "keep" in rendered
-    assert "localhost-proxy" in rendered
+    assert "localghost" in rendered
     assert "loadbalancer.server.port" in rendered
 
 
@@ -139,19 +139,19 @@ def test_an_empty_override_is_extended_safely() -> None:
 
     rendered = render_override(document)
     assert "web:" in rendered
-    assert "localhost-proxy:" in rendered
+    assert "localghost:" in rendered
     assert "loadbalancer.server.port=8000" in rendered
 
 
 def test_extending_a_complete_override_is_idempotent() -> None:
     document = create_override("shop", candidate(), 8000)
     model = {
-        "networks": {"localhost-proxy": {"external": True}},
+        "networks": {"localghost": {"external": True}},
         "services": {
             "web": {
                 "labels": {
                     "traefik.enable": "true",
-                    "traefik.docker.network": "localhost-proxy",
+                    "traefik.docker.network": "localghost",
                     "traefik.http.routers.shop-web.entrypoints": "web",
                         "traefik.http.routers.shop-web.rule": "Host(`shop.localhost`)",
                         "traefik.http.routers.shop-web.service": "shop-web",
@@ -179,13 +179,13 @@ def test_extending_a_complete_override_is_idempotent() -> None:
     ("model", "message"),
     [
         (
-            {"networks": {"localhost-proxy": {"external": False}}},
+            {"networks": {"localghost": {"external": False}}},
             "network is not external",
         ),
         (
             {
                 "networks": {
-                    "localhost-proxy": {"external": True, "name": "another-network"}
+                    "localghost": {"external": True, "name": "another-network"}
                 }
             },
             "does not use the fixed name",
@@ -325,7 +325,7 @@ def test_extension_refuses_structurally_unsafe_documents(
             CommentedMap(
                 {
                     "networks": CommentedMap(
-                        {"localhost-proxy": CommentedMap({"external": False})}
+                        {"localghost": CommentedMap({"external": False})}
                     )
                 }
             ),

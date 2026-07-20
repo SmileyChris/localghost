@@ -1,4 +1,4 @@
-from localhost import feedback
+from localghost import feedback
 
 
 class Console:

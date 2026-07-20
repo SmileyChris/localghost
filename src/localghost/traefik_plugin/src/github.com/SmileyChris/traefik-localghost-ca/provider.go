@@ -1,6 +1,6 @@
-// Package traefik_localhost_ca implements a Traefik provider plugin that
+// Package traefik_localghost_ca implements a Traefik provider plugin that
 // supplies locally trusted TLS certificates for .localhost development domains.
-package traefik_localhost_ca
+package traefik_localghost_ca
 
 import (
 	"context"
@@ -35,8 +35,8 @@ type Config struct {
 func CreateConfig() *Config {
 	return &Config{
 		DockerEndpoint: "unix:///var/run/docker.sock",
-		Network:        "localhost-https-poc",
-		StoragePath:    "/var/lib/localhost-ca",
+		Network:        "localghost-https-poc",
+		StoragePath:    "/var/lib/localghost-ca",
 		PollInterval:   "250ms",
 		DomainSuffix:   "localhost",
 		LeafLifetime:   "24h",
@@ -154,7 +154,7 @@ func (p *Provider) Init() error {
 	if err := p.ensureBaseline(false); err != nil {
 		return fmt.Errorf("ensuring baseline certificate: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "localhostCA[%s]: initialized (CA fingerprint: %s)\n", p.name, p.ca.Fingerprint())
+	fmt.Fprintf(os.Stderr, "localghostCA[%s]: initialized (CA fingerprint: %s)\n", p.name, p.ca.Fingerprint())
 	return nil
 }
 
@@ -205,7 +205,7 @@ func (p *Provider) publish(ctx context.Context, cfgChan chan<- json.Marshaler) {
 	if err != nil {
 		p.mu.Lock()
 		if !p.dockerLost {
-			fmt.Fprintf(os.Stderr, "localhostCA[%s]: Docker discovery lost: %v; retaining last snapshot\n", p.name, err)
+			fmt.Fprintf(os.Stderr, "localghostCA[%s]: Docker discovery lost: %v; retaining last snapshot\n", p.name, err)
 			p.dockerLost = true
 		}
 		p.mu.Unlock()
@@ -214,18 +214,18 @@ func (p *Provider) publish(ctx context.Context, cfgChan chan<- json.Marshaler) {
 
 	p.mu.Lock()
 	if p.dockerLost {
-		fmt.Fprintf(os.Stderr, "localhostCA[%s]: Docker discovery recovered\n", p.name)
+		fmt.Fprintf(os.Stderr, "localghostCA[%s]: Docker discovery recovered\n", p.name)
 		p.dockerLost = false
 	}
 
 	if err := p.ensureBaseline(true); err != nil {
-		fmt.Fprintf(os.Stderr, "localhostCA[%s]: baseline renewal failed: %v; retaining last snapshot\n", p.name, err)
+		fmt.Fprintf(os.Stderr, "localghostCA[%s]: baseline renewal failed: %v; retaining last snapshot\n", p.name, err)
 		p.mu.Unlock()
 		return
 	}
 	desired, err := p.desiredSpecs(containers)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "localhostCA[%s]: discovery rejected: %v; retaining last snapshot\n", p.name, err)
+		fmt.Fprintf(os.Stderr, "localghostCA[%s]: discovery rejected: %v; retaining last snapshot\n", p.name, err)
 		p.mu.Unlock()
 		return
 	}
@@ -233,7 +233,7 @@ func (p *Provider) publish(ctx context.Context, cfgChan chan<- json.Marshaler) {
 	for _, spec := range desired {
 		cert, err := p.ensureSpec(spec, true)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "localhostCA[%s]: certificate update failed for %s %q: %v; retaining last snapshot\n", p.name, spec.kind, spec.name, err)
+			fmt.Fprintf(os.Stderr, "localghostCA[%s]: certificate update failed for %s %q: %v; retaining last snapshot\n", p.name, spec.kind, spec.name, err)
 			p.mu.Unlock()
 			return
 		}
@@ -241,7 +241,7 @@ func (p *Provider) publish(ctx context.Context, cfgChan chan<- json.Marshaler) {
 	}
 	for key := range p.activeCerts {
 		if _, ok := newActive[key]; !ok {
-			fmt.Fprintf(os.Stderr, "localhostCA[%s]: removed %s from active snapshot\n", p.name, key)
+			fmt.Fprintf(os.Stderr, "localghostCA[%s]: removed %s from active snapshot\n", p.name, key)
 		}
 	}
 	p.activeCerts = newActive
@@ -249,7 +249,7 @@ func (p *Provider) publish(ctx context.Context, cfgChan chan<- json.Marshaler) {
 	p.lastSnapshot = snapshot
 	p.mu.Unlock()
 
-	fmt.Fprintf(os.Stderr, "localhostCA[%s]: publishing complete TLS snapshot (%d certificates)\n", p.name, len(snapshot))
+	fmt.Fprintf(os.Stderr, "localghostCA[%s]: publishing complete TLS snapshot (%d certificates)\n", p.name, len(snapshot))
 	if ctx.Err() != nil {
 		return
 	}
@@ -352,7 +352,7 @@ func (p *Provider) ensureSpec(spec certSpec, runtime bool) (*projectCert, error)
 		return nil, err
 	}
 	p.storedCerts[spec.key] = newCert
-	fmt.Fprintf(os.Stderr, "localhostCA[%s]: %s %s certificate SANs=%v expires=%s\n",
+	fmt.Fprintf(os.Stderr, "localghostCA[%s]: %s %s certificate SANs=%v expires=%s\n",
 		p.name, action, spec.kind, spec.domains, newCert.expires.UTC().Format(time.RFC3339))
 	_ = runtime // distinguishes the call site for readability; persistence is identical.
 	return newCert, nil
@@ -428,7 +428,7 @@ func (p *Provider) loadOptionalSpec(spec certSpec) error {
 	if time.Now().Before(cert.NotBefore) || time.Until(cert.NotAfter) <= p.renewBefore {
 		state = "cached renewal-due"
 	}
-	fmt.Fprintf(os.Stderr, "localhostCA[%s]: %s stored %s certificate SANs=%v expires=%s\n",
+	fmt.Fprintf(os.Stderr, "localghostCA[%s]: %s stored %s certificate SANs=%v expires=%s\n",
 		p.name, state, spec.kind, spec.domains, cert.NotAfter.UTC().Format(time.RFC3339))
 	return nil
 }

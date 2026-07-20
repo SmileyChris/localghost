@@ -3,7 +3,7 @@ from subprocess import CompletedProcess
 
 import pytest
 
-from localhost.trust import (
+from localghost.trust import (
     MkcertInstaller,
     PublicCertificate,
     TrustError,

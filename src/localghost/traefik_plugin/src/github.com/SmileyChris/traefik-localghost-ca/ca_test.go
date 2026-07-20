@@ -1,4 +1,4 @@
-package traefik_localhost_ca
+package traefik_localghost_ca
 
 import (
 	"crypto/ecdsa"

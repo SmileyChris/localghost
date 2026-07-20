@@ -5,7 +5,7 @@ from subprocess import CompletedProcess
 import click
 import pytest
 
-from localhost import runner
+from localghost import runner
 
 
 def executable(monkeypatch, *names):
@@ -198,10 +198,10 @@ def test_bridge_model_is_ephemeral():
     text = runner.render_override(runner.create_run_bridge_compose("demo", 8123))
     assert "caddy:2.11.4-alpine" in text
     assert "restart: no" in text and "external: true" in text
-    assert "localhost-proxy:" in text
-    assert "traefik.docker.network=localhost-proxy" in text
+    assert "localghost:" in text
+    assert "traefik.docker.network=localghost" in text
     assert "Host(`demo.localhost`)" in text
-    assert "io.localhost.managed=true" in text
+    assert "io.localghost.managed=true" in text
     assert "ports:" not in text
 
 

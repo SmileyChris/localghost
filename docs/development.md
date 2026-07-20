@@ -1,11 +1,11 @@
-# Developing Localhost Proxy
+# Developing Localghost
 
 ## Repository layout
 
 - `compose.yaml` is the stable public interface and must remain self-contained.
 - `examples/compose.yaml` supplies primary, secondary, and unlabelled fixtures.
 - `scripts/integration-test.sh` exercises the compatibility contract.
-- `src/localhost/` contains the packaged Click CLI, bundled proxy Compose
+- `src/localghost/` contains the packaged Click CLI, bundled proxy Compose
   definition, override generator, and source-loaded Traefik provider.
 - `pyproject.toml` and `uv.lock` define the build and locked development
   environment.
@@ -17,8 +17,8 @@
   it explicitly during dependency maintenance.
 
 The proxy Compose file must not gain application-specific mounts, state, or
-configuration files. Consumers rely on the fixed `localhost` project and
-`localhost-proxy` network names.
+configuration files. Consumers rely on the fixed `localghost` project and
+`localghost` network names.
 
 ## Static validation
 
@@ -26,12 +26,12 @@ Resolve and validate both Compose files:
 
 ```sh
 docker compose -f compose.yaml config --quiet
-COMPOSE_PROJECT_NAME=localhost-fixture-a \
+COMPOSE_PROJECT_NAME=localghost-fixture-a \
   docker compose -f examples/compose.yaml config --quiet
 bash -n scripts/integration-test.sh
 uv run ruff check .
 uv run pytest
-(cd src/localhost/traefik_plugin/src/github.com/SmileyChris/traefik-localhost-ca \
+(cd src/localghost/traefik_plugin/src/github.com/SmileyChris/traefik-localghost-ca \
   && go test ./...)
 ```
 
@@ -39,7 +39,7 @@ Review the fully rendered fixture configuration when changing interpolated
 labels:
 
 ```sh
-COMPOSE_PROJECT_NAME=localhost-fixture-a \
+COMPOSE_PROJECT_NAME=localghost-fixture-a \
   docker compose -f examples/compose.yaml config
 ```
 
@@ -51,10 +51,10 @@ Run:
 ./scripts/integration-test.sh
 ```
 
-The suite is destructive only to Docker resources named `localhost`,
-`localhost-proxy`,
-`localhost-fixture-a`, `localhost-fixture-b`, `localhost-fixture-host`, and
-`localhost-fixture-dockerfile`. It refuses to begin if any of those resources
+The suite is destructive only to Docker resources named `localghost`,
+`localghost`,
+`localghost-fixture-a`, `localghost-fixture-b`, `localghost-fixture-host`, and
+`localghost-fixture-dockerfile`. It refuses to begin if any of those resources
 already exist and cleans up resources it creates even after failure. Ports 80,
 18080, 18443, and 19090 must be available.
 
@@ -98,9 +98,9 @@ Test the local package through the same isolated tool mechanism used after PyPI
 publication:
 
 ```sh
-uvx --from . localhost --help
-uvx --from . localhost down --help
-uvx --from . localhost generate --help
+uvx --from . localghost --help
+uvx --from . localghost down --help
+uvx --from . localghost generate --help
 ```
 
 ## Release-candidate test
@@ -112,8 +112,8 @@ the lifecycle commands from that wheel:
 ```sh
 uv build --no-sources
 wheel=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
-uvx --isolated --from "$wheel" localhost
-uvx --isolated --from "$wheel" localhost down
+uvx --isolated --from "$wheel" localghost
+uvx --isolated --from "$wheel" localghost down
 ```
 
 CI performs the same wheel smoke test before the source integration suite.
@@ -156,8 +156,8 @@ does not support account username-and-password uploads; use an API token.
    wheel=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
    sdist=$(find dist -maxdepth 1 -name '*.tar.gz' -print -quit)
    test -n "$wheel" && test -n "$sdist"
-   uvx --isolated --from "$wheel" localhost
-   uvx --isolated --from "$wheel" localhost down
+   uvx --isolated --from "$wheel" localghost
+   uvx --isolated --from "$wheel" localghost down
    sha256sum "$wheel" "$sdist"
    ```
 7. Create the immutable SemVer tag and GitHub release for that commit. Publish
@@ -170,10 +170,10 @@ does not support account username-and-password uploads; use an API token.
 8. Refresh and verify the exact published version, including its lifecycle;
    then confirm a refreshed unpinned resolution selects the same version:
    ```sh
-   uvx --refresh localhost@1.0.0 --version
-   uvx --refresh localhost@1.0.0
-   uvx localhost@1.0.0 down
-   uvx --refresh localhost --version
+   uvx --refresh localghost@1.0.0 --version
+   uvx --refresh localghost@1.0.0
+   uvx localghost@1.0.0 down
+   uvx --refresh localghost --version
    ```
 
 Consumer-visible changes to fixed names, labels, hostname conventions, or

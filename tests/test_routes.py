@@ -4,7 +4,7 @@ from subprocess import CompletedProcess
 import click
 import pytest
 
-from localhost import routes
+from localghost import routes
 
 
 def test_routes_show_host_path_or_compose_location(monkeypatch):
@@ -15,7 +15,7 @@ def test_routes_show_host_path_or_compose_location(monkeypatch):
                 "Labels": {
                     "traefik.enable": "true",
                     "traefik.http.routers.demo.rule": "Host(`demo.localhost`)",
-                    "io.localhost.source-path": "/work/demo",
+                    "io.localghost.source-path": "/work/demo",
                 }
             },
         },
@@ -53,7 +53,7 @@ def test_proxy_running_uses_fixed_project_labels(monkeypatch):
 
     monkeypatch.setattr(routes.subprocess, "run", run)
     assert routes.proxy_is_running()
-    assert "label=com.docker.compose.project=localhost" in recorded[0]
+    assert "label=com.docker.compose.project=localghost" in recorded[0]
 
 
 def test_routes_handle_empty_and_unusual_container_metadata(monkeypatch):

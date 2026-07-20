@@ -1,4 +1,4 @@
-package traefik_localhost_ca
+package traefik_localghost_ca
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	metadataDomainsLabel  = "io.localhost.tls-domains"
+	metadataDomainsLabel  = "io.localghost.tls-domains"
 	maxMetadataDomains    = 32
 	maxMetadataLabelBytes = 4096
 	maxDockerResponse     = 16 << 20
@@ -118,7 +118,7 @@ func (d *DockerClient) ListOptedInContainers(ctx context.Context) ([]ContainerIn
 		}
 		project := c.Labels["com.docker.compose.project"]
 		if project != "" && !ValidateProjectName(project) {
-			fmt.Fprintf(os.Stderr, "localhostCA: rejected container %s invalid project label (length %d)\n", shortID(c.ID), len(project))
+			fmt.Fprintf(os.Stderr, "localghostCA: rejected container %s invalid project label (length %d)\n", shortID(c.ID), len(project))
 			project = ""
 		}
 
@@ -126,7 +126,7 @@ func (d *DockerClient) ListOptedInContainers(ctx context.Context) ([]ContainerIn
 		if raw, ok := c.Labels[metadataDomainsLabel]; ok {
 			domains, err = ParseMetadataDomains(raw)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "localhostCA: rejected container %s %s label (length %d): %v\n", shortID(c.ID), metadataDomainsLabel, len(raw), err)
+				fmt.Fprintf(os.Stderr, "localghostCA: rejected container %s %s label (length %d): %v\n", shortID(c.ID), metadataDomainsLabel, len(raw), err)
 				// Metadata is all-or-nothing, but a valid Compose project on the
 				// same container remains independently discoverable.
 				domains = nil

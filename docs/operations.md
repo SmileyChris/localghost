@@ -1,4 +1,4 @@
-# Operating Localhost Proxy
+# Operating Localghost
 
 Application commands must not include the proxy Compose file. The proxy and
 applications are intentionally separate lifecycle domains.
@@ -6,11 +6,11 @@ applications are intentionally separate lifecycle domains.
 ## Start or reconcile
 
 ```sh
-uvx localhost
+uvx localghost
 ```
 
 The command runs the Compose configuration bundled with the CLI. It is
-idempotent: running it again reconciles the existing `localhost` Compose
+idempotent: running it again reconciles the existing `localghost` Compose
 project rather than creating another proxy, and waits for Traefik to become
 healthy.
 
@@ -18,7 +18,7 @@ To inspect the current proxy state and routes without starting or reconciling
 it, run:
 
 ```sh
-uvx localhost --status
+uvx localghost --status
 ```
 
 ## Optional trusted HTTPS
@@ -28,7 +28,7 @@ to enable HTTPS and names the public root fingerprint before any privilege
 prompt appears. The explicit equivalent is:
 
 ```sh
-uvx localhost trust
+uvx localghost trust
 ```
 
 `trust` runs `mkcert` with `TRUST_STORES=system,nss` and a `CAROOT` containing
@@ -45,14 +45,14 @@ the corresponding HTTP or HTTPS configuration. Neither `trust` nor `trust
 Check the state without modifying a trust store:
 
 ```sh
-uvx localhost trust --status
+uvx localghost trust --status
 ```
 
 To disable the HTTPS listener and remove only this root from the stores managed
 by the command:
 
 ```sh
-uvx localhost trust --remove
+uvx localghost trust --remove
 ```
 
 Restart browsers after trust changes when their NSS implementation requires it.
@@ -62,13 +62,13 @@ renewal does not invoke `sudo`, change the root, or require browser action.
 ## Inspect status and logs
 
 ```sh
-docker ps --filter label=com.docker.compose.project=localhost
+docker ps --filter label=com.docker.compose.project=localghost
 ```
 
 The Traefik container should report `healthy`. Follow its logs with:
 
 ```sh
-docker logs -f localhost-traefik-1
+docker logs -f localghost-traefik-1
 ```
 
 The dashboard at `http://traefik.localhost` shows discovered routers, services,
@@ -78,7 +78,7 @@ replace application logs when a backend itself is failing.
 ## Stop and remove
 
 ```sh
-uvx localhost down
+uvx localghost down
 ```
 
 Compose removes the proxy container and attempts to remove its network. Docker
@@ -94,7 +94,7 @@ The ordinary command may reuse a cached CLI release. To fetch the newest
 published release and reconcile the proxy when you choose, run:
 
 ```sh
-uvx --refresh localhost
+uvx --refresh localghost
 ```
 
 The top-level project name and shared network name are fixed, so the new bundled
@@ -102,7 +102,7 @@ configuration updates the existing proxy. Consumer containers belong to other
 Compose projects and are not recreated or restarted.
 
 When stronger source immutability is required, use a reviewed package version,
-such as `uvx localhost@1.0.0`.
+such as `uvx localghost@1.0.0`.
 
 ## Use another HTTP port
 
@@ -110,7 +110,7 @@ If loopback port 80 is occupied, consistently prefix every lifecycle command
 with the same override:
 
 ```sh
-LOCALHOST_HTTP_PORT=8080 uvx localhost
+LOCALGHOST_HTTP_PORT=8080 uvx localghost
 ```
 
 The proxy still binds only to `127.0.0.1`. URLs include the selected port:
@@ -123,7 +123,7 @@ http://traefik.localhost:8080
 Framework origin allowlists must include the non-default port. Use the same
 environment prefix whenever you reconcile the proxy.
 
-When HTTPS is enabled, `LOCALHOST_HTTPS_PORT` similarly changes its loopback
+When HTTPS is enabled, `LOCALGHOST_HTTPS_PORT` similarly changes its loopback
 port (default `443`). Use the matching `https://` URL and allowlist that port.
 
 ## Inspect the local checkout

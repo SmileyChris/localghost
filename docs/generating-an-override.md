@@ -1,4 +1,4 @@
-# Generating a Localhost Proxy override
+# Generating a Localghost override
 
 Compose automatically merges `compose.override.yaml` with `compose.yaml`. The
 optional generator creates that local file, adding the most likely HTTP service
@@ -13,7 +13,7 @@ CLI and its Python dependencies into an isolated, cached environment.
 From the application directory, run:
 
 ```sh
-uvx localhost generate
+uvx localghost generate
 ```
 
 It resolves the application with `docker compose config`, chooses the most
@@ -28,7 +28,7 @@ docker compose up -d
 The generated override:
 
 - preserves the chosen service's existing network memberships;
-- adds the external `localhost-proxy` network;
+- adds the external `localghost` network;
 - opts the service into Traefik;
 - creates a primary route at `<project>.localhost`;
 - selects an explicit container port; and
@@ -53,7 +53,7 @@ are preferred when there are several.
 Make either choice explicit when needed:
 
 ```sh
-uvx localhost generate \
+uvx localghost generate \
   --service app \
   --port 8000
 ```
@@ -80,7 +80,7 @@ Compose only loads `compose.override.yaml` automatically. A different output
 name must be supplied explicitly alongside the base file:
 
 ```sh
-docker compose -f compose.yaml -f compose.localhost.yaml up -d
+docker compose -f compose.yaml -f compose.localghost.yaml up -d
 ```
 
 If the override is personal rather than shared project configuration, add it to
@@ -99,7 +99,7 @@ The same command provides a guided path when the current directory has no
 Compose file:
 
 ```sh
-uvx localhost generate
+uvx localghost generate
 ```
 
 If a `Dockerfile` exists, the default is a new `compose.yaml` with `build: .`,
@@ -110,7 +110,7 @@ For an application running directly on the host, choose `host`. The generated
 Compose project runs a pinned Caddy bridge between Traefik and the host port:
 
 ```sh
-uvx localhost generate --mode host --port 3000
+uvx localghost generate --mode host --port 3000
 ```
 
 The host process must listen on a Docker-reachable interface such as `0.0.0.0`;
@@ -134,10 +134,10 @@ owned Caddy bridge, then removes that bridge when the application exits. The
 shared Traefik proxy remains running.
 
 ```sh
-uvx localhost run
-uvx localhost run --framework django --name review-123 --port 8010
-uvx localhost run --port 3000 -- npm run custom-dev -- --port 3000
-uv run localhost run --directory /path/to/application
+uvx localghost run
+uvx localghost run --framework django --name review-123 --port 8010
+uvx localghost run --port 3000 -- npm run custom-dev -- --port 3000
+uv run localghost run --directory /path/to/application
 ```
 
 It detects Django from `manage.py` and Vite from a `package.json` dev script

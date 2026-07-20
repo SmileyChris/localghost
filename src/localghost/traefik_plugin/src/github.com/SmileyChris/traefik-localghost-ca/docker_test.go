@@ -1,4 +1,4 @@
-package traefik_localhost_ca
+package traefik_localghost_ca
 
 import (
 	"context"
@@ -200,10 +200,10 @@ func TestParseMetadataDomainsRejectsWholeValue(t *testing.T) {
 
 func TestDockerDiscoveryIncludesManagedHostAndCompose(t *testing.T) {
 	body := `[
-	  {"Id":"bbbbbbbbbbbb2","Names":["/managed"],"State":"running","Labels":{"traefik.enable":"true","io.localhost.tls-domains":"host.localhost, *.host.localhost"},"NetworkSettings":{"Networks":{"test-net":{}}}},
+	  {"Id":"bbbbbbbbbbbb2","Names":["/managed"],"State":"running","Labels":{"traefik.enable":"true","io.localghost.tls-domains":"host.localhost, *.host.localhost"},"NetworkSettings":{"Networks":{"test-net":{}}}},
 	  {"Id":"aaaaaaaaaaaa1","Names":["/compose"],"State":"running","Labels":{"traefik.enable":"true","com.docker.compose.project":"demo"},"NetworkSettings":{"Networks":{"test-net":{}}}},
-	  {"Id":"cccccccccccc3","State":"running","Labels":{"traefik.enable":"true","io.localhost.tls-domains":"example.com"},"NetworkSettings":{"Networks":{"test-net":{}}}},
-	  {"Id":"dddddddddddd4","State":"running","Labels":{"traefik.enable":"true","io.localhost.tls-domains":"wrong.localhost"},"NetworkSettings":{"Networks":{"wrong-net":{}}}}
+	  {"Id":"cccccccccccc3","State":"running","Labels":{"traefik.enable":"true","io.localghost.tls-domains":"example.com"},"NetworkSettings":{"Networks":{"test-net":{}}}},
+	  {"Id":"dddddddddddd4","State":"running","Labels":{"traefik.enable":"true","io.localghost.tls-domains":"wrong.localhost"},"NetworkSettings":{"Networks":{"wrong-net":{}}}}
 	]`
 	client, err := NewDockerClient("unix:///unused", "test-net")
 	if err != nil {

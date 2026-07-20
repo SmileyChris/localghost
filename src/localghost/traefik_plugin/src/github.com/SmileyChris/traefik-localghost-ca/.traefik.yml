@@ -1,12 +1,12 @@
-displayName: Localhost CA Provider
+displayName: Localghost CA Provider
 type: provider
-import: github.com/SmileyChris/traefik-localhost-ca
+import: github.com/SmileyChris/traefik-localghost-ca
 summary: Local CA certificate provider for .localhost development
 
 testData:
   dockerEndpoint: unix:///var/run/docker.sock
-  network: localhost-https-poc
-  storagePath: /var/lib/localhost-ca
+  network: localghost-https-poc
+  storagePath: /var/lib/localghost-ca
   pollInterval: 500ms
   domainSuffix: localhost
   leafLifetime: 24h

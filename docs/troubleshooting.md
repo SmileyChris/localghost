@@ -1,10 +1,10 @@
-# Troubleshooting Localhost Proxy
+# Troubleshooting Localghost
 
 Start with the proxy status and logs:
 
 ```sh
-docker ps --filter label=com.docker.compose.project=localhost
-docker logs --tail=100 localhost-traefik-1
+docker ps --filter label=com.docker.compose.project=localghost
+docker logs --tail=100 localghost-traefik-1
 ```
 
 ## External network not found
@@ -12,10 +12,10 @@ docker logs --tail=100 localhost-traefik-1
 Typical error:
 
 ```text
-network localhost-proxy declared as external, but could not be found
+network localghost declared as external, but could not be found
 ```
 
-The proxy has not yet created its shared network. Run `uvx localhost`
+The proxy has not yet created its shared network. Run `uvx localghost`
 once, then rerun the application's `docker compose up` command.
 
 Do not change the application network to a normal, implicitly created network.
@@ -25,9 +25,9 @@ That would create a project-scoped network that Traefik cannot share reliably.
 
 Consumer containers can run while the proxy container is stopped. Check that
 the proxy is running and healthy with `ps`, then inspect its logs. Reconcile it
-with `uvx localhost` if needed.
+with `uvx localghost` if needed.
 
-Also confirm the URL uses the configured `LOCALHOST_HTTP_PORT` when it is
+Also confirm the URL uses the configured `LOCALGHOST_HTTP_PORT` when it is
 not 80.
 
 ## Route returns 404
@@ -37,8 +37,8 @@ Confirm that:
 
 - the project name rendered by Compose is unique and DNS-safe;
 - the container has `traefik.enable=true`;
-- it is attached to the external `localhost-proxy` network;
-- `traefik.docker.network=localhost-proxy` is present;
+- it is attached to the external `localghost` network;
+- `traefik.docker.network=localghost` is present;
 - the router name is unique; and
 - the `Host(...)` rule exactly matches the browser hostname.
 
@@ -61,12 +61,12 @@ backend. Confirm that:
 - the load-balancer label uses the application's container port;
 - the process is actually listening on that port;
 - the container is running; and
-- both Traefik and the container are attached to `localhost-proxy`.
+- both Traefik and the container are attached to `localghost`.
 
 Inspect network membership with:
 
 ```sh
-docker network inspect localhost-proxy
+docker network inspect localghost
 ```
 
 Application logs usually reveal crashes or bind-address mistakes:
@@ -84,7 +84,7 @@ docker ps --filter publish=80
 ```
 
 Stop the conflicting listener if appropriate, or use
-`LOCALHOST_HTTP_PORT` consistently as described in
+`LOCALGHOST_HTTP_PORT` consistently as described in
 [Operating the proxy](operations.md#use-another-http-port). The proxy binds to
 `127.0.0.1`, but a process bound to `0.0.0.0:80` still conflicts with it.
 
@@ -108,7 +108,7 @@ For a non-default port, include it in the loopback URL and browser URL.
 
 ## Route already exists
 
-`localhost run` refuses to replace an existing container route for the
+`localghost run` refuses to replace an existing container route for the
 same hostname. Stop the other application normally, or inspect the reported
 container and remove a stale bridge explicitly:
 
@@ -125,7 +125,7 @@ An application-generated invalid-host, CSRF, CORS, or origin error is outside
 Traefik routing. Add the generated hostname and origin to the framework's local
 development settings. See [Framework configuration](integrating-applications.md#framework-configuration).
 
-For `localhost run`, Django needs its generated `<name>.localhost` in
+For `localghost run`, Django needs its generated `<name>.localhost` in
 `ALLOWED_HOSTS` and, when applicable, CSRF trusted origins. Vite HTTP, HMR, and
 WebSocket traffic use the same bridge; a failed upgrade usually means the host
 server was not listening on the selected Docker-reachable port.

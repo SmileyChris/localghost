@@ -23,7 +23,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Sec-WebSocket-Accept", accept)
             self.end_headers()
             return
-        body = b"localhost host bridge fixture\n"
+        body = b"localghost host bridge fixture\n"
         self.send_response(200)
         self.send_header("Content-Type", "text/plain")
         self.send_header("Content-Length", str(len(body)))

@@ -244,11 +244,11 @@ def create_run_bridge_compose(
         f"traefik.http.routers.{router}-secure.service={router}",
         f"traefik.http.routers.{router}-secure.tls=true",
         f"traefik.http.services.{router}.loadbalancer.server.port=8080",
-        "io.localhost.managed=true",
-        "io.localhost.kind=host-run-bridge",
+        "io.localghost.managed=true",
+        "io.localghost.kind=host-run-bridge",
     ]
     if source_path is not None:
-        labels.append(f"io.localhost.source-path={source_path}")
+        labels.append(f"io.localghost.source-path={source_path}")
     service["labels"] = CommentedSeq(labels)
     document = CommentedMap({"services": CommentedMap({"bridge": service})})
     document["networks"] = CommentedMap(
@@ -538,4 +538,4 @@ def _dotenv_name(path: Path) -> str | None:
 
 def _session_project(cwd: Path) -> str:
     digest = hashlib.sha256(str(cwd.resolve()).encode()).hexdigest()[:10]
-    return f"localhost-host-{digest}-{uuid.uuid4().hex[:8]}"
+    return f"localghost-host-{digest}-{uuid.uuid4().hex[:8]}"

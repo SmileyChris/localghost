@@ -1,13 +1,13 @@
 [project]
-name = "localhost"
+name = "localghost"
 version = "1.0.0"
-description = "Localhost Proxy serves local applications at friendly .localhost URLs"
+description = "Localghost serves local applications at friendly .localhost URLs"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "SmileyChris" }]
-keywords = ["localhost", "docker", "compose", "traefik", "development", "proxy"]
+keywords = ["localghost", "localhost", "docker", "compose", "traefik", "development", "proxy"]
 classifiers = [
   "Development Status :: 5 - Production/Stable",
   "Environment :: Console",
@@ -27,13 +27,13 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/SmileyChris/localhost"
-Documentation = "https://github.com/SmileyChris/localhost/tree/main/docs"
-Repository = "https://github.com/SmileyChris/localhost"
-Issues = "https://github.com/SmileyChris/localhost/issues"
+Homepage = "https://github.com/SmileyChris/localghost"
+Documentation = "https://github.com/SmileyChris/localghost/tree/main/docs"
+Repository = "https://github.com/SmileyChris/localghost"
+Issues = "https://github.com/SmileyChris/localghost/issues"
 
 [project.scripts]
-localhost = "localhost.cli:cli"
+localghost = "localghost.cli:cli"
 
 [dependency-groups]
 dev = [
@@ -52,7 +52,7 @@ testpaths = ["tests"]
 
 [tool.coverage.run]
 branch = true
-source = ["localhost"]
+source = ["localghost"]
 
 [tool.coverage.report]
 fail_under = 95

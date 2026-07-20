@@ -1,13 +1,14 @@
-# Localhost Proxy
+# Localghost
 
-Localhost Proxy gives local Docker Compose projects and host-native development
-servers friendly `.localhost` URLs. The `localhost` command keeps one small,
+Localghost gives local Docker Compose projects and host-native development
+servers friendly `.localhost` URLs. The `localghost` command keeps one small,
 loopback-only [Traefik](https://traefik.io/traefik/) proxy running while each
 application keeps its own lifecycle.
 
 This is local-development infrastructure, not a production proxy configuration.
-The proxy's Compose project is `localhost`; containers connect through the
-shared `localhost-proxy` Docker network.
+The proxy's Compose project and shared network are both named `localghost`;
+containers connect through the
+shared `localghost` Docker network.
 
 ## Quick start
 
@@ -16,7 +17,7 @@ You need Docker Engine or Docker Desktop, Docker Compose 5.x (CI tests 5.1.4),
 port 80 available. Start the proxy without cloning this repository:
 
 ```sh
-uvx localhost
+uvx localghost
 ```
 
 Open [http://traefik.localhost](http://traefik.localhost) for the dashboard.
@@ -26,23 +27,23 @@ from: a Compose project and service, or a host application's checkout path. To
 stop and remove it later, run:
 
 ```sh
-uvx localhost down
+uvx localghost down
 ```
 
 To inspect the proxy without starting or reconciling it, run:
 
 ```sh
-uvx localhost --status
+uvx localghost --status
 ```
 
 ## Optional trusted HTTPS
 
-HTTP is always available. On an interactive first start, `localhost` offers to
+HTTP is always available. On an interactive first start, `localghost` offers to
 enable HTTPS; it explains the trust-store change before `mkcert` asks for
 system authorization. You can also opt in explicitly:
 
 ```sh
-uvx localhost trust
+uvx localghost trust
 ```
 
 The command bootstraps a local constrained CA in Docker, exports only its
@@ -54,21 +55,21 @@ HTTP-only and prints the same command for retrying.
 
 Running `trust` while the proxy is already running reconciles it to HTTPS after
 the root is installed. When the proxy is stopped, `trust` only changes trust
-state; run `localhost` when you are ready to start it.
+state; run `localghost` when you are ready to start it.
 
-Use `uvx localhost trust --status` to show the public-root fingerprint and
+Use `uvx localghost trust --status` to show the public-root fingerprint and
 current mode. To return to HTTP-only operation and remove this exact root from the
 managed stores:
 
 ```sh
-uvx localhost trust --remove
+uvx localghost trust --remove
 ```
 
 `uvx` may reuse a cached CLI release. Fetch the newest published release when
 you need it with:
 
 ```sh
-uvx --refresh localhost
+uvx --refresh localghost
 ```
 
 See [Operating the proxy](docs/operations.md#upgrade) for reproducible,
@@ -87,10 +88,10 @@ services:
   web:
     networks:
       - default
-      - localhost-proxy
+      - localghost
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=localhost-proxy"
+      - "traefik.docker.network=localghost"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.rule=Host(`${COMPOSE_PROJECT_NAME}.localhost`)"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web-secure.entrypoints=websecure"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web-secure.rule=Host(`${COMPOSE_PROJECT_NAME}.localhost`)"
@@ -99,7 +100,7 @@ services:
       - "traefik.http.services.${COMPOSE_PROJECT_NAME}-web.loadbalancer.server.port=8000"
 
 networks:
-  localhost-proxy:
+  localghost:
     external: true
 ```
 
@@ -111,7 +112,7 @@ See [Integrating applications](docs/integrating-applications.md) for the full
 contract, explicit service association, secondary services, multiple checkouts,
 and framework settings.
 
-Or generate Compose configuration with `uvx localhost generate`; see
+Or generate Compose configuration with `uvx localghost generate`; see
 [Generating a local override](docs/generating-an-override.md). Use
 `generate --mode host` when you want to keep and manage a bridge Compose file.
 
@@ -121,7 +122,7 @@ For a Django or Vite development server running directly on your machine, use
 the foreground `run` command instead. It writes no files to the checkout:
 
 ```sh
-uvx localhost run
+uvx localghost run
 ```
 
 It detects the development command, creates a temporary bridge, and serves the
@@ -130,13 +131,13 @@ application at `http://<project>.localhost` until the command exits. Use
 own command with an explicit port:
 
 ```sh
-uvx localhost run --port 3000 -- npm run dev
+uvx localghost run --port 3000 -- npm run dev
 ```
 
 When running the tool from another checkout, point it at the application:
 
 ```sh
-uv run localhost run --directory /path/to/application
+uv run localghost run --directory /path/to/application
 ```
 
 See [Run a host-native server](docs/generating-an-override.md#run-a-host-native-server)

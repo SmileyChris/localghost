@@ -19,22 +19,22 @@ def compose_model(path: Path, **environment: str) -> dict:
 
 def test_proxy_compose_matches_the_public_contract() -> None:
     model = compose_model(
-        ROOT / "compose.yaml", LOCALHOST_HTTP_PORT="18081"
+        ROOT / "compose.yaml", LOCALGHOST_HTTP_PORT="18081"
     )
 
-    assert model["name"] == "localhost"
+    assert model["name"] == "localghost"
     assert set(model["services"]) == {"traefik"}
-    assert set(model["networks"]) == {"localhost-proxy"}
-    assert model["networks"]["localhost-proxy"]["name"] == "localhost-proxy"
+    assert set(model["networks"]) == {"localghost"}
+    assert model["networks"]["localghost"]["name"] == "localghost"
 
     traefik = model["services"]["traefik"]
-    assert traefik["image"] == "localhost-traefik:v3.7.7"
+    assert traefik["image"] == "localghost-traefik:v3.7.7"
     assert traefik["build"] == {
-        "context": str(ROOT / "src" / "localhost"),
+        "context": str(ROOT / "src" / "localghost"),
         "dockerfile": "Dockerfile",
     }
     assert traefik["restart"] == "unless-stopped"
-    assert set(traefik["networks"]) == {"localhost-proxy"}
+    assert set(traefik["networks"]) == {"localghost"}
 
     assert set(traefik["command"]) == {
         "--api.dashboard=true",
@@ -45,7 +45,7 @@ def test_proxy_compose_matches_the_public_contract() -> None:
         "--ping=true",
         "--providers.docker=true",
         "--providers.docker.exposedbydefault=false",
-        "--providers.docker.network=localhost-proxy",
+        "--providers.docker.network=localghost",
     }
     assert traefik["healthcheck"]["test"] == [
         "CMD",
@@ -76,15 +76,15 @@ def test_proxy_compose_matches_the_public_contract() -> None:
 
     labels = traefik["labels"]
     assert labels["traefik.enable"] == "true"
-    assert labels["traefik.docker.network"] == "localhost-proxy"
+    assert labels["traefik.docker.network"] == "localghost"
     assert labels[
-        "traefik.http.routers.localhost-dashboard.service"
+        "traefik.http.routers.localghost-dashboard.service"
     ] == "api@internal"
     assert labels[
-        "traefik.http.routers.localhost-dashboard.rule"
+        "traefik.http.routers.localghost-dashboard.rule"
     ] == "Host(`traefik.localhost`)"
     assert labels[
-        "traefik.http.middlewares.localhost-dashboard-redirect.redirectregex.replacement"
+        "traefik.http.middlewares.localghost-dashboard-redirect.redirectregex.replacement"
     ] == "http://$${1}/dashboard/"
 
 
@@ -95,10 +95,10 @@ def test_example_compose_exercises_consumer_contract() -> None:
     )
 
     assert set(model["services"]) == {"web", "mailpit", "unlabelled"}
-    assert model["networks"]["localhost-proxy"]["external"] is True
+    assert model["networks"]["localghost"]["external"] is True
 
     web = model["services"]["web"]
-    assert set(web["networks"]) == {"default", "localhost-proxy"}
+    assert set(web["networks"]) == {"default", "localghost"}
     assert web["expose"] == ["8080"]
     assert web["labels"]["traefik.enable"] == "true"
     assert web["labels"][

@@ -25,7 +25,7 @@ def proxy_is_running() -> bool:
             "ps",
             "--quiet",
             "--filter",
-            "label=com.docker.compose.project=localhost",
+            "label=com.docker.compose.project=localghost",
             "--filter",
             "label=com.docker.compose.service=traefik",
         ]
@@ -64,7 +64,7 @@ def active_routes() -> list[Route]:
 
 
 def _location(labels: dict[str, object], container: dict[str, object]) -> str:
-    source_path = labels.get("io.localhost.source-path")
+    source_path = labels.get("io.localghost.source-path")
     if isinstance(source_path, str) and source_path:
         return source_path
     project = labels.get("com.docker.compose.project")

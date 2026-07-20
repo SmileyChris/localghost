@@ -5,16 +5,16 @@ import (
 	"fmt"
 	"os"
 
-	localhostca "github.com/SmileyChris/traefik-localhost-ca"
+	localghostca "github.com/SmileyChris/traefik-localghost-ca"
 )
 
 func main() {
-	rootPath := flag.String("root-path", "/var/lib/localhost-root", "root-only volume path")
-	signerPath := flag.String("signer-path", "/var/lib/localhost-ca", "online signer volume path")
+	rootPath := flag.String("root-path", "/var/lib/localghost-root", "root-only volume path")
+	signerPath := flag.String("signer-path", "/var/lib/localghost-ca", "online signer volume path")
 	printRoot := flag.Bool("print-root", false, "write only the public root certificate to stdout")
 	flag.Parse()
 
-	ca, err := localhostca.BootstrapCA(*rootPath, *signerPath)
+	ca, err := localghostca.BootstrapCA(*rootPath, *signerPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bootstrap failed: %v\n", err)
 		os.Exit(1)

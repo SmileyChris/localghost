@@ -35,7 +35,7 @@ jobs:
         run: >-
           uv run --python ${{ matrix.python-version }} --frozen pytest
           --ignore=tests/test_compose_contract.py
-          --cov=localhost
+          --cov=localghost
           --cov-branch
           --cov-report=term-missing
 
@@ -57,8 +57,8 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version-file: src/localhost/traefik_plugin/src/github.com/SmileyChris/traefik-localhost-ca/go.mod
-          cache-dependency-path: src/localhost/traefik_plugin/src/github.com/SmileyChris/traefik-localhost-ca/go.sum
+          go-version-file: src/localghost/traefik_plugin/src/github.com/SmileyChris/traefik-localghost-ca/go.mod
+          cache-dependency-path: src/localghost/traefik_plugin/src/github.com/SmileyChris/traefik-localghost-ca/go.sum
 
       - name: Install supported Docker Compose
         run: |
@@ -82,7 +82,7 @@ jobs:
           ./tests/generator-test.sh
 
       - name: Test local Traefik provider
-        working-directory: src/localhost/traefik_plugin/src/github.com/SmileyChris/traefik-localhost-ca
+        working-directory: src/localghost/traefik_plugin/src/github.com/SmileyChris/traefik-localghost-ca
         run: go test ./...
 
       - name: Build Python package
@@ -92,9 +92,9 @@ jobs:
         run: |
           wheel=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
           test -n "${wheel}"
-          uvx --isolated --from "${wheel}" localhost --help
-          uvx --isolated --from "${wheel}" localhost
-          uvx --isolated --from "${wheel}" localhost down
+          uvx --isolated --from "${wheel}" localghost --help
+          uvx --isolated --from "${wheel}" localghost
+          uvx --isolated --from "${wheel}" localghost down
 
       - name: Run integration suite
         run: ./scripts/integration-test.sh

@@ -1,6 +1,6 @@
-// Package traefik_localhost_ca implements a Traefik provider plugin that
+// Package traefik_localghost_ca implements a Traefik provider plugin that
 // supplies locally trusted TLS certificates for .localhost development domains.
-package traefik_localhost_ca
+package traefik_localghost_ca
 
 import (
 	"bytes"
@@ -168,7 +168,7 @@ func generateRoot() ([]byte, []byte, error) {
 	}
 	now := time.Now()
 	template := &x509.Certificate{
-		SerialNumber: serial, Subject: pkix.Name{CommonName: "Localhost Proxy Development Root CA"},
+		SerialNumber: serial, Subject: pkix.Name{CommonName: "Localghost Development Root CA"},
 		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(10 * 365 * 24 * time.Hour),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
 		BasicConstraintsValid: true, IsCA: true, SignatureAlgorithm: x509.ECDSAWithSHA256,
@@ -195,7 +195,7 @@ func generateIntermediate(root *x509.Certificate, rootKey *ecdsa.PrivateKey) ([]
 		notAfter = root.NotAfter.Add(-time.Hour)
 	}
 	template := &x509.Certificate{
-		SerialNumber: serial, Subject: pkix.Name{CommonName: "Localhost Constrained Signing CA"},
+		SerialNumber: serial, Subject: pkix.Name{CommonName: "Localghost Constrained Signing CA"},
 		NotBefore: now.Add(-time.Hour), NotAfter: notAfter,
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
 		BasicConstraintsValid: true, IsCA: true, MaxPathLen: 0, MaxPathLenZero: true,

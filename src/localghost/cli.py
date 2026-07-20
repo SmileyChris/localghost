@@ -45,7 +45,7 @@ from .trust import MkcertInstaller, PublicCertificate, TrustError, ZenNssInstall
 
 
 @click.group(invoke_without_command=True)
-@click.version_option(package_name="localhost")
+@click.version_option(package_name="localghost")
 @click.option(
     "show_status",
     "--status",
@@ -77,7 +77,7 @@ def cli(ctx: click.Context, show_status: bool) -> None:
             routes((route.hostname, route.location) for route in active_routes())
         except click.ClickException as exc:
             warning("Route listing unavailable", [exc.message])
-        info("To stop and remove it, run: uvx localhost down")
+        info("To stop and remove it, run: uvx localghost down")
 
 
 def _proxy_status() -> None:
@@ -91,7 +91,7 @@ def _proxy_status() -> None:
             routes((route.hostname, route.location) for route in active_routes())
         except click.ClickException as exc:
             warning("Route listing unavailable", [exc.message])
-    click.echo("For public-root details, run: localhost trust --status")
+    click.echo("For public-root details, run: localghost trust --status")
 
 
 @cli.command()
@@ -133,7 +133,7 @@ def trust(remove: bool, show_status: bool) -> None:
     elif was_running:
         success("The shared proxy was already configured for HTTPS.")
     else:
-        success("Trusted HTTPS is configured. Run `localhost` to start the proxy.")
+        success("Trusted HTTPS is configured. Run `localghost` to start the proxy.")
 
 
 def _remove_trust() -> None:
@@ -267,7 +267,7 @@ def _run_proxy(
             "docker",
             "compose",
             "--project-name",
-            "localhost",
+            "localghost",
             "--file",
             str(compose_file),
             action,
@@ -298,11 +298,11 @@ def _run_proxy(
 
 
 def _state_directory() -> Path:
-    configured = os.environ.get("LOCALHOST_STATE_DIR")
+    configured = os.environ.get("LOCALGHOST_STATE_DIR")
     if configured:
         return Path(configured)
     state_home = os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")
-    return Path(state_home) / "localhost"
+    return Path(state_home) / "localghost"
 
 
 def _public_root_path() -> Path:
@@ -330,7 +330,7 @@ def _ensure_https_or_warn() -> bool:
         "HTTPS disabled",
         [
             "HTTP remains available.",
-            "Run `localhost trust` interactively to install the local root "
+            "Run `localghost trust` interactively to install the local root "
             "and enable HTTPS.",
         ],
     )
@@ -364,7 +364,7 @@ def _bootstrap_public_root() -> PublicCertificate:
             "docker",
             "compose",
             "--project-name",
-            "localhost",
+            "localghost",
             "--file",
             str(resource_root / "proxy_compose.yaml"),
             "--file",
@@ -417,12 +417,12 @@ def _proxy_resource_directory() -> Iterator[Path]:
     ``importlib.resources.as_file``, so copy the small bundled build context
     when necessary.
     """
-    resource_root = resources.files("localhost")
+    resource_root = resources.files("localghost")
     if isinstance(resource_root, Path):
         yield resource_root
         return
-    with tempfile.TemporaryDirectory(prefix="localhost-proxy-") as temporary:
-        destination = Path(temporary) / "localhost"
+    with tempfile.TemporaryDirectory(prefix="localghost-") as temporary:
+        destination = Path(temporary) / "localghost"
         _copy_resource_tree(resource_root, destination)
         yield destination
 
@@ -439,11 +439,11 @@ def _copy_resource_tree(source, destination: Path) -> None:
 
 
 def _proxy_http_port() -> int:
-    return _environment_port("LOCALHOST_HTTP_PORT", 80)
+    return _environment_port("LOCALGHOST_HTTP_PORT", 80)
 
 
 def _proxy_https_port() -> int:
-    return _environment_port("LOCALHOST_HTTPS_PORT", 443)
+    return _environment_port("LOCALGHOST_HTTPS_PORT", 443)
 
 
 def _environment_port(name: str, default: int) -> int:

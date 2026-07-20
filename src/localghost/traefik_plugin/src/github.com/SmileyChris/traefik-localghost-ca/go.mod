@@ -1,4 +1,4 @@
-module github.com/SmileyChris/traefik-localhost-ca
+module github.com/SmileyChris/traefik-localghost-ca
 
 go 1.22
 

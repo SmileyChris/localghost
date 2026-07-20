@@ -67,7 +67,7 @@ class MkcertInstaller:
         if executable is None:
             raise TrustError(
                 "mkcert is unavailable; HTTPS remains disabled. Install mkcert, "
-                "then run `localhost trust`."
+                "then run `localghost trust`."
             )
         result = self.runner(
             [executable, action],
@@ -98,7 +98,7 @@ class MkcertInstaller:
 class ZenNssInstaller:
     """Install into Zen profiles, which mkcert does not discover reliably."""
 
-    prefix = "localhost-proxy-"
+    prefix = "localghost-"
 
     def __init__(
         self,
@@ -142,7 +142,7 @@ class ZenNssInstaller:
         if executable is None:
             raise TrustError(
                 "Zen profile found but certutil is unavailable; install nss tools, "
-                "then run `localhost trust` again."
+                "then run `localghost trust` again."
             )
         certificate = PublicCertificate.parse(self.certificate_path.read_bytes())
         nickname = self._nickname(certificate)

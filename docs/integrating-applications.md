@@ -1,4 +1,4 @@
-# Integrating applications with Localhost Proxy
+# Integrating applications with Localghost
 
 An application joins the proxy's external Docker network and describes its
 routes using Traefik labels. The proxy and application remain separate Compose
@@ -7,10 +7,10 @@ projects.
 ## Prerequisites
 
 Start the proxy before the first application. This creates the external
-`localhost-proxy` network:
+`localghost` network:
 
 ```sh
-uvx localhost
+uvx localghost
 ```
 
 Compose automatically derives the project name from the checkout directory and
@@ -38,17 +38,17 @@ services:
   web:
     networks:
       - default
-      - localhost-proxy
+      - localghost
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=localhost-proxy"
+      - "traefik.docker.network=localghost"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.entrypoints=web"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.rule=Host(`${COMPOSE_PROJECT_NAME}.localhost`)"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.service=${COMPOSE_PROJECT_NAME}-web"
       - "traefik.http.services.${COMPOSE_PROJECT_NAME}-web.loadbalancer.server.port=8000"
 
 networks:
-  localhost-proxy:
+  localghost:
     external: true
 ```
 
@@ -76,17 +76,17 @@ services:
     image: axllent/mailpit:v1.27.7 # Choose and review the version used by your project.
     networks:
       - default
-      - localhost-proxy
+      - localghost
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=localhost-proxy"
+      - "traefik.docker.network=localghost"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit.entrypoints=web"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit.rule=Host(`mailpit.${COMPOSE_PROJECT_NAME}.localhost`)"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-mailpit.service=${COMPOSE_PROJECT_NAME}-mailpit"
       - "traefik.http.services.${COMPOSE_PROJECT_NAME}-mailpit.loadbalancer.server.port=8025"
 
 networks:
-  localhost-proxy:
+  localghost:
     external: true
 ```
 
@@ -136,7 +136,7 @@ browser.
 
 ## Failure behavior
 
-Because `localhost-proxy` is declared external, application startup fails if
+Because `localghost` is declared external, application startup fails if
 the proxy network has never been created. This is intentional: the application
 must not silently create a private network with the same name. Start the proxy,
 then rerun `docker compose up` for the application.

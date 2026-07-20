@@ -1,0 +1,50 @@
+# Applied only after `localghost trust` has installed this proxy's public root.
+services:
+  bootstrap:
+    image: golang:1.24.6-alpine
+    working_dir: /src
+    entrypoint: [go, run, ./cmd/bootstrap]
+    command:
+      - --root-path=/var/lib/localghost-root
+      - --signer-path=/var/lib/localghost-ca
+    network_mode: none
+    restart: "no"
+    volumes:
+      - ./traefik_plugin/src/github.com/SmileyChris/traefik-localghost-ca:/src:ro
+      - localghost-ca-root:/var/lib/localghost-root
+      - localghost-ca-signer:/var/lib/localghost-ca
+
+  traefik:
+    command:
+      - --api.dashboard=true
+      - --api.insecure=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --global.checknewversion=false
+      - --global.sendanonymoususage=false
+      - --ping=true
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=localghost
+      - --providers.plugin.localghostCA.dockerendpoint=unix:///var/run/docker.sock
+      - --providers.plugin.localghostCA.network=localghost
+      - --providers.plugin.localghostCA.storagepath=/var/lib/localghost-ca
+      - --providers.plugin.localghostCA.pollinterval=250ms
+      - --providers.plugin.localghostCA.domainsuffix=localhost
+      - --providers.plugin.localghostCA.leaflifetime=24h
+      - --providers.plugin.localghostCA.renewbefore=6h
+      - --experimental.abortonpluginfailure=true
+      - --experimental.localplugins.localghostCA.modulename=github.com/SmileyChris/traefik-localghost-ca
+    ports:
+      - 127.0.0.1:${LOCALGHOST_HTTPS_PORT:-443}:443
+    volumes:
+      - localghost-ca-signer:/var/lib/localghost-ca
+    labels:
+      - traefik.http.routers.localghost-dashboard-secure.entrypoints=websecure
+      - traefik.http.routers.localghost-dashboard-secure.rule=Host(`traefik.localhost`)
+      - traefik.http.routers.localghost-dashboard-secure.service=api@internal
+      - traefik.http.routers.localghost-dashboard-secure.tls=true
+
+volumes:
+  localghost-ca-root:
+  localghost-ca-signer:
