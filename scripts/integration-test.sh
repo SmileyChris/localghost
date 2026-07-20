@@ -3,6 +3,8 @@ set -Eeuo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 PROXY_COMPOSE_FILE=${PROXY_COMPOSE_FILE:-"${ROOT_DIR}/compose.yaml"}
+PACKAGED_PROXY_COMPOSE_FILE="${ROOT_DIR}/src/localhost/proxy_compose.yaml"
+PROXY_HTTPS_COMPOSE_FILE="${ROOT_DIR}/src/localhost/proxy_compose_https.yaml"
 EXAMPLE_COMPOSE_FILE="${ROOT_DIR}/examples/compose.yaml"
 PROJECT_A=${TEST_PROJECT_A:-localhost-fixture-a}
 PROJECT_B=${TEST_PROJECT_B:-localhost-fixture-b}
@@ -11,12 +13,14 @@ DOCKERFILE_PROJECT=${TEST_DOCKERFILE_PROJECT:-localhost-fixture-dockerfile}
 DEFAULT_PORT=${TEST_DEFAULT_PORT:-80}
 ALTERNATE_PORT=${TEST_ALTERNATE_PORT:-18080}
 HOST_APP_PORT=${TEST_HOST_APP_PORT:-19090}
+HTTPS_PORT=${TEST_HTTPS_PORT:-18443}
 ACTIVE_PORT=${DEFAULT_PORT}
 OWNS_RESOURCES=0
 HOST_DIR=''
 DOCKERFILE_DIR=''
 HOST_SERVER_PID=''
 HOST_RUN_PID=''
+PUBLIC_ROOT_FILE=''
 
 log() {
   printf '\n==> %s\n' "$*"
@@ -30,6 +34,13 @@ fail() {
 proxy() {
   LOCALHOST_HTTP_PORT="${ACTIVE_PORT}" \
     docker compose -f "${PROXY_COMPOSE_FILE}" "$@"
+}
+
+proxy_https() {
+  LOCALHOST_HTTP_PORT="${ACTIVE_PORT}" \
+    LOCALHOST_HTTPS_PORT="${HTTPS_PORT}" \
+    docker compose -f "${PACKAGED_PROXY_COMPOSE_FILE}" \
+    -f "${PROXY_HTTPS_COMPOSE_FILE}" "$@"
 }
 
 app() {
@@ -67,7 +78,11 @@ cleanup() {
     fi
     app "${PROJECT_A}" down --remove-orphans --volumes >/dev/null 2>&1 || true
     app "${PROJECT_B}" down --remove-orphans --volumes >/dev/null 2>&1 || true
-    proxy down --remove-orphans --volumes >/dev/null 2>&1 || true
+    if [[ -n ${PUBLIC_ROOT_FILE} ]]; then
+      proxy_https down --remove-orphans --volumes >/dev/null 2>&1 || true
+    else
+      proxy down --remove-orphans --volumes >/dev/null 2>&1 || true
+    fi
   fi
   if [[ -n ${HOST_SERVER_PID} ]]; then
     kill "${HOST_SERVER_PID}" >/dev/null 2>&1 || true
@@ -78,6 +93,9 @@ cleanup() {
   fi
   if [[ -n ${DOCKERFILE_DIR} ]]; then
     rm -rf "${DOCKERFILE_DIR}"
+  fi
+  if [[ -n ${PUBLIC_ROOT_FILE} ]]; then
+    rm -f "${PUBLIC_ROOT_FILE}"
   fi
   exit "${exit_code}"
 }
@@ -108,6 +126,27 @@ wait_for_body() {
   done
 
   fail "${host} did not return a response containing '${expected}'"
+}
+
+wait_for_https_body() {
+  local host=$1
+  local expected=$2
+  local body=''
+  local attempt
+
+  for attempt in $(seq 1 30); do
+    body=$(curl --noproxy '*' --silent --show-error --max-time 2 \
+      --cacert "${PUBLIC_ROOT_FILE}" \
+      --resolve "${host}:${HTTPS_PORT}:127.0.0.1" \
+      "https://${host}:${HTTPS_PORT}/" 2>/dev/null || true)
+    if [[ ${body} == *"${expected}"* ]]; then
+      printf '%s' "${body}"
+      return 0
+    fi
+    sleep 1
+  done
+
+  fail "${host} did not return a trusted HTTPS response containing '${expected}'"
 }
 
 wait_for_healthy_proxy() {
@@ -215,12 +254,14 @@ HOST_DIR=$(mktemp -d)
 HOST_RUN_PID=$!
 wait_for_body "${HOST_PROJECT}.localhost" \
   'localhost host bridge fixture' >/dev/null
-websocket_headers=$(curl --noproxy '*' --http1.1 --silent --dump-header - \
-  --output /dev/null --max-time 5 --header "Host: ${HOST_PROJECT}.localhost" \
-  --header 'Connection: Upgrade' --header 'Upgrade: websocket' \
-  --header 'Sec-WebSocket-Version: 13' \
-  --header 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
-  "http://127.0.0.1:${ACTIVE_PORT}/")
+websocket_headers=$(
+  curl --noproxy '*' --http1.1 --silent --dump-header - \
+    --output /dev/null --max-time 5 --header "Host: ${HOST_PROJECT}.localhost" \
+    --header 'Connection: Upgrade' --header 'Upgrade: websocket' \
+    --header 'Sec-WebSocket-Version: 13' \
+    --header 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+    "http://127.0.0.1:${ACTIVE_PORT}/" || [[ $? == 52 ]]
+)
 [[ ${websocket_headers} == *$'HTTP/1.1 101'* ]] || \
   fail 'Foreground host bridge did not forward a WebSocket upgrade'
 host_run_bridge_id=$(docker ps -q --filter 'label=io.localhost.kind=host-run-bridge')
@@ -313,9 +354,22 @@ assert_equal "${b_web_started_at}" \
   'Consumer start time after proxy reconcile'
 wait_for_body "${PROJECT_B}.localhost" "Hostname: ${b_web_hostname}" >/dev/null
 
-log 'Recreate the proxy on a non-default loopback port'
+log 'Enable HTTPS and verify the locally bootstrapped trust chain'
 proxy stop traefik
 proxy rm -f traefik
+PUBLIC_ROOT_FILE=$(mktemp)
+proxy_https run --rm bootstrap --print-root >"${PUBLIC_ROOT_FILE}"
+proxy_https up -d --force-recreate --wait --wait-timeout 90
+https_proxy_id=$(proxy_https ps -q traefik)
+assert_equal "127.0.0.1:${HTTPS_PORT}" \
+  "$(docker port "${https_proxy_id}" 443/tcp)" 'HTTPS entrypoint publication'
+wait_for_https_body "${PROJECT_B}.localhost" \
+  "Hostname: ${b_web_hostname}" >/dev/null
+wait_for_body "${PROJECT_B}.localhost" "Hostname: ${b_web_hostname}" >/dev/null
+
+log 'Recreate the proxy on a non-default loopback port'
+proxy_https stop traefik
+proxy_https rm -f traefik bootstrap
 ACTIVE_PORT=${ALTERNATE_PORT}
 proxy up -d --wait --wait-timeout 90
 alternate_proxy_id=$(proxy ps -q traefik)

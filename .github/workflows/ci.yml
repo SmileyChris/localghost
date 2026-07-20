@@ -54,6 +54,12 @@ jobs:
         with:
           version: "0.11.15"
 
+      - name: Install Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: src/localhost/traefik_plugin/src/github.com/SmileyChris/traefik-localhost-ca/go.mod
+          cache-dependency-path: src/localhost/traefik_plugin/src/github.com/SmileyChris/traefik-localhost-ca/go.sum
+
       - name: Install supported Docker Compose
         run: |
           mkdir -p "${HOME}/.docker/cli-plugins"
@@ -74,6 +80,10 @@ jobs:
           uv run --frozen ruff check .
           uv run --frozen pytest tests/test_compose_contract.py
           ./tests/generator-test.sh
+
+      - name: Test local Traefik provider
+        working-directory: src/localhost/traefik_plugin/src/github.com/SmileyChris/traefik-localhost-ca
+        run: go test ./...
 
       - name: Build Python package
         run: uv build --no-sources

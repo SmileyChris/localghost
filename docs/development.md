@@ -6,7 +6,7 @@
 - `examples/compose.yaml` supplies primary, secondary, and unlabelled fixtures.
 - `scripts/integration-test.sh` exercises the compatibility contract.
 - `src/localhost/` contains the packaged Click CLI, bundled proxy Compose
-  definition, and override generator.
+  definition, override generator, and source-loaded Traefik provider.
 - `pyproject.toml` and `uv.lock` define the build and locked development
   environment.
 - `.github/workflows/ci.yml` validates the project on Linux with Docker Compose
@@ -31,6 +31,8 @@ COMPOSE_PROJECT_NAME=localhost-fixture-a \
 bash -n scripts/integration-test.sh
 uv run ruff check .
 uv run pytest
+(cd src/localhost/traefik_plugin/src/github.com/SmileyChris/traefik-localhost-ca \
+  && go test ./...)
 ```
 
 Review the fully rendered fixture configuration when changing interpolated
@@ -52,9 +54,9 @@ Run:
 The suite is destructive only to Docker resources named `localhost`,
 `localhost-proxy`,
 `localhost-fixture-a`, `localhost-fixture-b`, `localhost-fixture-host`, and
-`localhost-fixture-dockerfile`. It refuses to begin if any of those resources already
-exist and cleans up resources it creates even after failure. Ports 80, 18080,
-and 19090 must be available.
+`localhost-fixture-dockerfile`. It refuses to begin if any of those resources
+already exist and cleans up resources it creates even after failure. Ports 80,
+18080, 18443, and 19090 must be available.
 
 Coverage includes:
 
@@ -65,6 +67,8 @@ Coverage includes:
 - secondary-service routing and rejection of an unlabelled container;
 - explicit backend-port selection when another port is exposed;
 - generated bridging to an HTTP application running directly on the host;
+- trusted HTTPS routing with the bootstrapped public root, without changing the
+  host trust store;
 - dashboard root redirection and internal dashboard access;
 - removal of one application without affecting another or the proxy;
 - proxy restart and forced reconciliation without consumer recreation; and
@@ -75,6 +79,7 @@ Override test names or ports only when necessary:
 ```sh
 TEST_DEFAULT_PORT=18081 \
 TEST_ALTERNATE_PORT=18082 \
+TEST_HTTPS_PORT=18444 \
 ./scripts/integration-test.sh
 ```
 
