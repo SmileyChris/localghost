@@ -380,7 +380,9 @@ def execute(
     return status
 
 
-def django_settings_warnings(plan: RunPlan, cwd: Path) -> list[str]:
+def django_settings_warnings(
+    plan: RunPlan, cwd: Path, *, public_origin: str | None = None
+) -> list[str]:
     """Return advisory warnings from Django's loaded settings, if available."""
     if plan.framework != "django":
         return []
@@ -415,7 +417,7 @@ def django_settings_warnings(plan: RunPlan, cwd: Path) -> list[str]:
             f"Django ALLOWED_HOSTS does not include '{host}'; add it before "
             "opening the public URL."
         )
-    origin = f"http://{host}"
+    origin = public_origin or f"http://{host}"
     if not isinstance(csrf_origins, list) or not _origin_is_trusted(
         origin, csrf_origins
     ):

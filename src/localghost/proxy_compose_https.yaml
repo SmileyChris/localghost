@@ -41,9 +41,13 @@ services:
       - localghost-ca-signer:/var/lib/localghost-ca
     labels:
       - traefik.http.routers.localghost-dashboard-secure.entrypoints=websecure
+      - traefik.http.routers.localghost-dashboard-secure.middlewares=localghost-dashboard-secure-redirect
       - traefik.http.routers.localghost-dashboard-secure.rule=Host(`traefik.localhost`)
       - traefik.http.routers.localghost-dashboard-secure.service=api@internal
       - traefik.http.routers.localghost-dashboard-secure.tls=true
+      - traefik.http.middlewares.localghost-dashboard-secure-redirect.redirectregex.permanent=true
+      - traefik.http.middlewares.localghost-dashboard-secure-redirect.redirectregex.regex=^https://([^/]+)/?$
+      - traefik.http.middlewares.localghost-dashboard-secure-redirect.redirectregex.replacement=https://$${1}/dashboard/
 
 volumes:
   localghost-ca-root:

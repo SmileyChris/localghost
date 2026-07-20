@@ -367,6 +367,17 @@ assert_equal "127.0.0.1:${HTTPS_PORT}" \
 wait_for_https_body "${PROJECT_B}.localhost" \
   "Hostname: ${b_web_hostname}" >/dev/null
 wait_for_body "${PROJECT_B}.localhost" "Hostname: ${b_web_hostname}" >/dev/null
+secure_dashboard_headers=$(
+  curl --noproxy '*' --silent --dump-header - --output /dev/null \
+    --max-time 5 --cacert "${PUBLIC_ROOT_FILE}" \
+    --resolve "traefik.localhost:${HTTPS_PORT}:127.0.0.1" \
+    "https://traefik.localhost:${HTTPS_PORT}/"
+)
+[[ ${secure_dashboard_headers} == *$'HTTP/1.1 301'* ]] || \
+  fail 'HTTPS dashboard root did not return a permanent redirect'
+secure_dashboard_location="https://traefik.localhost:${HTTPS_PORT}/dashboard/"
+[[ ${secure_dashboard_headers} == *$'Location: '"${secure_dashboard_location}"$'\r'* ]] || \
+  fail "HTTPS dashboard root did not redirect to ${secure_dashboard_location}"
 
 log 'Recreate the proxy on a non-default loopback port'
 proxy_https stop traefik

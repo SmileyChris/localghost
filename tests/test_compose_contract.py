@@ -6,9 +6,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def compose_model(path: Path, **environment: str) -> dict:
+def compose_model(*paths: Path, **environment: str) -> dict:
+    command = ["docker", "compose"]
+    for path in paths:
+        command.extend(["--file", str(path)])
+    command.extend(["config", "--format", "json"])
     result = subprocess.run(
-        ["docker", "compose", "--file", str(path), "config", "--format", "json"],
+        command,
         check=True,
         capture_output=True,
         text=True,
@@ -86,6 +90,28 @@ def test_proxy_compose_matches_the_public_contract() -> None:
     assert labels[
         "traefik.http.middlewares.localghost-dashboard-redirect.redirectregex.replacement"
     ] == "http://$${1}/dashboard/"
+
+
+def test_https_proxy_adds_loopback_dashboard_with_secure_redirect() -> None:
+    model = compose_model(
+        ROOT / "src" / "localghost" / "proxy_compose.yaml",
+        ROOT / "src" / "localghost" / "proxy_compose_https.yaml",
+        LOCALGHOST_HTTP_PORT="18081",
+        LOCALGHOST_HTTPS_PORT="18443",
+    )
+
+    traefik = model["services"]["traefik"]
+    https_port = next(port for port in traefik["ports"] if port["target"] == 443)
+    assert https_port["host_ip"] == "127.0.0.1"
+    assert https_port["published"] == "18443"
+
+    labels = traefik["labels"]
+    assert labels[
+        "traefik.http.routers.localghost-dashboard-secure.middlewares"
+    ] == "localghost-dashboard-secure-redirect"
+    assert labels[
+        "traefik.http.middlewares.localghost-dashboard-secure-redirect.redirectregex.replacement"
+    ] == "https://$${1}/dashboard/"
 
 
 def test_example_compose_exercises_consumer_contract() -> None:

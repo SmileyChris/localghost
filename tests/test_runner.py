@@ -62,6 +62,40 @@ def test_django_settings_preflight_warns_only_for_missing_values(monkeypatch, tm
     assert runner.django_settings_warnings(plan, tmp_path) == []
 
 
+def test_django_settings_preflight_uses_effective_public_origin(
+    monkeypatch, tmp_path
+):
+    plan = runner.RunPlan(
+        "demo",
+        "django",
+        ("uv", "run", "python", "manage.py", "runserver", "0"),
+        8000,
+        "p",
+        "",
+    )
+    payload = {
+        "allowed_hosts": ["demo.localhost"],
+        "csrf_trusted_origins": ["http://demo.localhost"],
+    }
+    monkeypatch.setattr(
+        runner.subprocess,
+        "run",
+        lambda command, **kwargs: CompletedProcess(
+            command, 0, json.dumps(payload), ""
+        ),
+    )
+
+    warnings = runner.django_settings_warnings(
+        plan, tmp_path, public_origin="https://demo.localhost:8443"
+    )
+
+    assert warnings == [
+        "Django CSRF_TRUSTED_ORIGINS does not include "
+        "'https://demo.localhost:8443'; add it if CSRF-protected requests use "
+        "this origin."
+    ]
+
+
 def test_django_settings_preflight_ignores_unavailable_settings(monkeypatch, tmp_path):
     plan = runner.RunPlan(
         "demo", "django", ("python", "manage.py", "runserver", "0"), 8000, "p", ""

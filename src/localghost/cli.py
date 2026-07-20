@@ -254,7 +254,9 @@ def run(
             f"{plan.name}.localhost is already claimed by container {collision}; "
             f"remove it with: docker rm -f {collision}"
         )
-    django_warnings = django_settings_warnings(plan, cwd)
+    django_warnings = django_settings_warnings(
+        plan, cwd, public_origin=_proxy_origin(plan.name)
+    )
     if django_warnings:
         warning("Django settings", django_warnings)
     _print_run_plan(plan, dry_run=False)
@@ -269,22 +271,27 @@ def run(
 
 
 def _print_run_plan(plan: RunPlan, dry_run: bool) -> None:
-    https_enabled = _https_configured()
-    port = _proxy_https_port() if https_enabled else _proxy_http_port()
-    default_port = 443 if https_enabled else 80
-    suffix = "" if port == default_port else f":{port}"
-    scheme = "https" if https_enabled else "http"
+    public_origin = _proxy_origin(plan.name)
     run_plan(
         framework=plan.framework,
         command=plan.command,
         port=plan.port,
-        url=f"{scheme}://{plan.name}.localhost{suffix}",
+        url=public_origin,
         dry_run=dry_run,
     )
     if dry_run:
         click.echo(plan.bridge_yaml, nl=False)
     else:
         info("Starting foreground application; press Ctrl+C to stop it.")
+
+
+def _proxy_origin(hostname: str) -> str:
+    https_enabled = _https_configured()
+    port = _proxy_https_port() if https_enabled else _proxy_http_port()
+    default_port = 443 if https_enabled else 80
+    suffix = "" if port == default_port else f":{port}"
+    scheme = "https" if https_enabled else "http"
+    return f"{scheme}://{hostname}.localhost{suffix}"
 
 
 def _run_proxy(
