@@ -142,6 +142,20 @@ func TestPublishPreservesSnapshotOnDockerFailureAndRecovers(t *testing.T) {
 	}
 }
 
+func TestPublishSkipsUnchangedSnapshot(t *testing.T) {
+	p := newTestProvider(t)
+	p.listContainers = func(context.Context) ([]ContainerInfo, error) { return nil, nil }
+	ch := make(chan json.Marshaler, 2)
+
+	p.publish(context.Background(), ch)
+	<-ch
+	p.publish(context.Background(), ch)
+
+	if len(ch) != 0 {
+		t.Fatal("unchanged discovery published a duplicate TLS snapshot")
+	}
+}
+
 func TestRuntimeRenewalUsesNewCertificateAndActualExpiry(t *testing.T) {
 	p := newTestProvider(t)
 	fake := &fakeLister{containers: []ContainerInfo{{MetadataDomains: []string{"managed.localhost"}}}}

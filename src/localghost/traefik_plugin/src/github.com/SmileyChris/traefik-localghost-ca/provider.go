@@ -246,6 +246,10 @@ func (p *Provider) publish(ctx context.Context, cfgChan chan<- json.Marshaler) {
 	}
 	p.activeCerts = newActive
 	snapshot := p.buildSnapshot()
+	if snapshotsEqual(snapshot, p.lastSnapshot) {
+		p.mu.Unlock()
+		return
+	}
 	p.lastSnapshot = snapshot
 	p.mu.Unlock()
 
@@ -547,4 +551,21 @@ func (p *Provider) buildSnapshot() []flatCert {
 		certs = append(certs, flatCert{CertFile: string(cert.certPEM), KeyFile: string(cert.keyPEM)})
 	}
 	return certs
+}
+
+func snapshotsEqual(left, right []flatCert) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index].CertFile != right[index].CertFile || left[index].KeyFile != right[index].KeyFile || len(left[index].Stores) != len(right[index].Stores) {
+			return false
+		}
+		for storeIndex := range left[index].Stores {
+			if left[index].Stores[storeIndex] != right[index].Stores[storeIndex] {
+				return false
+			}
+		}
+	}
+	return true
 }
