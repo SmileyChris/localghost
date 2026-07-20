@@ -28,7 +28,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/SmileyChris/localghost"
-Documentation = "https://github.com/SmileyChris/localghost/tree/main/docs"
+Documentation = "https://smileychris.github.io/localghost/"
 Repository = "https://github.com/SmileyChris/localghost"
 Issues = "https://github.com/SmileyChris/localghost/issues"
 
@@ -40,6 +40,7 @@ dev = [
   "pytest>=8.4,<10",
   "pytest-cov>=6,<8",
   "ruff>=0.11,<1",
+  "zensical>=0.0.50,<0.1",
 ]
 
 [build-system]

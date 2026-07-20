@@ -6,9 +6,8 @@ loopback-only [Traefik](https://traefik.io/traefik/) proxy running while each
 application keeps its own lifecycle.
 
 This is local-development infrastructure, not a production proxy configuration.
-The proxy's Compose project and shared network are both named `localghost`;
-containers connect through the
-shared `localghost` Docker network.
+The proxy runs as the `localghost` Compose project on the shared `localghost`
+Docker network.
 
 ## Quick start
 
@@ -22,145 +21,27 @@ uvx localghost
 
 Open [http://traefik.localhost](http://traefik.localhost) for the dashboard.
 The command creates or reconciles the proxy and waits for it to become healthy.
-When it is already running, it also lists active routes and where they come
-from: a Compose project and service, or a host application's checkout path. To
-stop and remove it later, run:
+When it is already running, it lists active routes and their sources. To stop
+and remove it later, run:
 
 ```sh
 uvx localghost down
 ```
 
-To inspect the proxy without starting or reconciling it, run:
+To inspect its state without starting or reconciling it, run:
 
 ```sh
 uvx localghost --status
 ```
 
-## Optional trusted HTTPS
-
-HTTP is always available. On an interactive first start, `localghost` offers to
-enable HTTPS; it explains the trust-store change before `mkcert` asks for
-system authorization. You can also opt in explicitly:
-
-```sh
-uvx localghost trust
-```
-
-The command bootstraps a local constrained CA in Docker, exports only its
-public root to your local state directory, and installs that root through
-`mkcert` into the system and NSS stores. Private root and intermediate keys are
-not exported. It also handles detected Zen browser NSS profiles. If `mkcert` is
-not installed, the prompt is declined, or setup fails, the proxy remains
-HTTP-only and prints the same command for retrying.
-
-Running `trust` while the proxy is already running reconciles it to HTTPS after
-the root is installed. When the proxy is stopped, `trust` only changes trust
-state; run `localghost` when you are ready to start it.
-
-Use `uvx localghost trust --status` to show the public-root fingerprint and
-current mode. To return to HTTP-only operation and remove this exact root from the
-managed stores:
-
-```sh
-uvx localghost trust --remove
-```
-
-`uvx` may reuse a cached CLI release. Fetch the newest published release when
-you need it with:
-
-```sh
-uvx --refresh localghost
-```
-
-See [Operating the proxy](docs/operations.md#upgrade) for reproducible,
-version-specific use.
-
-## Connect an application
-
-Compose uses the checkout directory as the project name. If that name is unique
-and contains only lowercase letters, digits, and hyphens, no configuration is
-needed.
-
-Attach the service to the shared network and opt into Traefik:
-
-```yaml
-services:
-  web:
-    networks:
-      - default
-      - localghost
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=localghost"
-      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web.rule=Host(`${COMPOSE_PROJECT_NAME}.localhost`)"
-      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web-secure.entrypoints=websecure"
-      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web-secure.rule=Host(`${COMPOSE_PROJECT_NAME}.localhost`)"
-      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web-secure.service=${COMPOSE_PROJECT_NAME}-web"
-      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-web-secure.tls=true"
-      - "traefik.http.services.${COMPOSE_PROJECT_NAME}-web.loadbalancer.server.port=8000"
-
-networks:
-  localghost:
-    external: true
-```
-
-The application must listen on `0.0.0.0:8000` inside its container. A checkout
-directory named `my-project` is available at `http://my-project.localhost` after
-`docker compose up -d`, without DNS or `/etc/hosts` changes.
-
-See [Integrating applications](docs/integrating-applications.md) for the full
-contract, explicit service association, secondary services, multiple checkouts,
-and framework settings.
-
-Or generate Compose configuration with `uvx localghost generate`; see
-[Generating a local override](docs/generating-an-override.md). Use
-`generate --mode host` when you want to keep and manage a bridge Compose file.
-
-## Run a host application
-
-For a Django or Vite development server running directly on your machine, use
-the foreground `run` command instead. It writes no files to the checkout:
-
-```sh
-uvx localghost run
-```
-
-It detects the development command, creates a temporary bridge, and serves the
-application at `http://<project>.localhost` until the command exits. Use
-`--dry-run` to inspect the command and generated bridge YAML, or provide your
-own command with an explicit port:
-
-```sh
-uvx localghost run --port 3000 -- npm run dev
-```
-
-When running the tool from another checkout, point it at the application:
-
-```sh
-uv run localghost run --directory /path/to/application
-```
-
-See [Run a host-native server](docs/generating-an-override.md#run-a-host-native-server)
-for framework detection, port selection, and Django settings.
-
 ## Documentation
 
-- [Architecture](docs/architecture.md) — ownership, discovery, networking, and
-  hostname conventions
-- [Integrating applications](docs/integrating-applications.md) — complete
-  Compose examples and application requirements
-- [Generating Compose configuration](docs/generating-an-override.md) — add an
-  existing service or scaffold a Dockerfile or host-native application
-- [Operating the proxy](docs/operations.md) — lifecycle, upgrades, ports, and
-  inspection
-- [Troubleshooting](docs/troubleshooting.md) — common failures and diagnostic
-  commands
-- [Security and trust](docs/security.md) — Docker socket and package-trust
-  risks
-- [Development and releases](docs/development.md) — fixtures, tests, CI, and
-  release-candidate checks
+The [Localghost documentation](docs/index.md) covers application integration,
+generation, host-native servers, HTTPS, operations, troubleshooting, security,
+architecture, and development.
 
-
+For a local documentation preview, install the development dependencies and run
+`uv run zensical serve`.
 ## License
 
 [MIT](LICENSE)

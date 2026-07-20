@@ -52,7 +52,6 @@ Run:
 ```
 
 The suite is destructive only to Docker resources named `localghost`,
-`localghost`,
 `localghost-fixture-a`, `localghost-fixture-b`, `localghost-fixture-host`, and
 `localghost-fixture-dockerfile`. It refuses to begin if any of those resources
 already exist and cleans up resources it creates even after failure. Ports 80,
@@ -85,6 +84,21 @@ TEST_HTTPS_PORT=18444 \
 
 CI should retain the default port-80 run because loopback publication on the
 public default is part of the release contract.
+
+## Documentation
+
+Documentation is built with [Zensical](https://zensical.org/). Preview it
+locally with:
+
+```sh
+uv run zensical serve
+```
+
+Build the static site with:
+
+```sh
+uv run --frozen zensical build
+```
 
 ## Build the CLI package
 

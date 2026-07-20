@@ -1,0 +1,28 @@
+[project]
+site_name = "Localghost"
+site_description = "A loopback-only Docker proxy for friendly .localhost development URLs"
+site_url = "https://smileychris.github.io/localghost/"
+repo_url = "https://github.com/SmileyChris/localghost"
+docs_dir = "docs"
+nav = [
+  {"Home" = "index.md"},
+  {"Use Localghost" = [
+    {"Integrate applications" = "integrating-applications.md"},
+    {"Generate configuration" = "generating-an-override.md"},
+  ]},
+  {"Operate Localghost" = [
+    {"Operations" = "operations.md"},
+    {"Troubleshooting" = "troubleshooting.md"},
+    {"Security and trust" = "security.md"},
+    {"Architecture" = "architecture.md"},
+  ]},
+  {"Develop Localghost" = "development.md"},
+]
+
+[project.theme]
+features = [
+  "navigation.instant",
+  "navigation.path",
+  "navigation.top",
+  "search.highlight",
+]
