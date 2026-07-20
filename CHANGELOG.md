@@ -5,6 +5,8 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-07-21
+
 ### Added
 
 - Consistent terminal feedback for proxy lifecycle, generated configuration, and
@@ -15,6 +17,17 @@ uses [Semantic Versioning](https://semver.org/).
 
 - Expanded HTTPS integration, troubleshooting, trust-state, and complete-removal
   documentation.
+
+### Fixed
+
+- Trusted HTTPS setup now rolls back partial trust-store changes safely, and
+  failed removal preserves the desired HTTPS state.
+- HTTPS dashboard URLs redirect correctly to `/dashboard/`.
+- Django origin checks honor HTTPS and custom proxy ports.
+- Route status is scoped to containers attached to the shared `localghost`
+  network.
+- The bundled certificate provider avoids unnecessary configuration reloads.
+- Integration tests are isolated from the developer's persistent HTTPS state.
 
 ## [1.0.0] - 2026-07-20
 
