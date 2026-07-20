@@ -1,4 +1,4 @@
-# Operating Localghost
+# Operating local<span class="brand-accent">ghost</span>
 
 Application commands must not include the proxy Compose file. The proxy and
 applications are intentionally separate lifecycle domains.

@@ -1,0 +1,60 @@
+@import url("https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800&display=swap");
+
+:root {
+  --localghost-heading-font: "Nunito", sans-serif;
+}
+
+:root > * {
+  --md-primary-fg-color: #2f8b69;
+  --md-primary-fg-color--light: #71d5a7;
+  --md-primary-fg-color--dark: #21654d;
+  --md-accent-fg-color: #71d5a7;
+  --md-accent-fg-color--transparent: #71d5a733;
+  --md-code-bg-color: #f1faf5;
+  --md-typeset-a-color: #267857;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.md-header__title,
+.md-nav__title {
+  font-family: var(--localghost-heading-font);
+  font-weight: 700;
+}
+
+.brand-accent {
+  color: #71d5a7;
+  margin-left: 0.1em;
+}
+
+.md-header__title .md-header__topic:first-child .md-ellipsis {
+  font-size: 0;
+}
+
+.md-header__title .md-header__topic:first-child .md-ellipsis::before,
+.md-header__title .md-header__topic:first-child .md-ellipsis::after {
+  font-family: var(--localghost-heading-font);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.md-header__title .md-header__topic:first-child .md-ellipsis::before {
+  content: "local";
+}
+
+.md-header__title .md-header__topic:first-child .md-ellipsis::after {
+  color: #71d5a7;
+  content: "ghost";
+  margin-left: 0.1em;
+}
+
+.localghost-home-logo {
+  display: block;
+  height: auto;
+  margin: 0 auto 2rem;
+  max-width: min(360px, 80vw);
+}

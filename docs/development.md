@@ -1,4 +1,4 @@
-# Developing Localghost
+# Developing local<span class="brand-accent">ghost</span>
 
 ## Repository layout
 

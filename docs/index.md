@@ -1,4 +1,6 @@
-# Localghost
+# local<span class="brand-accent">ghost</span>
+
+<img class="localghost-home-logo" src="assets/logo.png" alt="Localghost" width="360">
 
 Localghost is a loopback-only Docker Compose proxy that gives local
 applications friendly `.localhost` URLs.

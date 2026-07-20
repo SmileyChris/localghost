@@ -1,4 +1,4 @@
-# Generating a Localghost override
+# Generating a local<span class="brand-accent">ghost</span> override
 
 Compose automatically merges `compose.override.yaml` with `compose.yaml`. The
 optional generator creates that local file, adding the most likely HTTP service

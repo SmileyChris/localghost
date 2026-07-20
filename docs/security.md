@@ -1,4 +1,4 @@
-# Localghost security and trust
+# local<span class="brand-accent">ghost</span> security and trust
 
 This project is designed for a trusted local development machine. It is not a
 production security design and should not be exposed to a LAN or the internet.

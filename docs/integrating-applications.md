@@ -1,4 +1,4 @@
-# Integrating applications with Localghost
+# Integrating applications with local<span class="brand-accent">ghost</span>
 
 An application joins the proxy's external Docker network and describes its
 routes using Traefik labels. The proxy and application remain separate Compose

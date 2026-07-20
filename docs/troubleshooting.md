@@ -1,4 +1,4 @@
-# Troubleshooting Localghost
+# Troubleshooting local<span class="brand-accent">ghost</span>
 
 Start with the proxy status and logs:
 

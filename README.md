@@ -1,7 +1,27 @@
-# Localghost
+# localghost
+```
+          ▒█████████████▒
+        ███▒           ▒███░
+      ▓██░               ░███           ██                          ██
+     ██▒                   ▒██          ██░                         ██░
+    ▓█▒                     ░██         ██░ ░█████░  ▒█████  █████▓ ██░
+   ░██    ███▓       ████    ▓█▒        ██░░██   ██░▒█▓     ██░ ░█▓ ██░
+   ██░    ███▓       ▓███    ░██        ██░░██░  ██░▒██     ██▒ ░█▓ ██░
+   ██░         █   █          ██        ██░ ░█████░  ░█████  █████▓ ██░
+   ██░         ▒███▒          ██░
+   ██                         ██░            ░▒▒                       ░
+   ██                 ▓█████████▒            ░▒▒                      ▒▒
+   ██              ▓██▒▒▒▒▒▒▒▒██▒    ░▒▒▒▒▒▒ ░▒▒▒▒▒▒░  ▒▒▒▒▒░ ░▒▒▒▒░ ▒▒▒▒▒
+  ░██░          ░██▓▒▒▒▒▒▒▒▒▒▒▒██   ░▒▒   ▒▒ ░▒▒  ░▒░ ▒▒░  ░▒░ ░▒░    ▒▒
+  ▒████▓     ▒███▒▒▒▒▒▒▒▒▒▒▒▒▒▒██   ░▒▒   ▒▒ ░▒▒  ░▒▒ ▒▒░  ░▒░    ░▒░ ▒▒░
+  ██▒▒▒▒▓▓█▓▓▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒██░    ▒▒▒▒▒▒ ░▒▒  ░▒▒  ░▒▒▒▒░ ░▒▒▒▒░  ░▒▒▒
+ ░██▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒██  ░▒   ░▒▒
+ ░██▒▒▒▒███████▓▒▒▒▒███████▒▒▒▒▒██    ░▒▒▒
+  ▒█████▓     ▒█████▓     ▒██████
+```
 
-Localghost gives local Docker Compose projects and host-native development
-servers friendly `.localhost` URLs. The `localghost` command keeps one small,
+Localghost gives local servers (whether Docker Compose or host-native)
+friendly `.localhost` URLs. The `localghost` command keeps one small,
 loopback-only [Traefik](https://traefik.io/traefik/) proxy running while each
 application keeps its own lifecycle.
 
@@ -11,8 +31,8 @@ Docker network.
 
 ## Quick start
 
-You need Docker Engine or Docker Desktop, Docker Compose 5.x (CI tests 5.1.4),
-[uv](https://docs.astral.sh/uv/getting-started/installation/), and loopback
+You need Docker Engine or Docker Desktop, Docker Compose 5.x+,
+[uv](https://docs.astral.sh/uv/getting-started/installation/), and
 port 80 available. Start the proxy without cloning this repository:
 
 ```sh
@@ -36,12 +56,9 @@ uvx localghost --status
 
 ## Documentation
 
-The [Localghost documentation](docs/index.md) covers application integration,
+The [localghost documentation](docs/index.md) covers application integration,
 generation, host-native servers, HTTPS, operations, troubleshooting, security,
 architecture, and development.
 
 For a local documentation preview, install the development dependencies and run
 `uv run zensical serve`.
-## License
-
-[MIT](LICENSE)

@@ -1,4 +1,4 @@
-# Localghost architecture
+# local<span class="brand-accent">ghost</span> architecture
 
 Localghost separates a machine-wide concern from individual application
 checkouts. One long-lived Traefik container owns the host HTTP port; each

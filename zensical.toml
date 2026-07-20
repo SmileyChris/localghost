@@ -1,28 +1,39 @@
 [project]
-site_name = "Localghost"
+site_name = "localghost"
 site_description = "A loopback-only Docker proxy for friendly .localhost development URLs"
 site_url = "https://smileychris.github.io/localghost/"
 repo_url = "https://github.com/SmileyChris/localghost"
 docs_dir = "docs"
+extra_css = ["stylesheets/extra.css"]
+
 nav = [
   {"Home" = "index.md"},
-  {"Use Localghost" = [
+  {"Use localghost" = [
     {"Integrate applications" = "integrating-applications.md"},
     {"Generate configuration" = "generating-an-override.md"},
   ]},
-  {"Operate Localghost" = [
+  {"Operate localghost" = [
     {"Operations" = "operations.md"},
     {"Troubleshooting" = "troubleshooting.md"},
     {"Security and trust" = "security.md"},
     {"Architecture" = "architecture.md"},
   ]},
-  {"Develop Localghost" = "development.md"},
+  {"Develop localghost" = "development.md"},
 ]
 
+[project.extra]
+generator = false
+
 [project.theme]
+logo = "assets/favicon.png"
+favicon = "assets/favicon.png"
 features = [
   "navigation.instant",
   "navigation.path",
   "navigation.top",
   "search.highlight",
 ]
+
+[project.theme.palette]
+primary = "custom"
+accent = "custom"
