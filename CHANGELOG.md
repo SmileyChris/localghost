@@ -5,6 +5,14 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-07-21
+
+### Changed
+
+- Proxy images are now tagged with the Localghost release version, ensuring an
+  upgrade builds the bundled proxy and plugin source for that release.
+- `localghost --version` now prints only the version number for scripting.
+
 ## [1.0.1] - 2026-07-21
 
 ### Added

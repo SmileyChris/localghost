@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import importlib.resources as resources
-from importlib.metadata import version as package_version
 import os
 import re
 import shutil
@@ -55,7 +55,7 @@ from .runner import (
 )
 from .trust import MkcertInstaller, PublicCertificate, TrustError, ZenNssInstaller
 
-LOCALGHOST_VERSION = package_version("localghost")
+LOCALGHOST_VERSION = importlib.metadata.version("localghost")
 TRAEFIK_IMAGE = f"localghost-traefik:v{LOCALGHOST_VERSION}"
 
 

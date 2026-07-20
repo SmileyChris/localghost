@@ -10,6 +10,13 @@ from localghost.runner import RunPlan
 from localghost.trust import PublicCertificate
 
 
+def test_version_is_machine_readable() -> None:
+    result = CliRunner().invoke(cli, ["--version"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output == f"{LOCALGHOST_VERSION}\n"
+
+
 def test_default_command_starts_the_bundled_proxy(monkeypatch) -> None:
     commands = []
 

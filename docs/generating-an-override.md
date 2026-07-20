@@ -80,7 +80,7 @@ Compose only loads `compose.override.yaml` automatically. A different output
 name must be supplied explicitly alongside the base file:
 
 ```sh
-LOCALGHOST_IMAGE_TAG=v1.0.1 docker compose -f compose.yaml -f compose.localghost.yaml up -d
+LOCALGHOST_IMAGE_TAG="v$(uv run localghost --version)" docker compose -f compose.yaml -f compose.localghost.yaml up -d
 ```
 
 If the override is personal rather than shared project configuration, add it to
