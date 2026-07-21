@@ -5,6 +5,11 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Generator Compose-model validation now runs as part of the main pytest suite
+  instead of through a separate shell script.
+
 ## [1.0.2] - 2026-07-21
 
 ### Changed

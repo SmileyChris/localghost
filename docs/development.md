@@ -32,16 +32,13 @@ COMPOSE_PROJECT_NAME=localghost-fixture-a \
 bash -n scripts/integration-test.sh
 uv run ruff check .
 uv run pytest
-./tests/generator-test.sh
 (cd src/localghost/traefik_plugin/src/github.com/SmileyChris/traefik-localghost-ca \
   && go test ./...)
 ```
 
-The Python tests cover generator logic in isolation. `generator-test.sh` also
-exercises the CLI against resolved Compose models and validates the generated
-Compose, Dockerfile, host-bridge, extension, backup, and refusal behavior. Keep
-both checks: they catch different regressions and CI runs them separately for
-the same reason.
+The pytest suite covers generator logic in isolation and exercises the CLI
+against resolved Compose models. It validates generated Compose, Dockerfile,
+host-bridge, extension, backup, and refusal behavior.
 
 Review the fully rendered fixture configuration when changing interpolated
 labels:

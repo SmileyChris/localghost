@@ -25,7 +25,6 @@ Use the locked `uv` environment:
 ```sh
 uv run ruff check .
 uv run pytest
-./tests/generator-test.sh
 docker compose -f compose.yaml config --quiet
 COMPOSE_PROJECT_NAME=localghost-fixture-a docker compose -f examples/compose.yaml config --quiet
 bash -n scripts/integration-test.sh
