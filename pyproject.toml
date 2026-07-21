@@ -22,8 +22,8 @@ classifiers = [
 ]
 dependencies = [
   "click>=8.2,<9",
-  "rich>=13.9,<15",
-  "ruamel-yaml>=0.18.10,<0.19",
+  "rich>=13.9,<16",
+  "ruamel-yaml>=0.18.10,<0.20",
 ]
 
 [project.urls]
