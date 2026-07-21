@@ -107,6 +107,7 @@ def test_first_launch_introduces_localghost_before_the_https_prompt(
     monkeypatch.setattr("localghost.cli._managed_image_is_available", lambda: False)
     monkeypatch.setattr("localghost.cli._https_configured", lambda: False)
     monkeypatch.setattr("localghost.cli._is_interactive", lambda no_input: True)
+    monkeypatch.setattr("localghost.cli.shutil.which", lambda name: "mkcert")
     monkeypatch.setattr(
         "localghost.cli.title", lambda *, welcome: events.append(("title", welcome))
     )
@@ -123,6 +124,29 @@ def test_first_launch_introduces_localghost_before_the_https_prompt(
         ("title", True),
         ("prompt", "HTTPS is optional. Enable trusted https://*.localhost URLs now?"),
     ]
+
+
+def test_first_launch_skips_https_prompt_without_mkcert(monkeypatch) -> None:
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
+    monkeypatch.setattr("localghost.cli.active_routes", lambda: [])
+    monkeypatch.setattr("localghost.cli._managed_image_is_available", lambda: False)
+    monkeypatch.setattr("localghost.cli._https_configured", lambda: False)
+    monkeypatch.setattr("localghost.cli._is_interactive", lambda no_input: True)
+    monkeypatch.setattr("localghost.cli.shutil.which", lambda name: None)
+    monkeypatch.setattr(
+        "localghost.cli.click.confirm",
+        lambda *args, **kwargs: pytest.fail("prompted without mkcert"),
+    )
+    monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
+
+    result = CliRunner().invoke(cli)
+
+    assert result.exit_code == 0, result.output
+    assert "Shared proxy is ready at http://" in result.output
+    assert (
+        "Enable HTTPS: uvx localghost trust after installing mkcert."
+        in result.output
+    )
 
 
 def test_status_reports_proxy_state_without_reconciling(monkeypatch) -> None:

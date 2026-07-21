@@ -90,6 +90,7 @@ def test_interactive_start_can_enable_https(monkeypatch) -> None:
     enabled = []
     monkeypatch.setattr("localghost.cli._https_configured", lambda: False)
     monkeypatch.setattr("localghost.cli._is_interactive", lambda no_input: True)
+    monkeypatch.setattr("localghost.cli.shutil.which", lambda name: "mkcert")
     monkeypatch.setattr("localghost.cli._enable_https", lambda: enabled.append(True))
     monkeypatch.setattr("localghost.cli._managed_image_is_available", lambda: False)
     monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)

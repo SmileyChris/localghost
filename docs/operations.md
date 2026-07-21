@@ -24,9 +24,10 @@ uvx localghost --status
 ## Optional trusted HTTPS
 
 The proxy begins HTTP-only. Trusted HTTPS requires `mkcert` on the host. In an
-interactive terminal, the first start offers to enable HTTPS and names the
-public root fingerprint before any privilege prompt appears. The explicit
-equivalent is:
+interactive terminal with `mkcert` installed, the first start offers to enable
+HTTPS and names the public root fingerprint before any privilege prompt
+appears. Otherwise, the successful HTTP startup ends by showing the command to
+enable HTTPS after installing `mkcert`. The explicit equivalent is:
 
 ```sh
 uvx localghost trust

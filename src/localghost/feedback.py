@@ -26,14 +26,20 @@ def title(*, welcome: bool = False) -> None:
         console.print("Easy .localhost URLs for your local apps.")
 
 
-def next_actions() -> None:
-    """Show the two useful commands after a successful proxy launch."""
+def next_actions(*, https_enabled: bool) -> None:
+    """Show useful commands after a successful proxy launch."""
     action("Stop the proxy", "uvx localghost down")
     action(
         "Add a route",
         "uvx localghost generate",
         " for Docker Compose, or uvx localghost run for a local app.",
     )
+    if not https_enabled:
+        action(
+            "Enable HTTPS",
+            "uvx localghost trust",
+            " after installing mkcert.",
+        )
 
 
 def action(label: str, command: str, detail: str = "", *, err: bool = False) -> None:

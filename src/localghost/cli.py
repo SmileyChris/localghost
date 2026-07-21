@@ -95,7 +95,7 @@ def cli(ctx: click.Context, show_status: bool) -> None:
             routes((route.hostname, route.location) for route in active_routes())
         except click.ClickException as exc:
             warning("Route listing unavailable", [exc.message])
-        next_actions()
+        next_actions(https_enabled=https_enabled)
 
 
 def _proxy_status() -> None:
@@ -377,24 +377,12 @@ def _managed_image_is_available() -> bool:
 def _ensure_https_or_warn() -> bool:
     if _https_configured():
         return True
-    if _is_interactive(False) and click.confirm(
+    if _is_interactive(False) and shutil.which("mkcert") and click.confirm(
         "HTTPS is optional. Enable trusted https://*.localhost URLs now?",
         default=False,
     ):
         _enable_https()
         return True
-    warning(
-        "HTTPS disabled",
-        [
-            "HTTP remains available for your local apps.",
-        ],
-    )
-    action(
-        "Enable HTTPS",
-        "localghost trust",
-        " interactively to install the local root and enable HTTPS.",
-        err=True,
-    )
     return False
 
 

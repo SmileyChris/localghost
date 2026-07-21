@@ -78,12 +78,13 @@ def test_next_actions_use_plain_text_outside_interactive_terminals(monkeypatch):
     monkeypatch.setattr(feedback, "_rich_terminal", lambda err: False)
     monkeypatch.setattr(feedback, "_console", lambda err: standard)
 
-    feedback.next_actions()
+    feedback.next_actions(https_enabled=False)
 
     assert standard.items == [
         "Stop the proxy: uvx localghost down",
         "Add a route: uvx localghost generate for Docker Compose, or "
         "uvx localghost run for a local app.",
+        "Enable HTTPS: uvx localghost trust after installing mkcert.",
     ]
 
 
