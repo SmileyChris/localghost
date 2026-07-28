@@ -253,6 +253,7 @@ def create_run_bridge_compose(
         f"traefik.http.services.{router}.loadbalancer.server.port=8080",
         "io.localghost.managed=true",
         "io.localghost.kind=host-run-bridge",
+        f"io.localghost.tls-domains={name}.localhost", 
     ]
     if source_path is not None:
         labels.append(f"io.localghost.source-path={source_path}")

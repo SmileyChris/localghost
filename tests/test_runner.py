@@ -236,6 +236,7 @@ def test_bridge_model_is_ephemeral():
     assert "traefik.docker.network=localghost" in text
     assert "Host(`demo.localhost`)" in text
     assert "io.localghost.managed=true" in text
+    assert "io.localghost.tls-domains=demo.localhost" in text
     assert "ports:" not in text
 
 
