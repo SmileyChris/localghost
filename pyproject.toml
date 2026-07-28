@@ -1,6 +1,6 @@
 [project]
 name = "localghost"
-version = "1.0.2"
+version = "1.1.0"
 description = "Localghost serves local applications at friendly .localhost URLs"
 readme = "README.md"
 requires-python = ">=3.11"
