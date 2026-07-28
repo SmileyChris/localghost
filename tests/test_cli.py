@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from subprocess import CompletedProcess
 
@@ -367,6 +368,102 @@ def test_run_executes_and_refuses_collision(monkeypatch) -> None:
     result = CliRunner().invoke(cli, ["run", "--port", "3000", "--", "echo"])
     assert result.exit_code != 0
     assert "docker rm -f old" in result.output
+
+
+def _mock_docker_inspect(monkeypatch, container_id, exit_code, stdout_json):
+    """Helper to mock docker inspect via subprocess.run in _reclaim_route."""
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[-1] == container_id:
+            return CompletedProcess(command, exit_code, stdout_json, "")
+        return CompletedProcess(command, 1, "", "unexpected command")
+
+    monkeypatch.setattr("localghost.cli.subprocess.run", fake_run)
+    return calls
+
+
+@pytest.fixture
+def cli_module():
+    from localghost import cli as cli_mod
+    return cli_mod
+
+
+def test_reclaim_route_auto_removes_stale_bridge(monkeypatch, cli_module):
+    container_id = "abc123"
+    payload = json.dumps([{
+        "Config": {
+            "Labels": {
+                "io.localghost.managed": "true",
+                "io.localghost.kind": "host-run-bridge",
+            }
+        }
+    }])
+    calls = _mock_docker_inspect(monkeypatch, container_id, 0, payload)
+    cli_module._reclaim_route(container_id, "demo")
+    assert len(calls) == 2
+    assert calls[0] == ["docker", "inspect", "abc123"]
+    assert calls[1] == ["docker", "rm", "-f", "abc123"]
+
+
+def test_reclaim_route_raises_for_non_managed_container(monkeypatch, cli_module):
+    container_id = "abc123"
+    payload = json.dumps([{
+        "Config": {
+            "Labels": {"something": "else"}
+        }
+    }])
+    _mock_docker_inspect(monkeypatch, container_id, 0, payload)
+    with pytest.raises(click.ClickException, match="docker rm -f"):
+        cli_module._reclaim_route(container_id, "demo")
+
+
+def test_reclaim_route_raises_if_rm_fails(monkeypatch, cli_module):
+    container_id = "abc123"
+    payload = json.dumps([{
+        "Config": {
+            "Labels": {
+                "io.localghost.managed": "true",
+                "io.localghost.kind": "host-run-bridge",
+            }
+        }
+    }])
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[-1] == container_id and command[1] == "inspect":
+            return CompletedProcess(command, 0, payload, "")
+        if command[-1] == container_id and command[1] == "rm":
+            return CompletedProcess(command, 1, "", "permission denied")
+        return CompletedProcess(command, 1, "", "unexpected")
+
+    monkeypatch.setattr("localghost.cli.subprocess.run", fake_run)
+    with pytest.raises(click.ClickException, match="failed to remove.*permission denied"):
+        cli_module._reclaim_route(container_id, "demo")
+
+
+def test_reclaim_route_continues_if_container_gone(monkeypatch, cli_module):
+    container_id = "abc123"
+    _mock_docker_inspect(monkeypatch, container_id, 1, "error: no such container")
+    cli_module._reclaim_route(container_id, "demo")  # should not raise
+
+
+def test_reclaim_route_raises_if_docker_missing(monkeypatch, cli_module):
+    def no_docker(*args, **kwargs):
+        raise FileNotFoundError
+
+    monkeypatch.setattr("localghost.cli.subprocess.run", no_docker)
+    with pytest.raises(click.ClickException, match="docker is required"):
+        cli_module._reclaim_route("abc", "demo")
+
+
+def test_reclaim_route_raises_on_invalid_inspect_output(monkeypatch, cli_module):
+    container_id = "abc123"
+    _mock_docker_inspect(monkeypatch, container_id, 0, "not valid json{{")
+    with pytest.raises(click.ClickException, match="could not inspect"):
+        cli_module._reclaim_route(container_id, "demo")
 
 
 def test_run_uses_effective_origin_for_django_warning_and_preserves_status(
