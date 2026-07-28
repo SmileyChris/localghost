@@ -56,6 +56,36 @@ def test_public_certificate_rejects_invalid_input(value, message) -> None:
         PublicCertificate.parse(value)
 
 
+def test_parse_first_extracts_first_from_multiple_certs() -> None:
+    doubled = CERTIFICATE_PEM + CERTIFICATE_PEM
+    result = PublicCertificate.parse_first(doubled)
+
+    assert result is not None
+    assert result.fingerprint == FINGERPRINT
+    assert result.pem == CERTIFICATE_PEM
+
+
+def test_parse_first_single_cert_behaves_like_parse() -> None:
+    result = PublicCertificate.parse_first(CERTIFICATE_PEM)
+
+    assert result is not None
+    assert result.fingerprint == FINGERPRINT
+    assert result.pem == CERTIFICATE_PEM
+
+
+@pytest.mark.parametrize(
+    ("value",),
+    [
+        (b"",),
+        (b"garbage",),
+        (b"-----BEGIN CERTIFICATE-----\n\n-----END CERTIFICATE-----\n",),
+        (b"\xff",),
+    ],
+)
+def test_parse_first_returns_none_for_unparseable_input(value) -> None:
+    assert PublicCertificate.parse_first(value) is None
+
+
 def test_mkcert_installs_and_uninstalls_only_the_selected_stores(tmp_path) -> None:
     certificate_path = write_certificate(tmp_path / "rootCA.pem")
     calls = []
@@ -93,6 +123,25 @@ def test_mkcert_reports_missing_executable_and_command_failure(tmp_path) -> None
     )
     with pytest.raises(TrustError, match="mkcert -uninstall failed: denied"):
         failing.uninstall()
+
+
+def test_mkcert_force_install_uninstalls_first(tmp_path) -> None:
+    certificate_path = write_certificate(tmp_path / "rootCA.pem")
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return CompletedProcess(command, 0, "", "")
+
+    installer = MkcertInstaller(
+        certificate_path, runner=run, which=lambda name: "/usr/bin/mkcert"
+    )
+    installer.install(force=True)
+
+    assert calls == [
+        ["/usr/bin/mkcert", "-uninstall"],
+        ["/usr/bin/mkcert", "-install"],
+    ]
 
 
 def zen_profile(home: Path) -> Path:
@@ -231,3 +280,38 @@ def test_zen_uninstall_handles_absent_inputs_and_failed_removal(tmp_path) -> Non
             runner=run,
             which=lambda name: "certutil",
         ).uninstall()
+
+
+def test_zen_install_removes_stale_localghost_certs(tmp_path) -> None:
+    certificate_path = write_certificate(tmp_path / "rootCA.pem")
+    zen_profile(tmp_path / "home")
+    deletes: list[str] = []
+
+    def run(command, **kwargs):
+        if command[1] == "-L":
+            if "-a" in command:
+                # _inspect: return the actual certificate PEM.
+                return CompletedProcess(command, 0, CERTIFICATE_PEM.decode(), "")
+            # _stale_nicknames: return a listing with a stale entry.
+            fingerprint_suffix = FINGERPRINT.removeprefix("SHA256:")[:16]
+            stale = "localghost-DEADBEEFDEADBEEF                                  C,,"
+            current = (
+                f"localghost-{fingerprint_suffix}"
+                "                                  C,,"
+            )
+            return CompletedProcess(command, 0, f"{stale}\n{current}\n", "")
+        if command[1] == "-D":
+            deletes.append(command[command.index("-n") + 1])
+            return CompletedProcess(command, 0, "", "")
+        if command[1] == "-A":
+            return CompletedProcess(command, 0, "", "")
+        return CompletedProcess(command, 1, "", "failed")
+
+    ZenNssInstaller(
+        certificate_path,
+        home=tmp_path / "home",
+        runner=run,
+        which=lambda name: "certutil",
+    ).install()
+
+    assert deletes == ["localghost-DEADBEEFDEADBEEF"]

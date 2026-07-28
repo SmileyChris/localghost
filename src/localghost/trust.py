@@ -8,6 +8,7 @@ import shutil
 import ssl
 import subprocess
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -46,6 +47,28 @@ class PublicCertificate:
             pem=canonical.encode("ascii"),
             fingerprint="SHA256:" + hashlib.sha256(der).hexdigest().upper(),
         )
+
+    @classmethod
+    def parse_first(cls, value: bytes) -> PublicCertificate | None:
+        """Parse only the first certificate PEM block, ignoring extras.
+
+        Useful when a tool like ``certutil`` may return multiple
+        certificates that share a subject DN.
+        """
+        try:
+            text = value.decode("ascii")
+        except UnicodeDecodeError:
+            return None
+        begin = "-----BEGIN CERTIFICATE-----"
+        end = "-----END CERTIFICATE-----"
+        if begin not in text or end not in text:
+            return None
+        start = text.index(begin)
+        finish = text.index(end, start) + len(end)
+        try:
+            return cls.parse(text[start:finish].encode("ascii"))
+        except TrustError:
+            return None
 
 
 class MkcertInstaller:
@@ -86,8 +109,16 @@ class MkcertInstaller:
             ).strip()
             raise TrustError(f"mkcert {action} failed: {detail}")
 
-    def install(self) -> None:
+    def install(self, *, force: bool = False) -> None:
+        """Install the public root into system and NSS trust stores.
+
+        When *force* is true a best-effort uninstall runs first so that a
+        rotated root CA (same subject, different key) replaces the old one.
+        """
         PublicCertificate.parse(self.certificate_path.read_bytes())
+        if force:
+            with suppress(TrustError):
+                self.uninstall()
         self._run("-install")
 
     def uninstall(self) -> None:
@@ -132,7 +163,27 @@ class ZenNssInstaller:
         )
         if result.returncode:
             return None
-        return PublicCertificate.parse(result.stdout.encode("ascii")).fingerprint
+        found = PublicCertificate.parse_first(result.stdout.encode("ascii"))
+        return found.fingerprint if found else None
+
+    def _stale_nicknames(
+        self, executable: str, profile: Path, keep: str
+    ) -> list[str]:
+        """Return ``localghost-*`` nicknames in *profile* other than *keep*."""
+        result = self.runner(
+            [executable, "-L", "-d", f"sql:{profile}"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode:
+            return []
+        stale: list[str] = []
+        for line in result.stdout.splitlines():
+            nickname = line.strip().split()[0] if line.strip() else ""
+            if nickname.startswith(self.prefix) and nickname != keep:
+                stale.append(nickname)
+        return stale
 
     def install(self) -> None:
         profiles = self._profiles()
@@ -147,6 +198,13 @@ class ZenNssInstaller:
         certificate = PublicCertificate.parse(self.certificate_path.read_bytes())
         nickname = self._nickname(certificate)
         for profile in profiles:
+            for stale in self._stale_nicknames(executable, profile, nickname):
+                self.runner(
+                    [executable, "-D", "-d", f"sql:{profile}", "-n", stale],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
             found = self._inspect(executable, profile, nickname)
             if found == certificate.fingerprint:
                 continue

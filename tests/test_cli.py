@@ -199,7 +199,7 @@ def test_trust_configures_a_stopped_proxy_without_starting_it(
     monkeypatch.setattr("localghost.cli._bootstrap_public_root", lambda: certificate)
 
     class Installer:
-        def install(self):
+        def install(self, **kwargs):
             return None
 
     monkeypatch.setattr("localghost.cli.MkcertInstaller", lambda path: Installer())
@@ -230,7 +230,7 @@ def test_trust_restarts_a_running_proxy_when_https_becomes_configured(
     monkeypatch.setattr("localghost.cli._bootstrap_public_root", lambda: certificate)
 
     class Installer:
-        def install(self):
+        def install(self, **kwargs):
             return None
 
     monkeypatch.setattr("localghost.cli.MkcertInstaller", lambda path: Installer())

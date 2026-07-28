@@ -357,6 +357,10 @@ def _trust_marker() -> Path:
     return _state_directory() / "https-enabled"
 
 
+def _trust_fingerprint_path() -> Path:
+    return _state_directory() / "root-fingerprint"
+
+
 def _https_configured() -> bool:
     return _public_root_path().is_file() and _trust_marker().is_file()
 
@@ -386,6 +390,18 @@ def _ensure_https_or_warn() -> bool:
     return False
 
 
+def _detect_root_rotation(certificate: PublicCertificate) -> bool:
+    """Return True when the installed root CA has changed identity."""
+    path = _trust_fingerprint_path()
+    if not path.is_file():
+        return False
+    try:
+        previous = path.read_text().strip()
+    except OSError:
+        return False
+    return previous and previous != certificate.fingerprint
+
+
 def _enable_https() -> None:
     was_configured = _https_configured()
     certificate = _bootstrap_public_root()
@@ -403,8 +419,9 @@ def _enable_https() -> None:
     )
     mkcert_installer = MkcertInstaller(certificate_path)
     zen_installer = ZenNssInstaller(certificate_path)
+    root_rotated = _detect_root_rotation(certificate)
     try:
-        mkcert_installer.install()
+        mkcert_installer.install(force=root_rotated)
         zen_installer.install()
     except TrustError as exc:
         if was_configured:
@@ -413,6 +430,7 @@ def _enable_https() -> None:
                 f"failed: {exc}"
             ) from exc
         _trust_marker().unlink(missing_ok=True)
+        _trust_fingerprint_path().unlink(missing_ok=True)
         rollback_errors = []
         for name, installer in (
             ("Zen NSS", zen_installer),
@@ -430,6 +448,7 @@ def _enable_https() -> None:
         raise click.ClickException(message) from exc
     _trust_marker().parent.mkdir(parents=True, exist_ok=True)
     _trust_marker().touch(mode=0o600, exist_ok=True)
+    _trust_fingerprint_path().write_text(certificate.fingerprint)
 
 
 def _bootstrap_public_root() -> PublicCertificate:

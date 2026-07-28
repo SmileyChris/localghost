@@ -228,7 +228,7 @@ def test_enable_https_clears_marker_when_installation_fails(
     monkeypatch.setattr("localghost.cli._bootstrap_public_root", lambda: certificate)
 
     class Installer:
-        def install(self):
+        def install(self, **kwargs):
             raise TrustError("authorization denied")
 
         def uninstall(self):
@@ -253,14 +253,14 @@ def test_enable_https_rolls_back_partial_trust_installation(
     events = []
 
     class Mkcert:
-        def install(self):
+        def install(self, **kwargs):
             events.append("mkcert install")
 
         def uninstall(self):
             events.append("mkcert uninstall")
 
     class Zen:
-        def install(self):
+        def install(self, **kwargs):
             events.append("zen install")
             raise TrustError("Zen installation failed")
 
@@ -296,7 +296,7 @@ def test_enable_https_retains_an_existing_configuration_on_refresh_failure(
     monkeypatch.setattr("localghost.cli._bootstrap_public_root", lambda: certificate)
 
     class Installer:
-        def install(self):
+        def install(self, **kwargs):
             raise TrustError("refresh failed")
 
         def uninstall(self):
@@ -321,14 +321,14 @@ def test_enable_https_reports_incomplete_automatic_rollback(
     monkeypatch.setattr("localghost.cli._bootstrap_public_root", lambda: certificate)
 
     class Mkcert:
-        def install(self):
+        def install(self, **kwargs):
             raise TrustError("installation failed")
 
         def uninstall(self):
             raise TrustError("mkcert cleanup failed")
 
     class Zen:
-        def install(self):
+        def install(self, **kwargs):
             pytest.fail("Zen install should not run")
 
         def uninstall(self):
@@ -345,6 +345,46 @@ def test_enable_https_reports_incomplete_automatic_rollback(
     assert "automatic trust rollback also failed" in result.output
     assert "Zen NSS: Zen cleanup failed" in result.output
     assert "mkcert: mkcert cleanup failed" in result.output
+
+
+def test_enable_https_forces_mkcert_reinstall_on_root_rotation(
+    monkeypatch, tmp_path
+) -> None:
+    (tmp_path / "rootCA.pem").write_bytes(CERTIFICATE_PEM)
+    (tmp_path / "https-enabled").touch()
+    old_fingerprint = "SHA256:" + "B" * 64
+    (tmp_path / "root-fingerprint").write_text(old_fingerprint)
+    certificate = PublicCertificate.parse(CERTIFICATE_PEM)
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
+    monkeypatch.setattr(
+        "localghost.cli._bootstrap_public_root", lambda: certificate
+    )
+    calls = []
+
+    class Mkcert:
+        def install(self, force=False):
+            calls.append(("mkcert install", force))
+
+        def uninstall(self):
+            calls.append("mkcert uninstall")
+
+    class Zen:
+        def install(self, **kwargs):
+            calls.append("zen install")
+
+    monkeypatch.setattr("localghost.cli.MkcertInstaller", lambda path: Mkcert())
+    monkeypatch.setattr("localghost.cli.ZenNssInstaller", lambda path: Zen())
+
+    result = CliRunner().invoke(
+        cli, ["trust"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls == [
+        ("mkcert install", True),
+        "zen install",
+    ]
+    assert (tmp_path / "root-fingerprint").read_text() == certificate.fingerprint
 
 
 def test_bootstrap_writes_public_root_atomically(monkeypatch, tmp_path) -> None:
