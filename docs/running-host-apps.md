@@ -1,0 +1,89 @@
+# Running host applications with local<span class="brand-accent">ghost</span>
+
+`localghost run` lets you serve a framework application running directly on
+your host machine behind the proxy, without a Dockerfile or Compose file.
+
+## Supported frameworks
+
+| Framework | Detection | Default port |
+|-----------|-----------|-------------|
+| **Django** | `manage.py` in the project directory | 8000 |
+| **Vite** | `package.json` with a `dev` script and `vite` dependency | 5173 |
+| **Astro** | `package.json` with a `dev` script and `astro` dependency | 4321 |
+
+Detection runs automatically. If more than one framework is detected (for
+example, a Django project that also has a `package.json` with Vite), use
+`--framework` to resolve the ambiguity:
+
+```sh
+uvx localghost run --framework django
+```
+
+## Usage
+
+Start the proxy first (if it isn't already running), then run your app:
+
+```sh
+cd my-django-project
+uvx localghost run
+```
+
+The app is available at `https://my-django-project.localhost`. Press Ctrl+C to
+stop it.
+
+### Custom port
+
+Override the detected port when the default is already in use:
+
+```sh
+uvx localghost run --port 9000
+```
+
+If the port is free it is used directly. If it is occupied and `--port` was
+given explicitly, an error is raised. Without `--port`, the next free port is
+chosen automatically.
+
+### Explicit framework
+
+Skip auto-detection and specify the framework:
+
+```sh
+uvx localghost run --framework vite
+```
+
+### Custom command
+
+Run an arbitrary process with a custom port:
+
+```sh
+uvx localghost run --port 8080 -- my-custom-server --port 8080
+```
+
+## How it works
+
+`localghost run` creates an ephemeral Caddy reverse-proxy container on the
+shared `localghost` network. The Caddy container forwards requests from Traefik
+to the host process via `host.docker.internal`. When the foreground process
+exits, the Caddy bridge is removed automatically.
+
+If a previous `localghost run` was interrupted and left a stale bridge
+container, it is detected and removed automatically before the new one starts.
+
+## Django runner detection
+
+For Django projects, localghost selects the Python runner in this order:
+
+1. `uv run python` if `uv.lock` is present
+2. `poetry run python` if `poetry.lock`
+3. `pipenv run python` if `Pipfile` or `Pipfile.lock`
+4. The active `VIRTUAL_ENV` python if set
+5. `.venv/bin/python` if the directory exists
+6. Errors if none of the above are found
+
+## Notes
+
+- The host process must listen on `0.0.0.0`, not `127.0.0.1`, so the Caddy
+  bridge can reach it.
+- The bridge container uses the pinned `caddy:2.11.4-alpine` image.
+- Django's `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS` may need updating for the
+  `.localhost` hostname — localghost warns about missing values when possible.

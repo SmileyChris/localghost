@@ -32,15 +32,19 @@ For a Docker Compose application, generate the integration configuration:
 uvx localghost generate
 ```
 
-For a Django or Vite server running directly on the host:
+For a Django, Vite, or Astro server running directly on the host:
 
 ```sh
 uvx localghost run
 ```
 
-See [Integrate applications](integrating-applications.md) and
-[Generate configuration](generating-an-override.md) for the complete Compose
-contract, project naming, secondary services, and host-native workflows.
+The framework is auto-detected. See
+[Running host applications](running-host-apps.md) for the full workflow,
+custom ports, explicit framework selection, and Django runner resolution.
+
+For the complete Compose contract, project naming, secondary services, and
+host-native workflows, see [Integrate applications](integrating-applications.md)
+and [Generate configuration](generating-an-override.md).
 
 ## Optional trusted HTTPS
 
