@@ -209,7 +209,7 @@ def test_framework_ambiguity_and_custom_plan(monkeypatch, tmp_path):
     (tmp_path / "package.json").write_text(
         json.dumps({"scripts": {"dev": "vite"}, "dependencies": {"vite": "x"}})
     )
-    with pytest.raises(click.ClickException, match="both Django"):
+    with pytest.raises(click.ClickException, match="both django and vite"):
         runner.detect_framework(tmp_path)
     monkeypatch.setattr(runner, "_port_available", lambda _: True)
     plan = runner.build_plan(tmp_path, "hello", None, 3000, ("echo", "ok"))
@@ -303,6 +303,95 @@ def test_vite_declared_manager_and_missing_executable(monkeypatch, tmp_path):
     monkeypatch.setattr(runner.shutil, "which", lambda _: None)
     with pytest.raises(click.ClickException, match="was not found"):
         runner.vite_command(tmp_path, None)
+
+
+def test_astro_detection_and_command(monkeypatch, tmp_path):
+    (tmp_path / "package.json").write_text(
+        json.dumps({
+            "scripts": {"dev": "astro dev"},
+            "devDependencies": {"astro": "x"},
+        })
+    )
+    executable(monkeypatch, "npm")
+    assert runner.detect_framework(tmp_path) == "astro"
+    assert runner._astro_manifest(tmp_path) is not None
+    assert runner.astro_command(tmp_path, None) == (4321, (
+        "npm", "run", "dev", "--",
+        "--port", "{port}", "--host", "0.0.0.0",
+    ))
+
+
+def test_astro_without_dev_script(tmp_path):
+    (tmp_path / "package.json").write_text(
+        json.dumps({"devDependencies": {"astro": "x"}})
+    )
+    assert runner._astro_manifest(tmp_path) is None
+
+
+def test_astro_without_dependency(tmp_path):
+    (tmp_path / "package.json").write_text(
+        json.dumps({"scripts": {"dev": "vite"}})
+    )
+    assert runner._astro_manifest(tmp_path) is None
+
+
+def test_astro_vite_ambiguity(monkeypatch, tmp_path):
+    (tmp_path / "package.json").write_text(
+        json.dumps({
+            "scripts": {"dev": "astro dev"},
+            "dependencies": {"astro": "x", "vite": "x"},
+        })
+    )
+    with pytest.raises(click.ClickException, match="both vite and astro"):
+        runner.detect_framework(tmp_path)
+
+
+def test_astro_django_ambiguity(monkeypatch, tmp_path):
+    (tmp_path / "manage.py").touch()
+    (tmp_path / "package.json").write_text(
+        json.dumps({
+            "scripts": {"dev": "astro dev"},
+            "devDependencies": {"astro": "x"},
+        })
+    )
+    with pytest.raises(click.ClickException, match="both django and astro"):
+        runner.detect_framework(tmp_path)
+
+
+def test_astro_command_missing_manifest(monkeypatch, tmp_path):
+    with pytest.raises(click.ClickException, match="Astro requires"):
+        runner.astro_command(tmp_path, None)
+
+
+def test_astro_plan_with_detection(monkeypatch, tmp_path):
+    (tmp_path / "package.json").write_text(
+        json.dumps({
+            "scripts": {"dev": "astro dev"},
+            "devDependencies": {"astro": "x"},
+        })
+    )
+    executable(monkeypatch, "npm")
+    monkeypatch.setattr(runner, "_port_available", lambda _: True)
+    plan = runner.build_plan(tmp_path, "astro-site", None, None, ())
+    assert plan.framework == "astro"
+    assert plan.port == 4321
+    assert plan.command == (
+        "npm", "run", "dev", "--",
+        "--port", "4321", "--host", "0.0.0.0",
+    )
+
+
+def test_astro_plan_explicit_framework(monkeypatch, tmp_path):
+    (tmp_path / "package.json").write_text(
+        json.dumps({
+            "scripts": {"dev": "astro dev"},
+            "devDependencies": {"astro": "x"},
+        })
+    )
+    executable(monkeypatch, "npm")
+    monkeypatch.setattr(runner, "_port_available", lambda _: True)
+    plan = runner.build_plan(tmp_path, "site", "astro", None, ())
+    assert plan.framework == "astro"
 
 
 def test_detected_plan_and_small_helpers(monkeypatch, tmp_path):

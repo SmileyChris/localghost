@@ -84,8 +84,10 @@ def build_plan(
             default_port, selected_command = django_command(cwd, port)
         elif selected_framework == "vite":
             default_port, selected_command = vite_command(cwd, port)
+        elif selected_framework == "astro":
+            default_port, selected_command = astro_command(cwd, port)
         else:  # Click validates the public option; retain this for direct callers.
-            raise click.ClickException("--framework must be django or vite")
+            raise click.ClickException("--framework must be django, vite, or astro")
         selected_port = select_port(port or default_port, strict=port is not None)
         selected_command = tuple(
             part.format(port=selected_port) for part in selected_command
@@ -106,18 +108,23 @@ def build_plan(
 def detect_framework(cwd: Path) -> str:
     django = (cwd / "manage.py").is_file()
     vite = _vite_manifest(cwd) is not None
-    if django and vite:
+    astro = _astro_manifest(cwd) is not None
+    detected = [
+        framework for framework, flag in
+        [("django", django), ("vite", vite), ("astro", astro)]
+        if flag
+    ]
+    if len(detected) > 1:
+        choices = " or ".join(f"--framework {f}" for f in detected)
         raise click.ClickException(
-            "both Django and Vite were detected; rerun with --framework django "
-            "or --framework vite"
+            f"both {' and '.join(detected)} were detected; rerun with "
+            f"{choices}"
         )
-    if django:
-        return "django"
-    if vite:
-        return "vite"
+    if detected:
+        return detected[0]
     raise click.ClickException(
-        "could not detect Django or Vite; provide a command after -- together "
-        "with --port"
+        "could not detect Django, Vite, or Astro; provide a command after -- "
+        "together with --port"
     )
 
 
@@ -151,27 +158,26 @@ def django_command(
     return requested_port or 8000, (*prefix, "manage.py", "runserver", "0.0.0.0:{port}")
 
 
-def vite_command(cwd: Path, requested_port: int | None) -> tuple[int, tuple[str, ...]]:
-    manifest = _vite_manifest(cwd)
+def astro_command(cwd: Path, requested_port: int | None) -> tuple[int, tuple[str, ...]]:
+    manifest = _astro_manifest(cwd)
     if manifest is None:
         raise click.ClickException(
-            "Vite requires a valid package.json with a dev script and vite dependency"
+            "Astro requires a valid package.json with a dev script and astro dependency"
         )
     manager = package_manager(cwd, manifest)
-    _require_executable(manager, "Vite package manager")
+    _require_executable(manager, "Astro package manager")
     commands = {
         "npm": ("npm", "run", "dev", "--"),
         "pnpm": ("pnpm", "run", "dev", "--"),
         "yarn": ("yarn", "run", "dev", "--"),
         "bun": ("bun", "run", "dev", "--"),
     }
-    return requested_port or 5173, (
+    return requested_port or 4321, (
         *commands[manager],
-        "--host",
-        "0.0.0.0",
         "--port",
         "{port}",
-        "--strictPort",
+        "--host",
+        "0.0.0.0",
     )
 
 
@@ -482,7 +488,30 @@ def _terminate_process_tree(child: subprocess.Popen[bytes], signum: int) -> None
         child.terminate()
 
 
+_JSON_DEPENDENCY_KEYS = ("dependencies", "devDependencies")
+
+
+def _has_dependency(manifest: dict[str, object], name: str) -> bool:
+    return any(
+        isinstance(group, dict) and name in group
+        for group in (
+            manifest.get(key)
+            for key in _JSON_DEPENDENCY_KEYS
+        )
+    )
+
+
 def _vite_manifest(cwd: Path) -> dict[str, object] | None:
+    return _package_json_with_dev_script_and_dep(cwd, "vite")
+
+
+def _astro_manifest(cwd: Path) -> dict[str, object] | None:
+    return _package_json_with_dev_script_and_dep(cwd, "astro")
+
+
+def _package_json_with_dev_script_and_dep(
+    cwd: Path, dep: str
+) -> dict[str, object] | None:
     path = cwd / "package.json"
     if not path.is_file():
         return None
@@ -493,16 +522,35 @@ def _vite_manifest(cwd: Path) -> dict[str, object] | None:
     if not isinstance(value, dict):
         raise click.ClickException("package.json must contain an object")
     scripts = value.get("scripts")
-    dependencies = value.get("dependencies")
-    dev_dependencies = value.get("devDependencies")
     if not isinstance(scripts, dict) or not isinstance(scripts.get("dev"), str):
         return None
-    if not any(
-        isinstance(group, dict) and "vite" in group
-        for group in (dependencies, dev_dependencies)
-    ):
+    if not _has_dependency(value, dep):
         return None
     return value
+
+
+def vite_command(cwd: Path, requested_port: int | None) -> tuple[int, tuple[str, ...]]:
+    manifest = _vite_manifest(cwd)
+    if manifest is None:
+        raise click.ClickException(
+            "Vite requires a valid package.json with a dev script and vite dependency"
+        )
+    manager = package_manager(cwd, manifest)
+    _require_executable(manager, "Vite package manager")
+    commands = {
+        "npm": ("npm", "run", "dev", "--"),
+        "pnpm": ("pnpm", "run", "dev", "--"),
+        "yarn": ("yarn", "run", "dev", "--"),
+        "bun": ("bun", "run", "dev", "--"),
+    }
+    return requested_port or 5173, (
+        *commands[manager],
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "{port}",
+        "--strictPort",
+    )
 
 
 def _port_available(port: int) -> bool:

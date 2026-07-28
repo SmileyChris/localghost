@@ -224,7 +224,7 @@ def _trust_status() -> None:
 @click.option(
     "framework",
     "--framework",
-    type=click.Choice(["django", "vite"]),
+    type=click.Choice(["django", "vite", "astro"]),
     help="Resolve otherwise ambiguous framework detection.",
 )
 @click.option("port", "--port", type=click.IntRange(1, 65535), help="Host HTTP port.")
