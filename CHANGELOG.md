@@ -3,7 +3,22 @@
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.1.0] - 2026-07-29
+
+### Added
+
+- Astro framework detection: `localghost run` now auto-detects Astro projects
+  (package.json with a dev script and astro dependency), default port 4321.
+- `--framework astro` option for explicit selection.
+- Auto-cleanup of stale managed bridge containers on `localghost run`.
+- PyPI publish workflow: pushing a `v*` tag builds and deploys via trusted
+  publishing (OIDC).
+
+### Fixed
+
+- Host-run bridges now include the `io.localghost.tls-domains` label so the
+  Traefik CA plugin issues certificates matching the public project hostname
+  instead of the Compose project hash.
 
 ### Changed
 
