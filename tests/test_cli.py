@@ -355,6 +355,15 @@ def test_run_executes_and_refuses_collision(monkeypatch) -> None:
     assert "Starting foreground application" in result.output
 
     monkeypatch.setattr("localghost.cli.find_route_collision", lambda name: "old")
+    monkeypatch.setattr(
+        "localghost.cli._reclaim_route",
+        lambda cid, name: (_ for _ in ()).throw(
+            click.ClickException(
+                f"{name}.localhost is already claimed by container {cid}; "
+                f"remove it with: docker rm -f {cid}"
+            )
+        ),
+    )
     result = CliRunner().invoke(cli, ["run", "--port", "3000", "--", "echo"])
     assert result.exit_code != 0
     assert "docker rm -f old" in result.output

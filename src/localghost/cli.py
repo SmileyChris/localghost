@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import importlib.resources as resources
+import json
 import os
 import re
 import shutil
@@ -252,10 +253,7 @@ def run(
     title()
     collision = find_route_collision(plan.name)
     if collision:
-        raise click.ClickException(
-            f"{plan.name}.localhost is already claimed by container {collision}; "
-            f"remove it with: docker rm -f {collision}"
-        )
+        _reclaim_route(collision, plan.name)
     django_warnings = django_settings_warnings(
         plan, cwd, public_origin=_proxy_origin(plan.name)
     )
@@ -285,6 +283,44 @@ def _print_run_plan(plan: RunPlan, dry_run: bool) -> None:
         click.echo(plan.bridge_yaml, nl=False)
     else:
         info("Starting foreground application; press Ctrl+C to stop it.")
+
+
+def _reclaim_route(container_id: str, name: str) -> None:
+    """Remove a stale managed bridge container and continue."""
+    try:
+        inspection = subprocess.run(
+            ["docker", "inspect", container_id],
+            check=False, capture_output=True, text=True,
+        )
+    except FileNotFoundError as exc:
+        raise click.ClickException("docker is required") from exc
+    if inspection.returncode:
+        info(f"Container {container_id} no longer exists; continuing.")
+        return
+    try:
+        labels = json.loads(inspection.stdout)[0].get("Config", {}).get("Labels", {})
+    except (IndexError, json.JSONDecodeError) as exc:
+        raise click.ClickException(
+            f"could not inspect container {container_id}"
+        ) from exc
+    if labels.get("io.localghost.managed") == "true" and labels.get(
+        "io.localghost.kind"
+    ) == "host-run-bridge":
+        result = subprocess.run(
+            ["docker", "rm", "-f", container_id],
+            check=False, capture_output=True, text=True,
+        )
+        if result.returncode:
+            raise click.ClickException(
+                f"{name}.localhost is claimed by container {container_id}; "
+                f"failed to remove: {result.stderr.strip()}"
+            )
+        info(f"Removed stale bridge for {name}.localhost.")
+    else:
+        raise click.ClickException(
+            f"{name}.localhost is already claimed by container {container_id}; "
+            f"remove it with: docker rm -f {container_id}"
+        )
 
 
 def _proxy_origin(hostname: str) -> str:
