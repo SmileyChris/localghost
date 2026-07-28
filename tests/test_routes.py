@@ -92,6 +92,17 @@ def test_routes_handle_empty_and_unusual_container_metadata(monkeypatch):
     assert routes.active_routes() == [routes.Route("x.localhost", "manual")]
 
 
+def test_routes_handle_invalid_docker_inspect_json(monkeypatch):
+    def run(command, **kwargs):
+        if command[1:3] == ["ps", "--quiet"]:
+            return CompletedProcess(command, 0, "abc\n", "")
+        return CompletedProcess(command, 0, "not valid json{", "")
+
+    monkeypatch.setattr(routes.subprocess, "run", run)
+    with pytest.raises(click.ClickException, match="invalid container inspection"):
+        routes.active_routes()
+
+
 def test_routes_report_docker_failures(monkeypatch):
     monkeypatch.setattr(
         routes.subprocess,

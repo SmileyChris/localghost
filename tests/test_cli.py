@@ -466,6 +466,23 @@ def test_reclaim_route_raises_on_invalid_inspect_output(monkeypatch, cli_module)
         cli_module._reclaim_route(container_id, "demo")
 
 
+def test_detect_root_rotation_returns_false_on_oserror(monkeypatch, tmp_path):
+    from localghost import cli as cli_mod
+
+    fingerprint = tmp_path / "root-fingerprint"
+    fingerprint.write_text("old-fingerprint")
+
+    def fail_read(*args, **kwargs):
+        raise OSError("read failure")
+
+    monkeypatch.setattr(
+        "localghost.cli._trust_fingerprint_path",
+        lambda: fingerprint,
+    )
+    monkeypatch.setattr(Path, "read_text", fail_read)
+    assert cli_mod._detect_root_rotation("new-fingerprint") is False
+
+
 def test_run_uses_effective_origin_for_django_warning_and_preserves_status(
     monkeypatch,
 ) -> None:

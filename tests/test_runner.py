@@ -395,6 +395,31 @@ def test_astro_plan_explicit_framework(monkeypatch, tmp_path):
     assert plan.framework == "astro"
 
 
+def test_vite_plan_through_build_plan(monkeypatch, tmp_path):
+    (tmp_path / "package.json").write_text(
+        json.dumps({
+            "scripts": {"dev": "vite"},
+            "devDependencies": {"vite": "x"},
+        })
+    )
+    executable(monkeypatch, "npm")
+    monkeypatch.setattr(runner, "_port_available", lambda _: True)
+    plan = runner.build_plan(tmp_path, "vite-site", None, None, ())
+    assert plan.framework == "vite"
+    assert plan.port == 5173
+    assert "--host" in plan.command and "--strictPort" in plan.command
+
+
+def test_django_virtualenv_active(monkeypatch, tmp_path):
+    (tmp_path / "manage.py").touch()
+    python = tmp_path / "venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.touch(mode=0o755)
+    monkeypatch.setenv("VIRTUAL_ENV", str(tmp_path / "venv"))
+    monkeypatch.delenv("UV_CACHE_DIR", raising=False)
+    assert runner.django_command(tmp_path, None)[1][0] == str(python)
+
+
 def test_detected_plan_and_small_helpers(monkeypatch, tmp_path):
     (tmp_path / "manage.py").touch()
     (tmp_path / "uv.lock").touch()
