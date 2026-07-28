@@ -440,7 +440,9 @@ def test_reclaim_route_raises_if_rm_fails(monkeypatch, cli_module):
         return CompletedProcess(command, 1, "", "unexpected")
 
     monkeypatch.setattr("localghost.cli.subprocess.run", fake_run)
-    with pytest.raises(click.ClickException, match="failed to remove.*permission denied"):
+    with pytest.raises(
+        click.ClickException, match="failed to remove.*permission denied"
+    ):
         cli_module._reclaim_route(container_id, "demo")
 
 
