@@ -46,8 +46,11 @@ def test_rich_feedback_uses_compact_components(monkeypatch):
         url="http://demo.localhost",
         dry_run=False,
     )
+    feedback.action("Try", "localghost run", " in a project")
+    feedback.details([("Key", "Value")], title="Status")
+    feedback.choices("Pick", [("web", "port 8000", True)])
 
-    assert len(console.items) == 3
+    assert len(console.items) == 8
 
 
 def test_title_uses_the_localghost_wordmark_in_interactive_terminals(monkeypatch):
@@ -94,8 +97,14 @@ def test_choices_use_plain_text_outside_interactive_terminals(monkeypatch):
     monkeypatch.setattr(feedback, "_console", lambda err: standard)
 
     feedback.choices("Services", [("web", "ports 8000", True)])
+    feedback.details([("Key", "Value")], title="Status")
+    feedback.action("Try", "localghost run")
 
-    assert standard.items == ["Services:\n  web: ports 8000 (likely)"]
+    assert standard.items == [
+        "Services:\n  web: ports 8000 (likely)",
+        "Status\nKey: Value",
+        "Try: localghost run",
+    ]
 
 
 def test_routes_are_plain_or_a_table(monkeypatch):
