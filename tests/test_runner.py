@@ -175,17 +175,21 @@ def test_django_virtualenv_variants(monkeypatch, tmp_path):
         runner.django_command(tmp_path, None)
 
 
-def test_vite_detection_manager_and_conflicts(monkeypatch, tmp_path):
+def test_vite_detection_manager_and_priority(monkeypatch, tmp_path):
     (tmp_path / "package.json").write_text(
         json.dumps({"scripts": {"dev": "vite"}, "devDependencies": {"vite": "x"}})
     )
     (tmp_path / "pnpm-lock.yaml").touch()
     executable(monkeypatch, "pnpm")
     assert runner.detect_framework(tmp_path) == "vite"
-    assert runner.vite_command(tmp_path, None)[1][:3] == ("pnpm", "run", "dev")
+    assert runner.vite_command(tmp_path, None)[1] == (
+        "pnpm", "run", "dev", "--host", "0.0.0.0", "--port", "{port}",
+        "--strictPort",
+    )
     (tmp_path / "yarn.lock").touch()
-    with pytest.raises(click.ClickException, match="multiple package"):
-        runner.package_manager(tmp_path, runner._vite_manifest(tmp_path))
+    assert runner.package_manager(tmp_path, runner._vite_manifest(tmp_path)) == "pnpm"
+    (tmp_path / "package-lock.json").touch()
+    assert runner.package_manager(tmp_path, runner._vite_manifest(tmp_path)) == "npm"
 
 
 @pytest.mark.parametrize("manifest", ["[]", '{"scripts": {}}'])

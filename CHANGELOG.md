@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Changed
+
+- `localghost run` now selects a deterministic package manager when multiple
+  JavaScript lockfiles are present; `package.json`'s `packageManager` field
+  remains the override.
+- Vite and Astro host runs now forward dev-server flags correctly through pnpm
+  and Yarn.
+
 ## [1.1.0] - 2026-07-29
 
 ### Added

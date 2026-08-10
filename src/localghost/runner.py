@@ -168,9 +168,13 @@ def astro_command(cwd: Path, requested_port: int | None) -> tuple[int, tuple[str
     _require_executable(manager, "Astro package manager")
     commands = {
         "npm": ("npm", "run", "dev", "--"),
-        "pnpm": ("pnpm", "run", "dev", "--"),
-        "yarn": ("yarn", "run", "dev", "--"),
-        "bun": ("bun", "run", "dev", "--"),
+        # pnpm forwards the separator itself to the script. Yarn 1 forwards
+        # arguments without it (and warns that future versions will not strip
+        # it), so npm is the only manager here that needs the explicit
+        # separator.
+        "pnpm": ("pnpm", "run", "dev"),
+        "yarn": ("yarn", "run", "dev"),
+        "bun": ("bun", "run", "dev"),
     }
     return requested_port or 4321, (
         *commands[manager],
@@ -194,17 +198,10 @@ def package_manager(cwd: Path, manifest: dict[str, object]) -> str:
         "yarn": ("yarn.lock",),
         "bun": ("bun.lock", "bun.lockb"),
     }
-    found = [
-        manager
-        for manager, names in lockfiles.items()
-        if any((cwd / item).is_file() for item in names)
-    ]
-    if len(found) > 1:
-        raise click.ClickException(
-            "multiple package-manager lockfiles found; set packageManager in "
-            "package.json or provide a command after --"
-        )
-    return found[0] if found else "npm"
+    for manager in _PACKAGE_MANAGER_PRIORITY:
+        if any((cwd / item).is_file() for item in lockfiles[manager]):
+            return manager
+    return "npm"
 
 
 def select_port(port: int, strict: bool) -> int:
@@ -490,6 +487,7 @@ def _terminate_process_tree(child: subprocess.Popen[bytes], signum: int) -> None
 
 
 _JSON_DEPENDENCY_KEYS = ("dependencies", "devDependencies")
+_PACKAGE_MANAGER_PRIORITY = ("npm", "pnpm", "yarn", "bun")
 
 
 def _has_dependency(manifest: dict[str, object], name: str) -> bool:
@@ -540,9 +538,9 @@ def vite_command(cwd: Path, requested_port: int | None) -> tuple[int, tuple[str,
     _require_executable(manager, "Vite package manager")
     commands = {
         "npm": ("npm", "run", "dev", "--"),
-        "pnpm": ("pnpm", "run", "dev", "--"),
-        "yarn": ("yarn", "run", "dev", "--"),
-        "bun": ("bun", "run", "dev", "--"),
+        "pnpm": ("pnpm", "run", "dev"),
+        "yarn": ("yarn", "run", "dev"),
+        "bun": ("bun", "run", "dev"),
     }
     return requested_port or 5173, (
         *commands[manager],

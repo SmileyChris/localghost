@@ -80,6 +80,42 @@ For Django projects, localghost selects the Python runner in this order:
 5. `.venv/bin/python` if the directory exists
 6. Errors if none of the above are found
 
+## JavaScript package-manager detection
+
+For Vite and Astro projects, `localghost run` first uses the `packageManager`
+field in `package.json` when it is present. Otherwise, lockfiles are checked in
+this order: `package-lock.json`/`npm-shrinkwrap.json`, `pnpm-lock.yaml`,
+`yarn.lock`, then `bun.lock`/`bun.lockb`. This makes projects with more than
+one lockfile deterministic; declare `packageManager` in `package.json` when a
+different manager should win.
+
+### Wrapper scripts
+
+Localghost passes `--host 0.0.0.0` and `--port` through the package manager so
+the actual dev server listens on an interface the bridge can reach. If the
+`dev` script calls another script, that wrapper must forward the arguments or
+they will be silently discarded, leaving the server bound to localhost.
+
+For example:
+
+```json
+{
+  "scripts": {
+    "dev": "./scripts/dev.sh",
+    "dev:vite": "vite dev"
+  }
+}
+```
+
+The wrapper should pass its arguments to the nested package script:
+
+```sh
+npm run dev:vite -- "$@"
+```
+
+The `"$@"` passes Localghost's arguments through to Vite; without it, the
+bridge cannot reach the server.
+
 ## Notes
 
 - The host process must listen on `0.0.0.0`, not `127.0.0.1`, so the Caddy

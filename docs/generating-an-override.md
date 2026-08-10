@@ -142,10 +142,11 @@ uv run localghost run --directory /path/to/application
 
 It detects Django from `manage.py` and Vite from a `package.json` dev script
 with a Vite dependency. Django uses the project runner (uv, Poetry, Pipenv, or
-a virtualenv); Vite uses the declared or locked package manager. An ambiguous
-project needs `--framework`; custom commands always need `--port`. Detected
-servers bind to `0.0.0.0`, which can expose the raw development port to a LAN,
-and run package scripts with your normal host permissions.
+a virtualenv); Vite and Astro use the declared package manager, or select one
+from the lockfiles in the order npm, pnpm, Yarn, then Bun. An ambiguous project
+needs `--framework`; custom commands always need `--port`. Detected servers bind
+to `0.0.0.0`, which can expose the raw development port to a LAN, and run
+package scripts with your normal host permissions.
 
 `--name` takes precedence over `COMPOSE_PROJECT_NAME`, then `.env`, then the
 normalized checkout name. Detected applications use port 8000 (Django) or 5173
