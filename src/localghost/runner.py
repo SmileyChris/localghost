@@ -198,10 +198,20 @@ def package_manager(cwd: Path, manifest: dict[str, object]) -> str:
         "yarn": ("yarn.lock",),
         "bun": ("bun.lock", "bun.lockb"),
     }
-    for manager in _PACKAGE_MANAGER_PRIORITY:
-        if any((cwd / item).is_file() for item in lockfiles[manager]):
+    found = [
+        manager
+        for manager in _PACKAGE_MANAGER_PRIORITY
+        if any((cwd / item).is_file() for item in lockfiles[manager])
+    ]
+    if not found:
+        return "npm"
+    for manager in found:
+        if shutil.which(manager) is not None:
             return manager
-    return "npm"
+    # Preserve the deterministic error for a project whose detected managers
+    # are all unavailable, while preferring an installed fallback when there is
+    # one.
+    return found[0]
 
 
 def select_port(port: int, strict: bool) -> int:
@@ -487,7 +497,7 @@ def _terminate_process_tree(child: subprocess.Popen[bytes], signum: int) -> None
 
 
 _JSON_DEPENDENCY_KEYS = ("dependencies", "devDependencies")
-_PACKAGE_MANAGER_PRIORITY = ("npm", "pnpm", "yarn", "bun")
+_PACKAGE_MANAGER_PRIORITY = ("bun", "pnpm", "yarn", "npm")
 
 
 def _has_dependency(manifest: dict[str, object], name: str) -> bool:

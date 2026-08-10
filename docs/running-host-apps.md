@@ -84,10 +84,17 @@ For Django projects, localghost selects the Python runner in this order:
 
 For Vite and Astro projects, `localghost run` first uses the `packageManager`
 field in `package.json` when it is present. Otherwise, lockfiles are checked in
-this order: `package-lock.json`/`npm-shrinkwrap.json`, `pnpm-lock.yaml`,
-`yarn.lock`, then `bun.lock`/`bun.lockb`. This makes projects with more than
-one lockfile deterministic; declare `packageManager` in `package.json` when a
-different manager should win.
+this priority order: `bun.lock`/`bun.lockb`, `pnpm-lock.yaml`, `yarn.lock`, then
+`package-lock.json`/`npm-shrinkwrap.json`; the first detected manager whose
+executable is installed is used. More specific lockfiles are preferred because
+they are stronger signals of intentional package-manager use. This makes
+projects with more than one lockfile deterministic while allowing an
+unavailable higher-priority manager to fall back to another detected manager.
+Declare `packageManager` in
+`package.json` when a specific manager must be used; a declared manager is not
+silently replaced if its executable is missing. Localghost does not inspect
+lockfile contents or timestamps, so the priority is a fallback heuristic rather
+than proof of which lockfile is current.
 
 ### Wrapper scripts
 

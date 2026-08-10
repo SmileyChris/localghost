@@ -189,7 +189,12 @@ def test_vite_detection_manager_and_priority(monkeypatch, tmp_path):
     (tmp_path / "yarn.lock").touch()
     assert runner.package_manager(tmp_path, runner._vite_manifest(tmp_path)) == "pnpm"
     (tmp_path / "package-lock.json").touch()
+    assert runner.package_manager(tmp_path, runner._vite_manifest(tmp_path)) == "pnpm"
+    executable(monkeypatch, "npm")
     assert runner.package_manager(tmp_path, runner._vite_manifest(tmp_path)) == "npm"
+    (tmp_path / "bun.lock").touch()
+    executable(monkeypatch, "bun", "pnpm", "npm")
+    assert runner.package_manager(tmp_path, runner._vite_manifest(tmp_path)) == "bun"
 
 
 @pytest.mark.parametrize("manifest", ["[]", '{"scripts": {}}'])
