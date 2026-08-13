@@ -5,6 +5,14 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Fixed
+
+- A second Ctrl+C while `localghost run` is shutting down no longer dumps a
+  `_TerminationSignal` traceback. A repeat Ctrl+C within a 2 second grace
+  period is ignored as an accidental double-press; after the grace period it
+  force-quits with a clean message. Bridge cleanup is retried if interrupted
+  mid-teardown.
+
 ### Changed
 
 - `localghost run` now selects the first installed manager in a deterministic

@@ -520,6 +520,90 @@ def test_execute_interrupt_terminates_child(monkeypatch):
     assert runner.execute(runner.RunPlan("x", "c", (), 1, "p", ""), lambda: None) == 130
 
 
+def test_termination_handler_grace_then_force_quit(monkeypatch):
+    clock = iter([0.0, 0.5, 0.8, 3.0])
+    monkeypatch.setattr(runner.time, "monotonic", lambda: next(clock))
+    old_handlers = runner._install_termination_handlers()
+    try:
+        with pytest.raises(runner._TerminationSignal):
+            runner.signal.raise_signal(runner.signal.SIGINT)  # first press
+        # A repeat within the grace period is ignored...
+        runner.signal.raise_signal(runner.signal.SIGINT)
+        runner.signal.raise_signal(runner.signal.SIGTERM)
+        # ...but a repeat after it force-quits cleanly.
+        with pytest.raises(runner._ForceQuit):
+            runner.signal.raise_signal(runner.signal.SIGINT)
+    finally:
+        runner._restore_termination_handlers(old_handlers)
+
+
+def test_execute_force_quits_stuck_child(monkeypatch):
+    monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
+    monkeypatch.setattr(runner, "stop_bridge", lambda plan: None)
+    received = []
+
+    def killpg(pid, signum):
+        received.append(signum)
+
+    monkeypatch.setattr(runner.os, "killpg", killpg)
+    waits = {"count": 0}
+
+    class Child:
+        pid = 123
+
+        def wait(self):
+            waits["count"] += 1
+            if waits["count"] == 1:
+                raise KeyboardInterrupt
+            raise runner._ForceQuit(2)
+
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *args, **kwargs: Child())
+    plan = runner.RunPlan("x", "custom", ("x",), 1, "p", "")
+    assert runner.execute(plan, lambda: None) == 130
+    assert received == [runner.signal.SIGINT, runner.signal.SIGKILL]
+
+
+def test_execute_bridge_cleanup_interrupted_by_force_quit(monkeypatch):
+    monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
+    attempts = []
+
+    def stop(plan):
+        attempts.append(plan)
+        raise runner._ForceQuit(2)
+
+    monkeypatch.setattr(runner, "stop_bridge", stop)
+
+    class Child:
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *args, **kwargs: Child())
+    plan = runner.RunPlan("x", "custom", ("x",), 1, "p", "")
+    assert runner.execute(plan, lambda: None) == 0
+    assert len(attempts) == 1
+
+
+def test_execute_retries_bridge_cleanup_after_termination_signal(monkeypatch):
+    monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
+    attempts = []
+
+    def stop(plan):
+        attempts.append(plan)
+        if len(attempts) == 1:
+            raise runner._TerminationSignal(2)
+
+    monkeypatch.setattr(runner, "stop_bridge", stop)
+
+    class Child:
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *args, **kwargs: Child())
+    plan = runner.RunPlan("x", "custom", ("x",), 1, "p", "")
+    assert runner.execute(plan, lambda: None) == 0
+    assert len(attempts) == 2
+
+
 def test_port_in_use_and_vite_without_dependency(tmp_path):
     with socket.socket() as listener:
         listener.bind(("0.0.0.0", 0))

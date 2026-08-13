@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -9,6 +10,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -17,7 +19,7 @@ from pathlib import Path
 import click
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
-from .feedback import warning
+from .feedback import info, warning
 from .generator import (
     DNS_SAFE_PROJECT,
     HOST_BRIDGE_IMAGE,
@@ -41,6 +43,10 @@ class _TerminationSignal(Exception):
 
     def __init__(self, signum: int) -> None:
         self.signum = signum
+
+
+class _ForceQuit(_TerminationSignal):
+    """A termination signal repeated after the grace period has elapsed."""
 
 
 def resolve_name(cwd: Path) -> str:
@@ -376,14 +382,39 @@ def execute(
         status = 128 + signum
         if child is not None:
             _terminate_process_tree(child, signum)
-            child.wait()
-    finally:
-        _restore_termination_handlers(old_handlers)
-        if bridge_attempted:
             try:
-                stop_bridge(plan)
-            except Exception as exc:  # preserve the child status below
-                cleanup_error = exc
+                child.wait()
+            except _ForceQuit:
+                # The child is not exiting and the user asked again after
+                # the grace period: force it down and stop waiting.
+                with contextlib.suppress(AttributeError, ProcessLookupError):
+                    os.killpg(child.pid, signal.SIGKILL)
+                info("Force quitting.")
+    finally:
+        try:
+            if bridge_attempted:
+                try:
+                    stop_bridge(plan)
+                except _ForceQuit:
+                    # A repeat Ctrl+C after the grace period landed during
+                    # teardown; give up on removing the bridge here (it is
+                    # reclaimed on the next run).
+                    info("Bridge cleanup interrupted.")
+                except _TerminationSignal:
+                    # A termination signal landed mid-teardown. Retry once
+                    # to leave no bridge behind; repeats within the grace
+                    # period are ignored by the handler.
+                    try:
+                        stop_bridge(plan)
+                    except Exception as exc:  # preserve the child status below
+                        cleanup_error = exc
+                except Exception as exc:  # preserve the child status below
+                    cleanup_error = exc
+            _restore_termination_handlers(old_handlers)
+        except _ForceQuit:
+            # A force-quit landed during the final bookkeeping; exit with
+            # the interrupted status rather than crashing.
+            pass
     if cleanup_error:
         warning(
             "Bridge cleanup failed",
@@ -467,10 +498,26 @@ def _origin_is_trusted(origin: str, origins: list[object]) -> bool:
     return f"{scheme}://*.{host.partition('.')[2]}" in origins
 
 
+_FORCE_QUIT_DELAY = 2.0  # seconds of grace before a repeat Ctrl+C force-quits
+
+
 def _install_termination_handlers() -> dict[int, signal.Handlers]:
+    first_at: float | None = None
+
     def terminate(signum: int, frame: object) -> None:
+        nonlocal first_at
         del frame
-        raise _TerminationSignal(signum)
+        now = time.monotonic()
+        if first_at is None:
+            first_at = now
+            raise _TerminationSignal(signum)
+        if now - first_at < _FORCE_QUIT_DELAY:
+            # A repeat within the grace period is almost always an
+            # accidental double-press; keep the graceful shutdown going.
+            return
+        # The graceful shutdown is stuck and the user asked again after
+        # the grace period: force quit cleanly.
+        raise _ForceQuit(signum)
 
     return {
         signum: signal.signal(signum, terminate)
