@@ -59,6 +59,19 @@ To inspect its state without starting or reconciling it, run:
 uvx localghost --status
 ```
 
+## Running local apps
+
+`localghost run` detects Django, Vite, and Astro projects and serves them
+behind the proxy with zero configuration:
+
+```sh
+cd my-project
+uvx localghost run
+```
+
+The app is available at `https://my-project.localhost` (or `http://` if HTTPS
+is not configured). Press Ctrl+C to stop it.
+
 ## Documentation
 
 The [localghost documentation](docs/index.md) covers application integration,
