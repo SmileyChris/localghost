@@ -248,7 +248,7 @@ def test_trust_restarts_a_running_proxy_when_https_becomes_configured(
 
     assert result.exit_code == 0, result.output
     assert any("proxy_compose_https.yaml" in item for item in commands[0])
-    assert "--force-recreate" in commands[0]
+    assert "--force-recreate" not in commands[0]
 
 
 def test_trust_remove_disables_https_before_mutating_managed_stores(

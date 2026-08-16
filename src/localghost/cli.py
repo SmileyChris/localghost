@@ -354,7 +354,7 @@ def _run_proxy(
             command[6:6] = ["--file", str(resource_root / "proxy_compose_https.yaml")]
         if action == "up":
             command.extend(["--detach", "--wait", "--wait-timeout", "60"])
-            if https_enabled or force_recreate:
+            if force_recreate:
                 command.append("--force-recreate")
 
         verb = "Reconciling" if already_running else "Starting"

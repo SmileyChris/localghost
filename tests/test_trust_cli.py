@@ -83,7 +83,7 @@ def test_default_command_uses_configured_https_and_custom_port(
     assert result.exit_code == 0, result.output
     assert "https://traefik.localhost:8443" in result.output
     assert any("proxy_compose_https.yaml" in item for item in commands[1])
-    assert "--force-recreate" in commands[1]
+    assert "--force-recreate" not in commands[1]
 
 
 def test_interactive_start_can_enable_https(monkeypatch) -> None:
@@ -222,6 +222,7 @@ def test_trust_remove_keeps_marker_when_proxy_reconciliation_fails(
 def test_enable_https_clears_marker_when_installation_fails(
     monkeypatch, tmp_path
 ) -> None:
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
     marker = tmp_path / "https-enabled"
     marker.touch()
     certificate = PublicCertificate.parse(CERTIFICATE_PEM)
@@ -248,6 +249,7 @@ def test_enable_https_clears_marker_when_installation_fails(
 def test_enable_https_rolls_back_partial_trust_installation(
     monkeypatch, tmp_path
 ) -> None:
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
     certificate = PublicCertificate.parse(CERTIFICATE_PEM)
     monkeypatch.setattr("localghost.cli._bootstrap_public_root", lambda: certificate)
     events = []
