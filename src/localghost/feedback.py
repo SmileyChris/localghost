@@ -32,7 +32,11 @@ def next_actions(*, https_enabled: bool) -> None:
     action(
         "Add a route",
         "uvx localghost generate",
-        " for Docker Compose, or uvx localghost run for a local app.",
+        (
+            (" for Docker Compose, or ", "default"),
+            ("uvx localghost run", LIME),
+            (" for a local app.", "default"),
+        ),
     )
     if not https_enabled:
         action(
@@ -42,17 +46,24 @@ def next_actions(*, https_enabled: bool) -> None:
         )
 
 
-def action(label: str, command: str, detail: str = "", *, err: bool = False) -> None:
+def action(
+    label: str,
+    command: str,
+    detail: str | Iterable[tuple[str, str]] = "",
+    *,
+    err: bool = False,
+) -> None:
     """Show a runnable command with a consistent visual hierarchy."""
     console = _console(err)
+    detail_parts = [(detail, "default")] if isinstance(detail, str) else list(detail)
     if _rich_terminal(err):
         console.print(
             Text.assemble(
-                (f"{label}: ", "bold"), (command, LIME), (detail, "default")
+                (f"{label}: ", "bold"), (command, LIME), *detail_parts
             )
         )
         return
-    console.print(f"{label}: {command}{detail}")
+    console.print(f"{label}: {command}{''.join(text for text, _ in detail_parts)}")
 
 
 def details(

@@ -53,6 +53,30 @@ def test_rich_feedback_uses_compact_components(monkeypatch):
     assert len(console.items) == 8
 
 
+def test_next_actions_highlight_each_runnable_command(monkeypatch):
+    console = Console()
+    monkeypatch.setattr(feedback, "_rich_terminal", lambda err: True)
+    monkeypatch.setattr(feedback, "_console", lambda err: console)
+
+    feedback.next_actions(https_enabled=True)
+
+    route_hint = console.items[1]
+    assert route_hint.plain == (
+        "Add a route: uvx localghost generate for Docker Compose, or "
+        "uvx localghost run for a local app."
+    )
+    assert [
+        (route_hint.plain[span.start : span.end], span.style)
+        for span in route_hint.spans
+    ] == [
+        ("Add a route: ", "bold"),
+        ("uvx localghost generate", feedback.LIME),
+        (" for Docker Compose, or ", "default"),
+        ("uvx localghost run", feedback.LIME),
+        (" for a local app.", "default"),
+    ]
+
+
 def test_title_uses_the_localghost_wordmark_in_interactive_terminals(monkeypatch):
     console = Console()
     monkeypatch.setattr(feedback, "_rich_terminal", lambda err: True)
