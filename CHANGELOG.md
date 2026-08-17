@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Add configured host/Compose runs, detached session metadata, and the
+  `localghost manage` session commands.
+
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 
