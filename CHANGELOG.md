@@ -5,6 +5,8 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## [1.2.0] - 2026-08-17
+
 ### Fixed
 
 - A second Ctrl+C while `localghost run` is shutting down no longer dumps a
@@ -20,6 +22,8 @@ uses [Semantic Versioning](https://semver.org/).
   `package.json`'s `packageManager` field remains the strict override.
 - Vite and Astro host runs now forward dev-server flags correctly through pnpm,
   Yarn, and Bun.
+- Repeated HTTPS proxy starts no longer force-recreate the Traefik container;
+  Docker Compose now recreates it only when its configuration changes.
 
 ## [1.1.0] - 2026-07-29
 
