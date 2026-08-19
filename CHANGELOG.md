@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Add configured host/Compose runs, detached session metadata, and the
+  `localghost manage` session commands.
+- Validate configured run values and interpolate `{port}` placeholders in
+  configured argv commands.
+- Detached session status now handles Compose sessions, failed host startup
+  removes its bridge, and `manage stop`/`manage clean` reuse the stored bridge
+  configuration so they can remove detached bridges reliably.
+
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 

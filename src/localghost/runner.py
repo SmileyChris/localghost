@@ -85,8 +85,10 @@ def build_plan(
         if port is None:
             raise click.ClickException("a custom command requires --port")
         selected_framework = "custom"
-        selected_command = command
         selected_port = select_port(port, strict=True)
+        selected_command = tuple(
+            part.replace("{port}", str(selected_port)) for part in command
+        )
     else:
         selected_framework, project_root = discover_framework(cwd, framework)
         working_directory = project_root

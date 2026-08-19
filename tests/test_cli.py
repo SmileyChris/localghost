@@ -866,3 +866,30 @@ def test_no_compose_interactive_defaults_to_detected_dockerfile(monkeypatch) -> 
         assert "Application type" in result.output
         assert "Container HTTP port" in result.output
         assert "build: ." in Path("compose.yaml").read_text(encoding="utf-8")
+
+
+def test_detached_start_failure_removes_bridge(monkeypatch, tmp_path, cli_module):
+    plan = RunPlan(
+        "demo", "custom", ("missing",), 3000, "session", "services: {}\n"
+    )
+    calls = []
+    monkeypatch.setattr(cli_module, "_run_proxy", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        cli_module, "start_bridge", lambda selected: calls.append(("start", selected))
+    )
+    monkeypatch.setattr(
+        cli_module, "stop_bridge", lambda selected: calls.append(("stop", selected))
+    )
+    monkeypatch.setattr(
+        cli_module, "_session_log_path", lambda name: tmp_path / f"{name}.log"
+    )
+    monkeypatch.setattr(
+        cli_module.subprocess,
+        "Popen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("missing")),
+    )
+
+    with pytest.raises(click.ClickException, match="could not start detached"):
+        cli_module._detach_host(plan, tmp_path)
+
+    assert calls == [("start", plan), ("stop", plan)]

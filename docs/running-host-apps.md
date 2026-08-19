@@ -38,6 +38,33 @@ cd my-django-project
 uvx localghost run
 ```
 
+### Configured and detached runs
+
+Projects may keep repeatable run settings in `.localghost.toml`:
+
+```toml
+[run]
+mode = "host"
+name = "my-app"
+port = 8080
+command = ["./server", "--port", "{port}"]
+```
+
+Command-line options take precedence over this file. Use `--config PATH` for a
+different configuration. `--detach` records the process outside the project
+directory and keeps its output in Localghost's state directory:
+
+```sh
+localghost run --detach
+localghost manage list
+localghost manage attach SESSION_ID
+localghost manage stop SESSION_ID
+```
+
+`localghost manage clean` removes stale metadata and only the recorded,
+Localghost-managed host bridge. `localghost down` continues to control only
+the shared proxy.
+
 The app is available at `https://my-django-project.localhost`. Press Ctrl+C to
 stop it.
 

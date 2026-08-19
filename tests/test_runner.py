@@ -227,6 +227,16 @@ def test_framework_ambiguity_and_custom_plan(monkeypatch, tmp_path):
         runner.build_plan(tmp_path, "hello", None, None, ("echo",))
 
 
+def test_custom_plan_interpolates_configured_port_placeholder(monkeypatch, tmp_path):
+    monkeypatch.setattr(runner, "_port_available", lambda _: True)
+
+    plan = runner.build_plan(
+        tmp_path, "hello", None, 8123, ("server", "--port", "{port}", "{}")
+    )
+
+    assert plan.command == ("server", "--port", "8123", "{}")
+
+
 def test_port_selection(monkeypatch):
     monkeypatch.setattr(runner, "_port_available", lambda port: port == 8002)
     assert runner.select_port(8000, False) == 8002

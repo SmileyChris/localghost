@@ -8,16 +8,18 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 import click
 
 from .compose import resolve_compose
+from .config import RunConfig, config_path, detect_mode, load_config, write_run_config
 from .feedback import (
     action,
     choices,
@@ -53,7 +55,14 @@ from .runner import (
     django_settings_warnings,
     execute,
     find_route_collision,
+    start_bridge,
+    stop_bridge,
 )
+from .sessions import alive as session_alive
+from .sessions import clean as clean_sessions
+from .sessions import create as create_session
+from .sessions import find_matching, sessions
+from .sessions import stop as stop_session
 from .trust import MkcertInstaller, PublicCertificate, TrustError, ZenNssInstaller
 
 LOCALGHOST_VERSION = importlib.metadata.version("localghost")
@@ -89,7 +98,9 @@ def cli(ctx: click.Context, show_status: bool) -> None:
         default_port = 443 if https_enabled else 80
         suffix = "" if port == default_port else f":{port}"
         if was_running:
-            success(f"Shared proxy is already ready at {scheme}://traefik.localhost{suffix}")
+            success(
+                f"Shared proxy is already ready at {scheme}://traefik.localhost{suffix}"
+            )
         else:
             success(f"Shared proxy is ready at {scheme}://traefik.localhost{suffix}")
         try:
@@ -124,6 +135,76 @@ def down() -> None:
     title()
     _run_proxy("down", https_enabled=_https_configured())
     success("Proxy stopped and removed.")
+
+
+@cli.group(invoke_without_command=True)
+@click.pass_context
+def manage(ctx: click.Context) -> None:
+    """Inspect and control detached application sessions."""
+    if ctx.invoked_subcommand is None:
+        _manage_list(False)
+
+
+@manage.command("list")
+@click.option("--json", "as_json", is_flag=True)
+def manage_list(as_json: bool) -> None:
+    _manage_list(as_json)
+
+
+def _manage_list(as_json: bool) -> None:
+    records = []
+    for session in sessions():
+        status = "running" if session_alive(session) else "stopped"
+        item = session.as_dict()
+        item["status"] = status
+        records.append(item)
+    if as_json:
+        click.echo(json.dumps(records, indent=2))
+        return
+    if not records:
+        click.echo("No managed sessions.")
+        return
+    for item in records:
+        click.echo(
+            f"{item['id']}  {item['mode']}  {item['name']}.localhost  "
+            f"{item['status']}  {item['log']}"
+        )
+
+
+@manage.command("attach")
+@click.argument("session_id")
+def manage_attach(session_id: str) -> None:
+    session = next((item for item in sessions() if item.id == session_id), None)
+    if session is None:
+        raise click.ClickException(f"unknown session '{session_id}'")
+    log = Path(session.log)
+    if log.exists():
+        click.echo(log.read_text(encoding="utf-8", errors="replace"), nl=False)
+    else:
+        click.echo(f"Session {session.id} has no log yet.")
+
+
+@manage.command("stop")
+@click.argument("session_id", required=False)
+@click.option("--all", "stop_all", is_flag=True)
+def manage_stop(session_id: str | None, stop_all: bool) -> None:
+    if bool(session_id) == stop_all:
+        raise click.UsageError("provide a session ID or --all")
+    targets = (
+        sessions()
+        if stop_all
+        else [item for item in sessions() if item.id == session_id]
+    )
+    if not targets:
+        raise click.ClickException("no matching managed session")
+    for session in targets:
+        stop_session(session)
+    success(f"Stopped {len(targets)} session(s).")
+
+
+@manage.command("clean")
+def manage_clean() -> None:
+    success(f"Removed {clean_sessions()} stale session(s).")
 
 
 @cli.command()
@@ -229,6 +310,19 @@ def _trust_status() -> None:
     help="Resolve otherwise ambiguous framework detection.",
 )
 @click.option("port", "--port", type=click.IntRange(1, 65535), help="Host HTTP port.")
+@click.option("mode", "--mode", type=click.Choice(["host", "compose"]))
+@click.option(
+    "detach",
+    "--detach",
+    is_flag=True,
+    help="Run in the background and manage it later.",
+)
+@click.option(
+    "config",
+    "--config",
+    type=click.Path(path_type=Path),
+    help="Run configuration TOML path.",
+)
 @click.option(
     "dry_run",
     "--dry-run",
@@ -241,12 +335,43 @@ def run(
     working_directory: Path | None,
     framework: str | None,
     port: int | None,
+    mode: str | None,
+    detach: bool,
+    config: Path | None,
     dry_run: bool,
     command: tuple[str, ...],
 ) -> None:
-    """Run a detected host application behind an ephemeral local bridge."""
+    """Run a configured host or Compose application behind the proxy."""
     cwd = working_directory or Path.cwd()
+    explicit_run_settings = bool(command) or any(
+        value is not None for value in (name, framework, port, mode, config)
+    )
+    settings = load_config(config_path(cwd, config))
+    command = command or settings.command
+    name = name or settings.name
+    framework = framework or settings.framework
+    port = port or settings.port
+    selected_mode = (
+        mode or settings.mode or detect_mode(cwd, command=command, framework=framework)
+    )
+    if selected_mode == "compose":
+        if command or framework or port:
+            raise click.ClickException(
+                "Compose mode does not accept host command, framework, or port settings"
+            )
+        _run_compose(cwd, name, detach)
+        return
     plan = build_plan(cwd, name, framework, port, command)
+    matching = find_matching(name=plan.name, cwd=cwd)
+    if matching:
+        message = (
+            f"Session {matching.id} is already running; attach with: "
+            f"localghost manage attach {matching.id}"
+        )
+        if explicit_run_settings:
+            raise click.ClickException(message)
+        click.echo(message)
+        return
     if dry_run:
         _print_run_plan(plan, dry_run=True)
         return
@@ -262,6 +387,9 @@ def run(
     if django_warnings:
         warning("Django settings", django_warnings)
     _print_run_plan(plan, dry_run=False)
+    if detach:
+        _detach_host(plan, cwd)
+        return
     status = execute(
         plan,
         lambda: _run_proxy("up", https_enabled=_https_configured()),
@@ -270,6 +398,70 @@ def run(
     if status:
         raise click.exceptions.Exit(status)
     success("Application stopped.")
+
+
+def _session_log_path(name: str) -> Path:
+    return _state_directory() / "sessions" / f"{name}.log"
+
+
+def _detach_host(plan: RunPlan, cwd: Path) -> None:
+    _run_proxy("up", https_enabled=_https_configured())
+    start_bridge(plan)
+    log = _session_log_path(plan.name)
+    child: subprocess.Popen[bytes] | None = None
+    try:
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("ab") as handle:
+            child = subprocess.Popen(
+                list(plan.command),
+                cwd=cwd,
+                stdout=handle,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+            create_session(
+                mode="host",
+                name=plan.name,
+                port=plan.port,
+                cwd=cwd,
+                command=plan.command,
+                log=log,
+                pid=child.pid,
+                bridge_project=plan.project,
+                bridge_yaml=plan.bridge_yaml,
+            )
+    except OSError as exc:
+        if child is not None:
+            with suppress(ProcessLookupError, PermissionError):
+                os.killpg(child.pid, signal.SIGTERM)
+        stop_bridge(plan)
+        raise click.ClickException(
+            f"could not start detached application: {exc}"
+        ) from exc
+    success(f"Started detached session for {plan.name}.localhost.")
+
+
+def _run_compose(cwd: Path, name: str | None, detach: bool) -> None:
+    project = name or cwd.name
+    command = ["docker", "compose", "--project-name", project, "up"]
+    if detach:
+        command.append("--detach")
+    result = subprocess.run(command, cwd=cwd, check=False)
+    if result.returncode:
+        raise click.exceptions.Exit(result.returncode)
+    if detach:
+        log = _session_log_path(project)
+        create_session(
+            mode="compose",
+            name=project,
+            port=0,
+            cwd=cwd,
+            command=(),
+            log=log,
+            pid=None,
+            project=project,
+        )
+        success(f"Started detached Compose session for {project}.")
 
 
 def _print_run_plan(plan: RunPlan, dry_run: bool) -> None:
@@ -286,7 +478,11 @@ def _print_run_plan(plan: RunPlan, dry_run: bool) -> None:
     if dry_run:
         click.echo(plan.bridge_yaml, nl=False)
     else:
-        info("Starting foreground application; press Ctrl+C to stop it.")
+        info(
+            "Starting foreground application; press Ctrl+C to stop it. "
+            "Terminal detach (Ctrl-B D) is unavailable in this environment; "
+            "use --detach with localghost manage instead."
+        )
 
 
 def _reclaim_route(container_id: str, name: str) -> None:
@@ -294,7 +490,9 @@ def _reclaim_route(container_id: str, name: str) -> None:
     try:
         inspection = subprocess.run(
             ["docker", "inspect", container_id],
-            check=False, capture_output=True, text=True,
+            check=False,
+            capture_output=True,
+            text=True,
         )
     except FileNotFoundError as exc:
         raise click.ClickException("docker is required") from exc
@@ -307,12 +505,15 @@ def _reclaim_route(container_id: str, name: str) -> None:
         raise click.ClickException(
             f"could not inspect container {container_id}"
         ) from exc
-    if labels.get("io.localghost.managed") == "true" and labels.get(
-        "io.localghost.kind"
-    ) == "host-run-bridge":
+    if (
+        labels.get("io.localghost.managed") == "true"
+        and labels.get("io.localghost.kind") == "host-run-bridge"
+    ):
         result = subprocess.run(
             ["docker", "rm", "-f", container_id],
-            check=False, capture_output=True, text=True,
+            check=False,
+            capture_output=True,
+            text=True,
         )
         if result.returncode:
             raise click.ClickException(
@@ -421,9 +622,13 @@ def _managed_image_is_available() -> bool:
 def _ensure_https_or_warn() -> bool:
     if _https_configured():
         return True
-    if _is_interactive(False) and shutil.which("mkcert") and click.confirm(
-        "HTTPS is optional. Enable trusted https://*.localhost URLs now?",
-        default=False,
+    if (
+        _is_interactive(False)
+        and shutil.which("mkcert")
+        and click.confirm(
+            "HTTPS is optional. Enable trusted https://*.localhost URLs now?",
+            default=False,
+        )
     ):
         _enable_https()
         return True
@@ -582,14 +787,10 @@ def _proxy_https_port() -> int:
 def _environment_port(name: str, default: int) -> int:
     value = os.environ.get(name) or str(default)
     if not value.isascii() or not value.isdecimal():
-        raise click.ClickException(
-            f"{name} must be an integer from 1 to 65535"
-        )
+        raise click.ClickException(f"{name} must be an integer from 1 to 65535")
     port = int(value)
     if not 1 <= port <= 65535:
-        raise click.ClickException(
-            f"{name} must be an integer from 1 to 65535"
-        )
+        raise click.ClickException(f"{name} must be an integer from 1 to 65535")
     return port
 
 
@@ -635,6 +836,7 @@ def _environment_port(name: str, default: int) -> int:
     is_flag=True,
     help="Use detected defaults and never prompt.",
 )
+@click.argument("command", nargs=-1, type=click.UNPROCESSED)
 def generate(
     files: tuple[Path, ...],
     service_name: str | None,
@@ -644,13 +846,14 @@ def generate(
     extend: bool,
     dry_run: bool,
     no_input: bool,
+    command: tuple[str, ...],
 ) -> None:
     """Generate Compose configuration for the current application."""
     if not dry_run:
         title()
     interactive = _is_interactive(no_input)
     if not files and not _has_compose_file():
-        if extend:
+        if extend and not command:
             raise click.ClickException("--extend requires an existing Compose project")
         _generate_without_compose(
             service_name=service_name,
@@ -659,6 +862,8 @@ def generate(
             mode=mode,
             dry_run=dry_run,
             interactive=interactive,
+            command=command,
+            extend=extend,
         )
         return
 
@@ -666,6 +871,8 @@ def generate(
         raise click.ClickException(
             "--mode can only be used when no Compose file is present"
         )
+    if command:
+        raise click.ClickException("a command can only be used for host generation")
 
     output = output or Path("compose.override.yaml")
     output_exists = output.exists()
@@ -732,7 +939,24 @@ def _generate_without_compose(
     mode: str | None,
     dry_run: bool,
     interactive: bool,
+    command: tuple[str, ...] = (),
+    extend: bool = False,
 ) -> None:
+    if command:
+        if mode == "dockerfile":
+            raise click.ClickException(
+                "a command cannot be combined with --mode dockerfile"
+            )
+        if port is None:
+            raise click.ClickException("a custom command requires --port")
+        config = RunConfig(mode="host", name=service_name, port=port, command=command)
+        backup = write_run_config(
+            Path(".localghost.toml"), config, extend=extend, interactive=interactive
+        )
+        success("Created .localghost.toml.")
+        if backup:
+            info(f"Backup: {backup}")
+        return
     if output.exists() and not dry_run:
         raise click.ClickException(f"refusing to overwrite existing '{output}'")
     validate_project_name_value(_local_project_name())

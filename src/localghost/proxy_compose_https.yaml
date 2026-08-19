@@ -1,6 +1,9 @@
 # Applied only after `localghost trust` has installed this proxy's public root.
 services:
   bootstrap:
+    # This is an explicit one-shot job invoked by `docker compose run`; it is
+    # not part of the long-running proxy's `up --wait` service set.
+    profiles: [bootstrap]
     image: golang:1.24.6-alpine
     working_dir: /src
     entrypoint: [go, run, ./cmd/bootstrap]

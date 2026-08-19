@@ -8,10 +8,14 @@ from localghost.cli import LOCALGHOST_VERSION
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def compose_model(*paths: Path, **environment: str) -> dict:
+def compose_model(
+    *paths: Path, profiles: tuple[str, ...] = (), **environment: str
+) -> dict:
     command = ["docker", "compose"]
     for path in paths:
         command.extend(["--file", str(path)])
+    for profile in profiles:
+        command.extend(["--profile", profile])
     command.extend(["config", "--format", "json"])
     result = subprocess.run(
         command,
@@ -37,6 +41,7 @@ def test_proxy_compose_matches_the_public_contract() -> None:
 
     traefik = model["services"]["traefik"]
     assert traefik["image"] == f"localghost-traefik:v{LOCALGHOST_VERSION}"
+    assert traefik["pull_policy"] == "build"
     assert traefik["build"] == {
         "context": str(ROOT / "src" / "localghost"),
         "dockerfile": "Dockerfile",
@@ -105,6 +110,8 @@ def test_https_proxy_adds_loopback_dashboard_with_secure_redirect() -> None:
     )
 
     traefik = model["services"]["traefik"]
+    assert "bootstrap" not in model["services"]
+    assert traefik["pull_policy"] == "build"
     https_port = next(port for port in traefik["ports"] if port["target"] == 443)
     assert https_port["host_ip"] == "127.0.0.1"
     assert https_port["published"] == "18443"
@@ -116,6 +123,15 @@ def test_https_proxy_adds_loopback_dashboard_with_secure_redirect() -> None:
     assert labels[
         "traefik.http.middlewares.localghost-dashboard-secure-redirect.redirectregex.replacement"
     ] == "https://$${1}/dashboard/"
+
+    profiled_model = compose_model(
+        ROOT / "src" / "localghost" / "proxy_compose.yaml",
+        ROOT / "src" / "localghost" / "proxy_compose_https.yaml",
+        profiles=("bootstrap",),
+        LOCALGHOST_HTTP_PORT="18081",
+        LOCALGHOST_HTTPS_PORT="18443",
+    )
+    assert profiled_model["services"]["bootstrap"]["profiles"] == ["bootstrap"]
 
 
 def test_example_compose_exercises_consumer_contract() -> None:
