@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shlex
 from collections.abc import Iterable
+from pathlib import Path
 
 from rich import box
 from rich.console import Console
@@ -137,12 +138,20 @@ def run_plan(
     port: int,
     url: str,
     dry_run: bool,
+    project_root: Path | None = None,
+    working_directory: Path | None = None,
 ) -> None:
-    rows = (
-        ("Framework", framework),
-        ("Command", shlex.join(command)),
-        ("Host port", str(port)),
-        ("Public URL", url),
+    rows = [("Framework", framework)]
+    if project_root:
+        rows.append(("Project root", str(project_root)))
+    if working_directory and working_directory != project_root:
+        rows.append(("Working directory", str(working_directory)))
+    rows.extend(
+        [
+            ("Command", shlex.join(command)),
+            ("Host port", str(port)),
+            ("Public URL", url),
+        ]
     )
     destination_is_error = dry_run
     if _rich_terminal(destination_is_error):

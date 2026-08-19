@@ -404,6 +404,136 @@ def test_astro_plan_explicit_framework(monkeypatch, tmp_path):
     assert plan.framework == "astro"
 
 
+def test_nested_framework_root_drives_name_and_working_directory(
+    monkeypatch, tmp_path
+):
+    root = tmp_path / "customer-portal"
+    nested = root / "src" / "accounts"
+    nested.mkdir(parents=True)
+    (root / ".git").mkdir()
+    (root / "manage.py").touch()
+    (root / "uv.lock").touch()
+    executable(monkeypatch, "uv")
+    monkeypatch.setattr(runner, "_port_available", lambda _: True)
+
+    plan = runner.build_plan(nested, None, None, None, ())
+
+    assert plan.framework == "django"
+    assert plan.name == "customer-portal"
+    assert plan.project_root == root
+    assert plan.working_directory == root
+
+
+def test_framework_search_stops_at_worktree_boundary(tmp_path):
+    outside = tmp_path / "outside"
+    checkout = outside / "checkout"
+    nested = checkout / "src"
+    nested.mkdir(parents=True)
+    (checkout / ".git").touch()
+    (outside / "manage.py").touch()
+
+    with pytest.raises(click.ClickException, match="could not detect"):
+        runner.detect_framework(nested)
+
+
+def test_modern_cakephp_detection_and_plan(monkeypatch, tmp_path):
+    root = tmp_path / "bakery"
+    webroot = root / "webroot"
+    cake = root / "bin" / "cake"
+    webroot.mkdir(parents=True)
+    cake.parent.mkdir()
+    cake.touch()
+    cake.chmod(0o755)
+    (root / "composer.json").write_text(
+        json.dumps({"require": {"cakephp/cakephp": "^5.0"}})
+    )
+    monkeypatch.setattr(runner, "_port_available", lambda _: True)
+
+    plan = runner.build_plan(webroot, None, None, None, ())
+
+    assert plan.framework == "cakephp"
+    assert plan.name == "bakery"
+    assert plan.port == 8765
+    assert plan.project_root == root
+    assert plan.working_directory == root
+    assert plan.command == (
+        "bin/cake", "server", "-H", "0.0.0.0", "-p", "8765"
+    )
+
+
+def test_modern_cakephp_non_executable_wrapper_uses_php(monkeypatch, tmp_path):
+    cake = tmp_path / "bin" / "cake"
+    cake.parent.mkdir()
+    cake.touch()
+    (cake.parent / "cake.php").touch()
+    (tmp_path / "composer.json").write_text(
+        json.dumps({"require": {"cakephp/cakephp": "^4.0"}})
+    )
+    executable(monkeypatch, "php")
+
+    port, command, working_directory = runner.cakephp_command(tmp_path, 9000)
+
+    assert port == 9000
+    assert command[:2] == ("php", "bin/cake.php")
+    assert working_directory == tmp_path
+
+
+def test_legacy_cakephp_uses_webroot_without_naming_it_webroot(
+    monkeypatch, tmp_path
+):
+    root = tmp_path / "legacy-shop"
+    webroot = root / "app" / "webroot"
+    config = root / "app" / "Config"
+    webroot.mkdir(parents=True)
+    config.mkdir()
+    (webroot / "index.php").touch()
+    (config / "core.php").touch()
+    executable(monkeypatch, "php")
+    monkeypatch.setattr(runner, "_port_available", lambda _: True)
+
+    plan = runner.build_plan(webroot, None, None, None, ())
+
+    assert plan.framework == "cakephp"
+    assert plan.name == "legacy-shop"
+    assert plan.project_root == root
+    assert plan.working_directory == webroot
+    assert plan.command == ("php", "-S", "0.0.0.0:8765")
+
+
+def test_laravel_detection_from_public_directory(monkeypatch, tmp_path):
+    root = tmp_path / "orders"
+    public = root / "public"
+    public.mkdir(parents=True)
+    (root / "artisan").touch()
+    (root / "composer.json").write_text(
+        json.dumps({"require": {"laravel/framework": "^12.0"}})
+    )
+    executable(monkeypatch, "php")
+    monkeypatch.setattr(runner, "_port_available", lambda _: True)
+
+    plan = runner.build_plan(public, None, None, None, ())
+
+    assert plan.framework == "laravel"
+    assert plan.name == "orders"
+    assert plan.working_directory == root
+    assert plan.command == (
+        "php", "artisan", "serve", "--host=0.0.0.0", "--port=8000"
+    )
+
+
+def test_php_and_javascript_markers_at_same_root_are_ambiguous(tmp_path):
+    (tmp_path / "artisan").touch()
+    (tmp_path / "composer.json").write_text(
+        json.dumps({"require": {"laravel/framework": "^12.0"}})
+    )
+    (tmp_path / "package.json").write_text(
+        json.dumps({"scripts": {"dev": "vite"}, "dependencies": {"vite": "x"}})
+    )
+
+    with pytest.raises(click.ClickException, match="both vite and laravel"):
+        runner.detect_framework(tmp_path)
+
+
 def test_vite_plan_through_build_plan(monkeypatch, tmp_path):
     (tmp_path / "package.json").write_text(
         json.dumps({
@@ -499,6 +629,29 @@ def test_execute_cleanup_failure_returns_failure(monkeypatch):
     monkeypatch.setattr(runner.subprocess, "Popen", lambda *args, **kwargs: Child())
     plan = runner.RunPlan("x", "custom", ("x",), 1, "p", "")
     assert runner.execute(plan, lambda: None) == 1
+
+
+def test_execute_prefers_planned_working_directory(monkeypatch, tmp_path):
+    monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
+    monkeypatch.setattr(runner, "stop_bridge", lambda plan: None)
+    recorded = {}
+
+    class Child:
+        def wait(self):
+            return 0
+
+    def popen(*args, **kwargs):
+        recorded["cwd"] = kwargs["cwd"]
+        return Child()
+
+    monkeypatch.setattr(runner.subprocess, "Popen", popen)
+    planned = tmp_path / "app" / "webroot"
+    plan = runner.RunPlan(
+        "x", "cakephp", ("php", "-S", "0"), 1, "p", "", tmp_path, planned
+    )
+
+    assert runner.execute(plan, lambda: None, cwd=tmp_path) == 0
+    assert recorded["cwd"] == planned
 
 
 def test_execute_interrupt_terminates_child(monkeypatch):

@@ -5,6 +5,20 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Added
+
+- `localghost run` now detects modern and legacy CakePHP applications and
+  Laravel applications, using their conventional development servers and
+  default ports.
+- Framework detection searches upward to the nearest application root without
+  crossing the Git worktree boundary. The detected root controls the default
+  hostname while a framework may select a different process working directory.
+
+### Changed
+
+- Dry-run and run summaries show the detected project root and, when different,
+  the application process working directory.
+
 ## [1.2.0] - 2026-08-17
 
 ### Fixed

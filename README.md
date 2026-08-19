@@ -61,7 +61,7 @@ uvx localghost --status
 
 ## Running local apps
 
-`localghost run` detects Django, Vite, and Astro projects and serves them
+`localghost run` detects Django, Vite, Astro, CakePHP, and Laravel projects and serves them
 behind the proxy with zero configuration:
 
 ```sh

@@ -10,6 +10,9 @@ your host machine behind the proxy, without a Dockerfile or Compose file.
 | **Django** | `manage.py` in the project directory | 8000 |
 | **Vite** | `package.json` with a `dev` script and `vite` dependency | 5173 |
 | **Astro** | `package.json` with a `dev` script and `astro` dependency | 4321 |
+| **CakePHP 3+** | `bin/cake` and a `cakephp/cakephp` Composer dependency | 8765 |
+| **CakePHP 2** | `app/Config/core.php` and `app/webroot/index.php` | 8765 |
+| **Laravel** | `artisan` and a `laravel/framework` Composer dependency | 8000 |
 
 Detection runs automatically. If more than one framework is detected (for
 example, a Django project that also has a `package.json` with Vite), use
@@ -18,6 +21,13 @@ example, a Django project that also has a `package.json` with Vite), use
 ```sh
 uvx localghost run --framework django
 ```
+
+Localghost searches upward from the selected directory to the nearest
+framework root, stopping at the Git worktree boundary. This means it can be
+run from directories such as `webroot`, `public`, or a nested source package
+without naming the application after that directory. The detected root supplies
+the default public name and application configuration. Frameworks may still
+use a different working directory for their server process.
 
 ## Usage
 
@@ -95,6 +105,20 @@ Declare `packageManager` in
 silently replaced if its executable is missing. Localghost does not inspect
 lockfile contents or timestamps, so the priority is a fallback heuristic rather
 than proof of which lockfile is current.
+
+## PHP runner detection
+
+Modern CakePHP applications run `bin/cake server` from the application root.
+When `bin/cake` is not executable, Localghost uses `php bin/cake.php` if that
+entry point is present. Legacy CakePHP 2 applications run PHP's development
+server from `app/webroot`, while their hostname remains derived from the
+application root. Laravel applications run `php artisan serve` from the
+application root.
+
+PHP framework detection requires both framework-specific files and Composer
+dependency metadata where modern projects provide it. A generic
+`composer.json`, `public`, or `webroot` directory is not enough to select a
+runner automatically.
 
 ### Wrapper scripts
 

@@ -225,7 +225,7 @@ def _trust_status() -> None:
 @click.option(
     "framework",
     "--framework",
-    type=click.Choice(["django", "vite", "astro"]),
+    type=click.Choice(["django", "vite", "astro", "cakephp", "laravel"]),
     help="Resolve otherwise ambiguous framework detection.",
 )
 @click.option("port", "--port", type=click.IntRange(1, 65535), help="Host HTTP port.")
@@ -255,7 +255,9 @@ def run(
     if collision:
         _reclaim_route(collision, plan.name)
     django_warnings = django_settings_warnings(
-        plan, cwd, public_origin=_proxy_origin(plan.name)
+        plan,
+        plan.working_directory or cwd,
+        public_origin=_proxy_origin(plan.name),
     )
     if django_warnings:
         warning("Django settings", django_warnings)
@@ -263,7 +265,7 @@ def run(
     status = execute(
         plan,
         lambda: _run_proxy("up", https_enabled=_https_configured()),
-        cwd=cwd,
+        cwd=plan.working_directory or cwd,
     )
     if status:
         raise click.exceptions.Exit(status)
@@ -278,6 +280,8 @@ def _print_run_plan(plan: RunPlan, dry_run: bool) -> None:
         port=plan.port,
         url=public_origin,
         dry_run=dry_run,
+        project_root=plan.project_root,
+        working_directory=plan.working_directory,
     )
     if dry_run:
         click.echo(plan.bridge_yaml, nl=False)

@@ -36,6 +36,8 @@ class RunPlan:
     port: int
     project: str
     bridge_yaml: str
+    project_root: Path | None = None
+    working_directory: Path | None = None
 
 
 class _TerminationSignal(Exception):
@@ -76,29 +78,41 @@ def build_plan(
     port: int | None,
     command: tuple[str, ...],
 ) -> RunPlan:
-    public_name = name or resolve_name(cwd)
-    validate_name(public_name)
+    cwd = cwd.resolve()
     if command:
+        project_root = cwd
+        working_directory = cwd
         if port is None:
             raise click.ClickException("a custom command requires --port")
         selected_framework = "custom"
         selected_command = command
         selected_port = select_port(port, strict=True)
     else:
-        selected_framework = framework or detect_framework(cwd)
+        selected_framework, project_root = discover_framework(cwd, framework)
+        working_directory = project_root
         if selected_framework == "django":
-            default_port, selected_command = django_command(cwd, port)
+            default_port, selected_command = django_command(project_root, port)
         elif selected_framework == "vite":
-            default_port, selected_command = vite_command(cwd, port)
+            default_port, selected_command = vite_command(project_root, port)
         elif selected_framework == "astro":
-            default_port, selected_command = astro_command(cwd, port)
+            default_port, selected_command = astro_command(project_root, port)
+        elif selected_framework == "cakephp":
+            default_port, selected_command, working_directory = cakephp_command(
+                project_root, port
+            )
+        elif selected_framework == "laravel":
+            default_port, selected_command = laravel_command(project_root, port)
         else:  # Click validates the public option; retain this for direct callers.
-            raise click.ClickException("--framework must be django, vite, or astro")
+            raise click.ClickException(
+                "--framework must be django, vite, astro, cakephp, or laravel"
+            )
         selected_port = select_port(port or default_port, strict=port is not None)
         selected_command = tuple(
             part.format(port=selected_port) for part in selected_command
         )
-    project = _session_project(cwd)
+    public_name = name or resolve_name(project_root)
+    validate_name(public_name)
+    project = _session_project(project_root)
     return RunPlan(
         public_name,
         selected_framework,
@@ -106,32 +120,80 @@ def build_plan(
         selected_port,
         project,
         render_override(
-            create_run_bridge_compose(public_name, selected_port, cwd.resolve())
+            create_run_bridge_compose(public_name, selected_port, project_root)
         ),
+        project_root,
+        working_directory,
     )
 
 
 def detect_framework(cwd: Path) -> str:
-    django = (cwd / "manage.py").is_file()
-    vite = _vite_manifest(cwd) is not None
-    astro = _astro_manifest(cwd) is not None
-    detected = [
-        framework for framework, flag in
-        [("django", django), ("vite", vite), ("astro", astro)]
-        if flag
-    ]
-    if len(detected) > 1:
-        choices = " or ".join(f"--framework {f}" for f in detected)
+    return discover_framework(cwd)[0]
+
+
+def discover_framework(cwd: Path, requested: str | None = None) -> tuple[str, Path]:
+    """Return the nearest matching framework and its application root."""
+    supported = {"django", "vite", "astro", "cakephp", "laravel"}
+    if requested is not None and requested not in supported:
         raise click.ClickException(
-            f"both {' and '.join(detected)} were detected; rerun with "
-            f"{choices}"
+            "--framework must be django, vite, astro, cakephp, or laravel"
         )
-    if detected:
-        return detected[0]
+    start = cwd.resolve()
+    for candidate in _framework_search_path(start):
+        detected = _frameworks_at(candidate)
+        if requested is not None:
+            if requested in detected:
+                return requested, candidate
+            continue
+        if len(detected) > 1:
+            choices = " or ".join(f"--framework {item}" for item in detected)
+            raise click.ClickException(
+                f"both {' and '.join(detected)} were detected; rerun with {choices}"
+            )
+        if detected:
+            return detected[0], candidate
+    names = "Django, Vite, Astro, CakePHP, or Laravel"
+    if requested is not None:
+        raise click.ClickException(
+            f"could not find a {requested} project root from '{start}'"
+        )
     raise click.ClickException(
-        "could not detect Django, Vite, or Astro; provide a command after -- "
+        f"could not detect {names}; provide a command after -- "
         "together with --port"
     )
+
+
+def _framework_search_path(start: Path) -> list[Path]:
+    candidates = [start, *start.parents]
+    boundary = next((path for path in candidates if (path / ".git").exists()), None)
+    if boundary is None:
+        return candidates
+    return candidates[: candidates.index(boundary) + 1]
+
+
+def _frameworks_at(cwd: Path) -> list[str]:
+    composer = _composer_manifest(cwd)
+    cake_dependency = composer is not None and _has_composer_dependency(
+        composer, "cakephp/cakephp"
+    )
+    laravel_dependency = composer is not None and _has_composer_dependency(
+        composer, "laravel/framework"
+    )
+    return [
+        framework
+        for framework, detected in (
+            ("django", (cwd / "manage.py").is_file()),
+            ("vite", _vite_manifest(cwd) is not None),
+            ("astro", _astro_manifest(cwd) is not None),
+            (
+                "cakephp",
+                (cake_dependency and (cwd / "bin" / "cake").is_file())
+                or _legacy_cakephp_root(cwd),
+            ),
+            ("laravel", laravel_dependency and (cwd / "artisan").is_file()),
+        )
+        if detected
+    ]
 
 
 def django_command(
@@ -162,6 +224,69 @@ def django_command(
             "activate a virtualenv, or provide a command after --"
         )
     return requested_port or 8000, (*prefix, "manage.py", "runserver", "0.0.0.0:{port}")
+
+
+def cakephp_command(
+    cwd: Path, requested_port: int | None
+) -> tuple[int, tuple[str, ...], Path]:
+    """Return the appropriate modern or legacy CakePHP development server."""
+    if _legacy_cakephp_root(cwd):
+        _require_executable("php", "CakePHP project runner")
+        return requested_port or 8765, ("php", "-S", "0.0.0.0:{port}"), (
+            cwd / "app" / "webroot"
+        )
+
+    manifest = _composer_manifest(cwd)
+    cake = cwd / "bin" / "cake"
+    if (
+        manifest is None
+        or not _has_composer_dependency(manifest, "cakephp/cakephp")
+        or not cake.is_file()
+    ):
+        raise click.ClickException(
+            "CakePHP requires bin/cake and a cakephp/cakephp Composer dependency"
+        )
+    if os.access(cake, os.X_OK):
+        command = ("bin/cake", "server", "-H", "0.0.0.0", "-p", "{port}")
+    else:
+        cake_php = cwd / "bin" / "cake.php"
+        if not cake_php.is_file():
+            raise click.ClickException(
+                "CakePHP bin/cake is not executable and bin/cake.php was not found"
+            )
+        _require_executable("php", "CakePHP project runner")
+        command = (
+            "php",
+            "bin/cake.php",
+            "server",
+            "-H",
+            "0.0.0.0",
+            "-p",
+            "{port}",
+        )
+    return requested_port or 8765, command, cwd
+
+
+def laravel_command(
+    cwd: Path, requested_port: int | None
+) -> tuple[int, tuple[str, ...]]:
+    manifest = _composer_manifest(cwd)
+    if (
+        manifest is None
+        or not _has_composer_dependency(manifest, "laravel/framework")
+        or not (cwd / "artisan").is_file()
+    ):
+        raise click.ClickException(
+            "Laravel requires artisan and a laravel/framework Composer dependency"
+        )
+    _require_executable("php", "Laravel project runner")
+    return requested_port or 8000, (
+        "php",
+        "artisan",
+        "serve",
+        "--host=0.0.0.0",
+        "--port={port}",
+    )
 
 
 def astro_command(cwd: Path, requested_port: int | None) -> tuple[int, tuple[str, ...]]:
@@ -366,7 +491,9 @@ def execute(
         start_bridge(plan)
         try:
             child = subprocess.Popen(
-                list(plan.command), cwd=cwd or Path.cwd(), start_new_session=True
+                list(plan.command),
+                cwd=plan.working_directory or cwd or Path.cwd(),
+                start_new_session=True,
             )
         except OSError as exc:
             raise click.ClickException(
@@ -555,6 +682,34 @@ def _has_dependency(manifest: dict[str, object], name: str) -> bool:
             for key in _JSON_DEPENDENCY_KEYS
         )
     )
+
+
+def _has_composer_dependency(manifest: dict[str, object], name: str) -> bool:
+    return any(
+        isinstance(manifest.get(group), dict) and name in manifest[group]
+        for group in ("require", "require-dev")
+    )
+
+
+def _composer_manifest(cwd: Path) -> dict[str, object] | None:
+    path = cwd / "composer.json"
+    if not path.is_file():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise click.ClickException(
+            f"could not read valid composer.json: {exc}"
+        ) from exc
+    if not isinstance(value, dict):
+        raise click.ClickException("composer.json must contain an object")
+    return value
+
+
+def _legacy_cakephp_root(cwd: Path) -> bool:
+    return (cwd / "app" / "Config" / "core.php").is_file() and (
+        cwd / "app" / "webroot" / "index.php"
+    ).is_file()
 
 
 def _vite_manifest(cwd: Path) -> dict[str, object] | None:

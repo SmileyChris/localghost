@@ -140,20 +140,24 @@ uvx localghost run --port 3000 -- npm run custom-dev -- --port 3000
 uv run localghost run --directory /path/to/application
 ```
 
-It detects Django from `manage.py` and Vite from a `package.json` dev script
-with a Vite dependency. Django uses the project runner (uv, Poetry, Pipenv, or
-a virtualenv); Vite and Astro use the declared package manager, or select the
+It detects Django, Vite, Astro, CakePHP, and Laravel from framework-specific
+root markers. Django uses the project runner (uv, Poetry, Pipenv, or a
+virtualenv); Vite and Astro use the declared package manager, or select the
 first installed manager from lockfiles in the order Bun, pnpm, Yarn, then npm.
+CakePHP and Laravel use their framework development-server commands.
 An ambiguous project needs `--framework`; custom commands always need `--port`.
 Detected servers bind to `0.0.0.0`, which can expose the raw development port to
 a LAN, and run package scripts with your normal host permissions. The lockfile
 order is only a fallback heuristic; use `packageManager` when multiple
 lockfiles are intentional or one may be stale.
 
-`--name` takes precedence over `COMPOSE_PROJECT_NAME`, then `.env`, then the
-normalized checkout name. Detected applications use port 8000 (Django) or 5173
-(Vite), choosing the next free port when needed; an explicit `--port` is strict
-and fails if occupied. `--dry-run` performs no Docker inspection or startup.
+For detected applications, Localghost searches upward to the nearest framework
+root without crossing the Git worktree boundary. `--name` takes precedence
+over `COMPOSE_PROJECT_NAME`, then `.env`, then that root's normalized name.
+Default ports are 8000 for Django and Laravel, 5173 for Vite, 4321 for Astro,
+and 8765 for CakePHP. Localghost chooses the next free port when needed; an
+explicit `--port` is strict and fails if occupied. `--dry-run` performs no
+Docker inspection or startup.
 
 The command removes its bridge on normal exit, Ctrl+C, or SIGTERM, while leaving
 the shared proxy running. It refuses an existing route instead of replacing it;
