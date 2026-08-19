@@ -1,15 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- Add configured host/Compose runs, detached session metadata, and the
-  `localghost manage` session commands.
-- Validate configured run values and interpolate `{port}` placeholders in
-  configured argv commands.
-- Detached session status now handles Compose sessions, failed host startup
-  removes its bridge, and `manage stop`/`manage clean` reuse the stored bridge
-  configuration so they can remove detached bridges reliably.
-
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 
@@ -23,11 +13,43 @@ uses [Semantic Versioning](https://semver.org/).
 - Framework detection searches upward to the nearest application root without
   crossing the Git worktree boundary. The detected root controls the default
   hostname while a framework may select a different process working directory.
+- Add configured host/Compose runs, detached session metadata, and the
+  `localghost manage` session commands.
+- Validate configured run values and interpolate `{port}` placeholders in
+  configured argv commands.
 
 ### Changed
 
 - Dry-run and run summaries show the detected project root and, when different,
   the application process working directory.
+- Detached session status now handles Compose sessions, failed host startup
+  removes its bridge, and `manage stop`/`manage clean` reuse the stored bridge
+  configuration so they can remove detached bridges reliably.
+- `localghost manage stop` now reports an error and keeps the session record
+  when a process survives `SIGKILL`, instead of discarding the only reference
+  to a still-running application. `manage stop --all` continues past such a
+  session and reports the failures once every other session is stopped.
+- Unreadable session records are reported instead of being silently skipped,
+  so a corrupt file can no longer hide a running application from
+  `manage list`, `manage stop`, and `manage clean`.
+
+### Fixed
+
+- Run-mode detection now performs the same upward framework search as the
+  runner, so `localghost run` detects CakePHP, Laravel, and any project
+  invoked from a subdirectory instead of refusing with "could not detect a
+  run mode".
+- `[run].framework` in `.localghost.toml` accepts every framework `--framework`
+  accepts; CakePHP and Laravel were previously rejected by the config file.
+- `localghost run --mode compose` starts the shared proxy and reports the
+  public URL. It previously ran `docker compose up` with nothing routing to it.
+- Detached runs start in the framework's working directory and record the
+  project root, so legacy CakePHP serves the right docroot and a session
+  started from a subdirectory is matched instead of duplicated.
+- `localghost generate --dry-run` with a command prints the configuration
+  instead of writing `.localghost.toml`.
+- Detached session state honours `XDG_STATE_HOME`, matching the location
+  documented for every other piece of Localghost state.
 
 ## [1.2.0] - 2026-08-17
 

@@ -32,15 +32,19 @@ For a Docker Compose application, generate the integration configuration:
 uvx localghost generate
 ```
 
-For a Django, Vite, or Astro server running directly on the host:
+For a Django, Vite, Astro, CakePHP, or Laravel server running directly on the
+host:
 
 ```sh
 uvx localghost run
 ```
 
-The framework is auto-detected. See
-[Running host applications](running-host-apps.md) for the full workflow,
-custom ports, explicit framework selection, and Django runner resolution.
+The framework and the run mode are auto-detected, searching upward to the
+nearest application root. `--detach` runs the application in the background and
+`localghost manage` inspects and stops those sessions. See
+[Running host applications](running-host-apps.md) for the full workflow, custom
+ports, explicit framework selection, `.localghost.toml` settings, detached
+sessions, and Django runner resolution.
 
 For the complete Compose contract, project naming, secondary services, and
 host-native workflows, see [Integrate applications](integrating-applications.md)

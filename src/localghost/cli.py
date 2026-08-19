@@ -19,7 +19,15 @@ from pathlib import Path
 import click
 
 from .compose import resolve_compose
-from .config import RunConfig, config_path, detect_mode, load_config, write_run_config
+from .config import (
+    CONFIG_NAME,
+    RunConfig,
+    config_path,
+    detect_mode,
+    load_config,
+    render_run_config,
+    write_run_config,
+)
 from .feedback import (
     action,
     choices,
@@ -48,8 +56,10 @@ from .generator import (
     write_extended,
     write_new,
 )
+from .paths import state_directory
 from .routes import active_routes, proxy_is_running
 from .runner import (
+    SUPPORTED_FRAMEWORKS,
     RunPlan,
     build_plan,
     django_settings_warnings,
@@ -146,8 +156,14 @@ def manage(ctx: click.Context) -> None:
 
 
 @manage.command("list")
-@click.option("--json", "as_json", is_flag=True)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Print the session records as JSON instead of a table.",
+)
 def manage_list(as_json: bool) -> None:
+    """List detached sessions and whether each one is still running."""
     _manage_list(as_json)
 
 
@@ -174,6 +190,7 @@ def _manage_list(as_json: bool) -> None:
 @manage.command("attach")
 @click.argument("session_id")
 def manage_attach(session_id: str) -> None:
+    """Print the captured log of a detached session."""
     session = next((item for item in sessions() if item.id == session_id), None)
     if session is None:
         raise click.ClickException(f"unknown session '{session_id}'")
@@ -186,8 +203,15 @@ def manage_attach(session_id: str) -> None:
 
 @manage.command("stop")
 @click.argument("session_id", required=False)
-@click.option("--all", "stop_all", is_flag=True)
+@click.option(
+    "--all", "stop_all", is_flag=True, help="Stop every detached session."
+)
 def manage_stop(session_id: str | None, stop_all: bool) -> None:
+    """Stop one detached session, or every session with --all.
+
+    A host session is asked to exit with SIGTERM and force-quit with SIGKILL
+    after a two second grace period; its bridge is removed either way.
+    """
     if bool(session_id) == stop_all:
         raise click.UsageError("provide a session ID or --all")
     targets = (
@@ -197,13 +221,25 @@ def manage_stop(session_id: str | None, stop_all: bool) -> None:
     )
     if not targets:
         raise click.ClickException("no matching managed session")
+    stopped = 0
+    failures = []
     for session in targets:
-        stop_session(session)
-    success(f"Stopped {len(targets)} session(s).")
+        # One stubborn process must not strand the sessions after it.
+        try:
+            stop_session(session)
+        except click.ClickException as exc:
+            failures.append(exc.message)
+        else:
+            stopped += 1
+    if stopped:
+        success(f"Stopped {stopped} session(s).")
+    if failures:
+        raise click.ClickException("; ".join(failures))
 
 
 @manage.command("clean")
 def manage_clean() -> None:
+    """Remove records and bridges left behind by sessions that already exited."""
     success(f"Removed {clean_sessions()} stale session(s).")
 
 
@@ -306,11 +342,19 @@ def _trust_status() -> None:
 @click.option(
     "framework",
     "--framework",
-    type=click.Choice(["django", "vite", "astro", "cakephp", "laravel"]),
+    type=click.Choice(SUPPORTED_FRAMEWORKS),
     help="Resolve otherwise ambiguous framework detection.",
 )
 @click.option("port", "--port", type=click.IntRange(1, 65535), help="Host HTTP port.")
-@click.option("mode", "--mode", type=click.Choice(["host", "compose"]))
+@click.option(
+    "mode",
+    "--mode",
+    type=click.Choice(["host", "compose"]),
+    help=(
+        "Run the application directly on the host, or hand it to Docker "
+        "Compose. Detected from the project when omitted."
+    ),
+)
 @click.option(
     "detach",
     "--detach",
@@ -362,7 +406,7 @@ def run(
         _run_compose(cwd, name, detach)
         return
     plan = build_plan(cwd, name, framework, port, command)
-    matching = find_matching(name=plan.name, cwd=cwd)
+    matching = find_matching(name=plan.name, cwd=plan.project_root or cwd)
     if matching:
         message = (
             f"Session {matching.id} is already running; attach with: "
@@ -412,9 +456,11 @@ def _detach_host(plan: RunPlan, cwd: Path) -> None:
     try:
         log.parent.mkdir(parents=True, exist_ok=True)
         with log.open("ab") as handle:
+            # `start_new_session` makes the child a process-group leader, which
+            # is what lets `sessions.stop` signal the group by its recorded pid.
             child = subprocess.Popen(
                 list(plan.command),
-                cwd=cwd,
+                cwd=plan.working_directory or cwd,
                 stdout=handle,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
@@ -423,7 +469,7 @@ def _detach_host(plan: RunPlan, cwd: Path) -> None:
                 mode="host",
                 name=plan.name,
                 port=plan.port,
-                cwd=cwd,
+                cwd=plan.project_root or cwd,
                 command=plan.command,
                 log=log,
                 pid=child.pid,
@@ -443,6 +489,11 @@ def _detach_host(plan: RunPlan, cwd: Path) -> None:
 
 def _run_compose(cwd: Path, name: str | None, detach: bool) -> None:
     project = name or cwd.name
+    title()
+    # The proxy has to be reconciled before the application comes up, otherwise
+    # a foreground `compose up` blocks before anything can route to it.
+    _run_proxy("up", https_enabled=_https_configured())
+    info(f"Public URL: {_proxy_origin(project)}")
     command = ["docker", "compose", "--project-name", project, "up"]
     if detach:
         command.append("--detach")
@@ -583,11 +634,7 @@ def _run_proxy(
 
 
 def _state_directory() -> Path:
-    configured = os.environ.get("LOCALGHOST_STATE_DIR")
-    if configured:
-        return Path(configured)
-    state_home = os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")
-    return Path(state_home) / "localghost"
+    return state_directory()
 
 
 def _public_root_path() -> Path:
@@ -950,10 +997,15 @@ def _generate_without_compose(
         if port is None:
             raise click.ClickException("a custom command requires --port")
         config = RunConfig(mode="host", name=service_name, port=port, command=command)
+        target = Path(CONFIG_NAME)
+        if dry_run:
+            click.echo(render_run_config(config), nl=False)
+            return
+        existed = target.exists()
         backup = write_run_config(
-            Path(".localghost.toml"), config, extend=extend, interactive=interactive
+            target, config, extend=extend, interactive=interactive
         )
-        success("Created .localghost.toml.")
+        success(f"{'Updated' if existed else 'Created'} {CONFIG_NAME}.")
         if backup:
             info(f"Backup: {backup}")
         return

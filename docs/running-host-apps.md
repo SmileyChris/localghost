@@ -38,7 +38,31 @@ cd my-django-project
 uvx localghost run
 ```
 
-### Configured and detached runs
+### Host and Compose runs
+
+`localghost run` serves either a host process or a Docker Compose project. The
+mode is detected from the directory: a Compose file beside the invocation
+selects `compose`, and an application root found by the framework search
+selects `host`. When both are present in the same directory, name the one you
+want:
+
+```sh
+uvx localghost run --mode host
+uvx localghost run --mode compose
+```
+
+In `compose` mode Localghost starts the shared proxy, then hands the project to
+`docker compose up`. Because Compose owns the application's configuration, the
+host-only options (`--framework`, `--port`, and a `--` command) are rejected in
+this mode.
+
+!!! note
+
+    `run --mode` chooses how an application is *started* and takes `host` or
+    `compose`. It is unrelated to `generate --mode`, which chooses what
+    configuration to *write* and takes `dockerfile` or `host`.
+
+### Configured runs
 
 Projects may keep repeatable run settings in `.localghost.toml`:
 
@@ -46,24 +70,59 @@ Projects may keep repeatable run settings in `.localghost.toml`:
 [run]
 mode = "host"
 name = "my-app"
+framework = "django"
 port = 8080
 command = ["./server", "--port", "{port}"]
 ```
 
-Command-line options take precedence over this file. Use `--config PATH` for a
-different configuration. `--detach` records the process outside the project
-directory and keeps its output in Localghost's state directory:
+| Key | Type | Meaning |
+|-----|------|---------|
+| `mode` | `"host"` or `"compose"` | How to start the application. Detected when omitted. |
+| `name` | string | Public name, serving the app at `NAME.localhost`. Defaults to the project root's name. |
+| `framework` | `django`, `vite`, `astro`, `cakephp`, or `laravel` | Resolves otherwise ambiguous detection, exactly like `--framework`. |
+| `port` | integer, 1–65535 | Host HTTP port. The framework default is used when omitted. |
+| `command` | array of strings | Argv to run instead of the framework's server. `{port}` is replaced with the selected port. |
+
+Every key is optional, and an unrecognised key is an error rather than being
+ignored — a misspelled setting fails loudly instead of silently doing nothing.
+
+Settings are layered: a command-line option wins over `.localghost.toml`, which
+wins over automatic detection. Use `--config PATH` to read a different file.
+
+`localghost generate` writes this file for you when given a command:
+
+```sh
+uvx localghost generate --port 8080 -- ./server --port 8080
+```
+
+It refuses to overwrite an existing `.localghost.toml` unless `--extend` is
+given, keeps a `.bak` copy when it does rewrite one, and prints the
+configuration without writing anything under `--dry-run`.
+
+### Detached runs
+
+`--detach` records the process outside the project directory and keeps its
+output in Localghost's state directory:
 
 ```sh
 localghost run --detach
 localghost manage list
+localghost manage list --json
 localghost manage attach SESSION_ID
 localghost manage stop SESSION_ID
+localghost manage stop --all
 ```
 
-`localghost manage clean` removes stale metadata and only the recorded,
-Localghost-managed host bridge. `localghost down` continues to control only
-the shared proxy.
+`localghost manage` on its own lists sessions, the same as `manage list`.
+Session records live in `${XDG_STATE_HOME:-$HOME/.local/state}/localghost/sessions`
+(or `$LOCALGHOST_STATE_DIR` when set). A host session's liveness is probed by
+its recorded process ID and a Compose session's by `docker compose ps`.
+
+`manage stop` asks a host process to exit with `SIGTERM`, then force-quits it
+with `SIGKILL` after a two second grace period; it reports an error and keeps
+the record if the process somehow survives. `localghost manage clean` removes
+records and bridges left by sessions that already exited, leaving running ones
+alone. `localghost down` continues to control only the shared proxy.
 
 The app is available at `https://my-django-project.localhost`. Press Ctrl+C to
 stop it.

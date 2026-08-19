@@ -40,6 +40,15 @@ class RunPlan:
     working_directory: Path | None = None
 
 
+SUPPORTED_FRAMEWORKS = ("django", "vite", "astro", "cakephp", "laravel")
+
+
+def framework_choices(prefix: str) -> str:
+    """Render the supported framework list for an error message."""
+    *leading, last = SUPPORTED_FRAMEWORKS
+    return f"{prefix} must be {', '.join(leading)}, or {last}"
+
+
 class _TerminationSignal(Exception):
     """Internal control flow used to make termination run normal cleanup."""
 
@@ -105,9 +114,7 @@ def build_plan(
         elif selected_framework == "laravel":
             default_port, selected_command = laravel_command(project_root, port)
         else:  # Click validates the public option; retain this for direct callers.
-            raise click.ClickException(
-                "--framework must be django, vite, astro, cakephp, or laravel"
-            )
+            raise click.ClickException(framework_choices("--framework"))
         selected_port = select_port(port or default_port, strict=port is not None)
         selected_command = tuple(
             part.format(port=selected_port) for part in selected_command
@@ -133,13 +140,23 @@ def detect_framework(cwd: Path) -> str:
     return discover_framework(cwd)[0]
 
 
+def host_project_root(cwd: Path) -> Path | None:
+    """Return the nearest application root, or None when none is detected.
+
+    Unlike `discover_framework` this never raises: mode detection only needs to
+    know whether a host application exists, and an ambiguous root is reported
+    later with framework-specific guidance.
+    """
+    for candidate in _framework_search_path(cwd.resolve()):
+        if _frameworks_at(candidate):
+            return candidate
+    return None
+
+
 def discover_framework(cwd: Path, requested: str | None = None) -> tuple[str, Path]:
     """Return the nearest matching framework and its application root."""
-    supported = {"django", "vite", "astro", "cakephp", "laravel"}
-    if requested is not None and requested not in supported:
-        raise click.ClickException(
-            "--framework must be django, vite, astro, cakephp, or laravel"
-        )
+    if requested is not None and requested not in SUPPORTED_FRAMEWORKS:
+        raise click.ClickException(framework_choices("--framework"))
     start = cwd.resolve()
     for candidate in _framework_search_path(start):
         detected = _frameworks_at(candidate)

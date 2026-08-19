@@ -11,6 +11,8 @@ from pathlib import Path
 
 import click
 
+from .runner import SUPPORTED_FRAMEWORKS, framework_choices, host_project_root
+
 CONFIG_NAME = ".localghost.toml"
 
 
@@ -44,10 +46,8 @@ def load_config(path: Path) -> RunConfig:
     if name is not None and (not isinstance(name, str) or not name):
         raise click.ClickException("[run].name must be a non-empty string")
     framework = values.get("framework")
-    if framework is not None and framework not in {"django", "vite", "astro"}:
-        raise click.ClickException(
-            "[run].framework must be django, vite, or astro"
-        )
+    if framework is not None and framework not in SUPPORTED_FRAMEWORKS:
+        raise click.ClickException(framework_choices("[run].framework"))
     command = values.get("command", ())
     if not isinstance(command, (list, tuple)) or not all(
         isinstance(item, str) for item in command
@@ -85,15 +85,17 @@ def detect_mode(
             "docker-compose.yml",
         )
     )
-    host = (directory / "manage.py").is_file() or (directory / "package.json").is_file()
-    if compose and host:
+    host_root = host_project_root(directory)
+    if compose and host_root == directory.resolve():
         raise click.ClickException(
             "both Compose and a host framework were detected; provide "
             "--mode host or --mode compose"
         )
     if compose:
+        # A Compose file beside the invocation wins over an application root
+        # found further up the tree; the nearer marker is the specific one.
         return "compose"
-    if host:
+    if host_root is not None:
         return "host"
     raise click.ClickException(
         "could not detect a run mode; provide --mode, a framework, or a "

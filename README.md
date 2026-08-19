@@ -61,8 +61,8 @@ uvx localghost --status
 
 ## Running local apps
 
-`localghost run` detects Django, Vite, Astro, CakePHP, and Laravel projects and serves them
-behind the proxy with zero configuration:
+`localghost run` detects Django, Vite, Astro, CakePHP, Laravel, and Docker
+Compose projects and serves them behind the proxy with zero configuration:
 
 ```sh
 cd my-project
@@ -71,6 +71,17 @@ uvx localghost run
 
 The app is available at `https://my-project.localhost` (or `http://` if HTTPS
 is not configured). Press Ctrl+C to stop it.
+
+Run it in the background with `--detach` and manage it afterwards:
+
+```sh
+uvx localghost run --detach
+uvx localghost manage list
+uvx localghost manage stop SESSION_ID
+```
+
+Repeatable settings live in a `.localghost.toml` file; see
+[Running host applications](docs/running-host-apps.md).
 
 ## Documentation
 

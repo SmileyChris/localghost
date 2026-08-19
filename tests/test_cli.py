@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 from subprocess import CompletedProcess
 
@@ -8,6 +9,8 @@ from click.testing import CliRunner
 
 from localghost.cli import LOCALGHOST_VERSION, cli
 from localghost.runner import RunPlan
+from localghost.sessions import create
+from localghost.sessions import sessions as sessions_list
 from localghost.trust import PublicCertificate
 
 
@@ -866,6 +869,251 @@ def test_no_compose_interactive_defaults_to_detected_dockerfile(monkeypatch) -> 
         assert "Application type" in result.output
         assert "Container HTTP port" in result.output
         assert "build: ." in Path("compose.yaml").read_text(encoding="utf-8")
+
+
+def test_compose_run_detached_records_a_session(monkeypatch, tmp_path) -> None:
+    (tmp_path / "compose.yaml").write_text("services: {}\n")
+    commands = []
+    monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
+
+    def _run(command, **kwargs):
+        commands.append(command)
+        return CompletedProcess(command, 0)
+
+    monkeypatch.setattr("localghost.cli.subprocess.run", _run)
+
+    result = CliRunner().invoke(
+        cli,
+        ["run", "-C", str(tmp_path), "--mode", "compose", "--name", "demo", "--detach"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert commands[0][-1] == "--detach"
+    assert "Started detached Compose session for demo." in result.output
+    recorded = sessions_list()
+    assert [(item.mode, item.name) for item in recorded] == [("compose", "demo")]
+
+
+def test_compose_run_propagates_a_failure(monkeypatch, tmp_path) -> None:
+    (tmp_path / "compose.yaml").write_text("services: {}\n")
+    monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "localghost.cli.subprocess.run",
+        lambda command, **kwargs: CompletedProcess(command, 2),
+    )
+
+    result = CliRunner().invoke(
+        cli, ["run", "-C", str(tmp_path), "--mode", "compose", "--name", "demo"]
+    )
+
+    assert result.exit_code == 2
+    assert sessions_list() == []
+
+
+def test_compose_run_rejects_host_only_settings(tmp_path) -> None:
+    (tmp_path / "compose.yaml").write_text("services: {}\n")
+
+    result = CliRunner().invoke(
+        cli, ["run", "-C", str(tmp_path), "--mode", "compose", "--port", "3000"]
+    )
+
+    assert result.exit_code != 0
+    assert "Compose mode does not accept" in result.output
+
+
+def test_generate_command_requires_a_port() -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["generate", "--no-input", "--", "./server"])
+
+    assert result.exit_code != 0
+    assert "a custom command requires --port" in result.output
+
+
+def test_generate_command_rejects_dockerfile_mode() -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli,
+            [
+                "generate",
+                "--no-input",
+                "--mode",
+                "dockerfile",
+                "--port",
+                "3000",
+                "--",
+                "./server",
+            ],
+        )
+
+    assert result.exit_code != 0
+    assert "cannot be combined with --mode dockerfile" in result.output
+
+
+def test_generate_command_writes_and_then_extends_the_config() -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        created = runner.invoke(
+            cli, ["generate", "--no-input", "--port", "3000", "--", "./server"]
+        )
+        assert created.exit_code == 0, created.output
+        assert "Created .localghost.toml." in created.output
+
+        updated = runner.invoke(
+            cli,
+            [
+                "generate",
+                "--no-input",
+                "--extend",
+                "--port",
+                "4000",
+                "--",
+                "./server",
+            ],
+        )
+
+        assert updated.exit_code == 0, updated.output
+        assert "Updated .localghost.toml." in updated.output
+        assert "Backup: .localghost.toml.bak" in updated.output
+        assert "port = 4000" in Path(".localghost.toml").read_text(encoding="utf-8")
+
+
+def test_generate_command_refuses_to_overwrite_without_extend() -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        Path(".localghost.toml").write_text("[run]\nport = 1\n")
+
+        result = runner.invoke(
+            cli, ["generate", "--no-input", "--port", "3000", "--", "./server"]
+        )
+
+        assert result.exit_code != 0
+        assert "--extend" in result.output
+
+
+def test_generate_command_dry_run_prints_without_writing() -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli,
+            ["generate", "--no-input", "--dry-run", "--port", "3000", "--", "./server"],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert not Path(".localghost.toml").exists()
+        assert "[run]" in result.output
+        assert "port = 3000" in result.output
+
+
+def test_compose_run_starts_the_proxy_and_reports_the_public_url(
+    monkeypatch, tmp_path
+) -> None:
+    (tmp_path / "compose.yaml").write_text("services: {}\n")
+    calls: list[object] = []
+    monkeypatch.setattr(
+        "localghost.cli._run_proxy", lambda *args, **kwargs: calls.append("proxy")
+    )
+
+    def _run(command, **kwargs):
+        calls.append(command)
+        return CompletedProcess(command, 0)
+
+    monkeypatch.setattr("localghost.cli.subprocess.run", _run)
+
+    result = CliRunner().invoke(
+        cli, ["run", "-C", str(tmp_path), "--mode", "compose", "--name", "demo"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls[0] == "proxy", "the proxy must be up before the application starts"
+    assert calls[1] == ["docker", "compose", "--project-name", "demo", "up"]
+    assert "http://demo.localhost" in result.output
+
+
+def test_run_matches_an_existing_session_started_from_the_project_root(
+    monkeypatch, tmp_path
+) -> None:
+    root = tmp_path / "site"
+    nested = root / "accounts"
+    nested.mkdir(parents=True)
+    (root / ".git").mkdir()
+    (root / "manage.py").touch()
+    plan = RunPlan(
+        "demo",
+        "django",
+        ("run",),
+        3000,
+        "session",
+        "services: {}\n",
+        project_root=root,
+        working_directory=root,
+    )
+    monkeypatch.setattr("localghost.cli.build_plan", lambda *args: plan)
+    monkeypatch.setattr(
+        "localghost.cli._run_proxy",
+        lambda *args, **kwargs: pytest.fail("started the proxy"),
+    )
+    monkeypatch.setattr(
+        "localghost.cli.execute", lambda *args, **kwargs: pytest.fail("ran")
+    )
+    create(
+        mode="host",
+        name="demo",
+        port=3000,
+        cwd=root,
+        command=("run",),
+        log=tmp_path / "demo.log",
+        pid=os.getpid(),
+    )
+
+    result = CliRunner().invoke(cli, ["run", "-C", str(nested)])
+
+    assert result.exit_code == 0, result.output
+    assert "is already running" in result.output
+
+
+def test_detached_host_runs_in_the_planned_working_directory(
+    monkeypatch, tmp_path, cli_module
+):
+    root = tmp_path / "app"
+    docroot = root / "webroot"
+    docroot.mkdir(parents=True)
+    plan = RunPlan(
+        "demo",
+        "cakephp",
+        ("php", "-S", "127.0.0.1:3000"),
+        3000,
+        "session",
+        "services: {}\n",
+        project_root=root,
+        working_directory=docroot,
+    )
+    recorded: dict[str, object] = {}
+    monkeypatch.setattr(cli_module, "_run_proxy", lambda *args, **kwargs: None)
+    monkeypatch.setattr(cli_module, "start_bridge", lambda selected: None)
+    monkeypatch.setattr(
+        cli_module, "_session_log_path", lambda name: tmp_path / f"{name}.log"
+    )
+
+    class _Child:
+        pid = 4321
+
+    def _popen(command, **kwargs):
+        recorded["popen_cwd"] = kwargs["cwd"]
+        return _Child()
+
+    monkeypatch.setattr(cli_module.subprocess, "Popen", _popen)
+    monkeypatch.setattr(
+        cli_module,
+        "create_session",
+        lambda **kwargs: recorded.update(session_cwd=kwargs["cwd"]),
+    )
+
+    cli_module._detach_host(plan, tmp_path)
+
+    assert recorded["popen_cwd"] == docroot
+    assert recorded["session_cwd"] == root
 
 
 def test_detached_start_failure_removes_bridge(monkeypatch, tmp_path, cli_module):

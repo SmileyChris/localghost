@@ -12,6 +12,11 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
+import click
+
+from .feedback import warning
+from .paths import state_directory
+
 
 @dataclass
 class Session:
@@ -32,14 +37,7 @@ class Session:
 
 
 def state_dir() -> Path:
-    return (
-        Path(
-            os.environ.get(
-                "LOCALGHOST_STATE_DIR", Path.home() / ".local" / "state" / "localghost"
-            )
-        )
-        / "sessions"
-    )
+    return state_directory() / "sessions"
 
 
 def _path(session_id: str) -> Path:
@@ -57,11 +55,16 @@ def save(session: Session) -> None:
 
 def sessions() -> list[Session]:
     result = []
+    unreadable = []
     for path in sorted(state_dir().glob("*.json")):
         try:
             result.append(Session(**json.loads(path.read_text(encoding="utf-8"))))
-        except (OSError, ValueError, TypeError):
-            continue
+        except (OSError, ValueError, TypeError) as exc:
+            # Dropping the record silently would hide a still-running
+            # application from `manage list`, `stop`, and `clean`.
+            unreadable.append(f"{path.name}: {exc}")
+    if unreadable:
+        warning("Unreadable session records", unreadable)
     return result
 
 
@@ -137,6 +140,13 @@ def stop(session: Session) -> None:
         if alive(session):
             with suppress(ProcessLookupError, PermissionError):
                 os.killpg(session.pid, signal.SIGKILL)
+        if alive(session):
+            # Removing the record here would orphan the process: nothing else
+            # remembers its pid, bridge, or log.
+            raise click.ClickException(
+                f"session {session.id} did not stop; process {session.pid} "
+                "is still running"
+            )
     elif session.mode == "compose" and session.project:
         subprocess.run(
             ["docker", "compose", "--project-name", session.project, "down"],

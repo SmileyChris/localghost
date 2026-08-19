@@ -76,6 +76,22 @@ when the existing configuration cannot be merged safely.
 For non-interactive use, pass `--extend` explicitly. Use another output file or
 `--dry-run` when you prefer to merge the result manually.
 
+## Host run configuration
+
+Passing a command after `--` writes a `.localghost.toml` run configuration
+instead of a Compose override, recording the argv `localghost run` should use:
+
+```sh
+uvx localghost generate --port 8080 -- ./server --port 8080
+```
+
+`--port` is required in this form, and it cannot be combined with
+`--mode dockerfile`. The same protections apply as for Compose overrides: an
+existing `.localghost.toml` is left alone unless `--extend` is given, a `.bak`
+copy is kept before rewriting (rotating to `.bak.1`, `.bak.2`, and so on), and
+`--dry-run` prints the configuration without writing it. See
+[Running host applications](running-host-apps.md) for what each key means.
+
 Compose only loads `compose.override.yaml` automatically. A different output
 name must be supplied explicitly alongside the base file:
 

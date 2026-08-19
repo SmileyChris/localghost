@@ -873,3 +873,73 @@ def test_termination_falls_back_to_send_signal(monkeypatch):
     )
     runner._terminate_process_tree(Child(), runner.signal.SIGTERM)
     assert received == [runner.signal.SIGTERM]
+
+
+def _composer(tmp_path, *packages):
+    (tmp_path / "composer.json").write_text(
+        json.dumps({"require": {name: "*" for name in packages}})
+    )
+
+
+def test_composer_manifest_rejects_malformed_json(tmp_path):
+    (tmp_path / "composer.json").write_text("{not json")
+
+    with pytest.raises(click.ClickException, match="could not read valid composer"):
+        runner._composer_manifest(tmp_path)
+
+
+def test_composer_manifest_rejects_a_non_object(tmp_path):
+    (tmp_path / "composer.json").write_text("[]")
+
+    with pytest.raises(click.ClickException, match="must contain an object"):
+        runner._composer_manifest(tmp_path)
+
+
+def test_composer_manifest_is_absent_without_a_file(tmp_path):
+    assert runner._composer_manifest(tmp_path) is None
+
+
+def test_cakephp_requires_its_binary_and_dependency(tmp_path):
+    _composer(tmp_path, "cakephp/cakephp")
+
+    with pytest.raises(click.ClickException, match="requires bin/cake"):
+        runner.cakephp_command(tmp_path, None)
+
+
+def test_cakephp_rejects_a_non_executable_binary_without_a_php_entrypoint(tmp_path):
+    _composer(tmp_path, "cakephp/cakephp")
+    binary = tmp_path / "bin" / "cake"
+    binary.parent.mkdir()
+    binary.touch(mode=0o644)
+
+    with pytest.raises(click.ClickException, match="bin/cake.php was not found"):
+        runner.cakephp_command(tmp_path, None)
+
+
+def test_laravel_requires_artisan_and_its_dependency(tmp_path):
+    _composer(tmp_path, "laravel/framework")
+
+    with pytest.raises(click.ClickException, match="requires artisan"):
+        runner.laravel_command(tmp_path, None)
+
+
+def test_discover_framework_reports_a_missing_requested_root(tmp_path):
+    (tmp_path / ".git").mkdir()
+
+    with pytest.raises(click.ClickException, match="could not find a django project"):
+        runner.discover_framework(tmp_path, "django")
+
+
+def test_discover_framework_rejects_an_unsupported_framework(tmp_path):
+    with pytest.raises(click.ClickException, match="--framework must be"):
+        runner.discover_framework(tmp_path, "rails")
+
+
+def test_discover_framework_keeps_walking_past_an_unrelated_root(tmp_path):
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "manage.py").touch()
+    nested = tmp_path / "frontend"
+    nested.mkdir()
+    (nested / "package.json").write_text(json.dumps({"scripts": {"dev": "vite"}}))
+
+    assert runner.discover_framework(nested, "django") == ("django", tmp_path)
