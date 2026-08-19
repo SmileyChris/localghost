@@ -48,6 +48,8 @@ uses [Semantic Versioning](https://semver.org/).
   started from a subdirectory is matched instead of duplicated.
 - `localghost generate --dry-run` with a command prints the configuration
   instead of writing `.localghost.toml`.
+- A detached run no longer prints the foreground banner telling the user to
+  pass `--detach`.
 - Detached session state honours `XDG_STATE_HOME`, matching the location
   documented for every other piece of Localghost state.
 

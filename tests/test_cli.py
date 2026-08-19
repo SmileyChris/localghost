@@ -1073,6 +1073,32 @@ def test_run_matches_an_existing_session_started_from_the_project_root(
     assert "is already running" in result.output
 
 
+def test_detached_run_does_not_print_the_foreground_banner(
+    monkeypatch, tmp_path
+) -> None:
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "manage.py").touch()
+    plan = RunPlan(
+        "demo",
+        "django",
+        ("run",),
+        3000,
+        "session",
+        "services: {}\n",
+        project_root=tmp_path,
+        working_directory=tmp_path,
+    )
+    monkeypatch.setattr("localghost.cli.build_plan", lambda *args: plan)
+    monkeypatch.setattr("localghost.cli.find_route_collision", lambda name: None)
+    monkeypatch.setattr("localghost.cli._detach_host", lambda *args: None)
+
+    result = CliRunner().invoke(cli, ["run", "--detach", "-C", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert "Starting foreground application" not in result.output
+    assert "Ctrl+C" not in result.output
+
+
 def test_detached_host_runs_in_the_planned_working_directory(
     monkeypatch, tmp_path, cli_module
 ):

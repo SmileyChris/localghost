@@ -430,7 +430,7 @@ def run(
     )
     if django_warnings:
         warning("Django settings", django_warnings)
-    _print_run_plan(plan, dry_run=False)
+    _print_run_plan(plan, dry_run=False, detach=detach)
     if detach:
         _detach_host(plan, cwd)
         return
@@ -515,7 +515,7 @@ def _run_compose(cwd: Path, name: str | None, detach: bool) -> None:
         success(f"Started detached Compose session for {project}.")
 
 
-def _print_run_plan(plan: RunPlan, dry_run: bool) -> None:
+def _print_run_plan(plan: RunPlan, dry_run: bool, detach: bool = False) -> None:
     public_origin = _proxy_origin(plan.name)
     run_plan(
         framework=plan.framework,
@@ -528,6 +528,11 @@ def _print_run_plan(plan: RunPlan, dry_run: bool) -> None:
     )
     if dry_run:
         click.echo(plan.bridge_yaml, nl=False)
+    elif detach:
+        info(
+            "Starting the application in the background; inspect and stop it "
+            "with localghost manage."
+        )
     else:
         info(
             "Starting foreground application; press Ctrl+C to stop it. "
