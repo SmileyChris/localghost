@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import tomllib
@@ -33,20 +34,34 @@ def load_config(path: Path) -> RunConfig:
     values = document.get("run", {})
     if not isinstance(values, dict):
         raise click.ClickException(f"'{path}' [run] must be a table")
+    unknown = sorted(set(values) - {"mode", "name", "framework", "port", "command"})
+    if unknown:
+        raise click.ClickException(f"unknown [run] setting '{unknown[0]}'")
+    mode = values.get("mode")
+    if mode is not None and mode not in {"host", "compose"}:
+        raise click.ClickException("[run].mode must be 'host' or 'compose'")
+    name = values.get("name")
+    if name is not None and (not isinstance(name, str) or not name):
+        raise click.ClickException("[run].name must be a non-empty string")
+    framework = values.get("framework")
+    if framework is not None and framework not in {"django", "vite", "astro"}:
+        raise click.ClickException(
+            "[run].framework must be django, vite, or astro"
+        )
     command = values.get("command", ())
-    if isinstance(command, str):
-        command = (command,)
     if not isinstance(command, (list, tuple)) or not all(
         isinstance(item, str) for item in command
     ):
         raise click.ClickException("[run].command must be an argv array of strings")
     port = values.get("port")
-    if port is not None and (not isinstance(port, int) or not 1 <= port <= 65535):
+    if port is not None and (
+        isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535
+    ):
         raise click.ClickException("[run].port must be between 1 and 65535")
     return RunConfig(
-        values.get("mode"),
-        values.get("name"),
-        values.get("framework"),
+        mode,
+        name,
+        framework,
         port,
         tuple(command),
     )
@@ -104,14 +119,11 @@ def render_run_config(config: RunConfig, existing: str = "") -> str:
         ("framework", config.framework),
     ):
         if value is not None:
-            lines += f'{key} = "{value}"\n'
+            lines += f"{key} = {json.dumps(value)}\n"
     if config.port is not None:
         lines += f"port = {config.port}\n"
     if config.command:
-        escaped = ", ".join(
-            '"' + item.replace("\\", "\\\\").replace('"', '\\"') + '"'
-            for item in config.command
-        )
+        escaped = ", ".join(json.dumps(item) for item in config.command)
         lines += f"command = [{escaped}]\n"
     return lines
 

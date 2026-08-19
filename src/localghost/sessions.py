@@ -25,6 +25,7 @@ class Session:
     project: str | None = None
     bridge_project: str | None = None
     command: tuple[str, ...] = ()
+    bridge_yaml: str = ""
 
     def as_dict(self) -> dict[str, object]:
         return self.__dict__.copy()
@@ -75,6 +76,7 @@ def create(
     pid: int | None,
     project: str | None = None,
     bridge_project: str | None = None,
+    bridge_yaml: str = "",
 ) -> Session:
     session = Session(
         uuid.uuid4().hex[:8],
@@ -87,6 +89,7 @@ def create(
         project,
         bridge_project,
         command,
+        bridge_yaml,
     )
     save(session)
     return session
@@ -141,18 +144,7 @@ def stop(session: Session) -> None:
             check=False,
         )
     if session.bridge_project:
-        subprocess.run(
-            [
-                "docker",
-                "compose",
-                "--project-name",
-                session.bridge_project,
-                "down",
-                "--remove-orphans",
-            ],
-            check=False,
-            capture_output=True,
-        )
+        _stop_bridge(session)
     _path(session.id).unlink(missing_ok=True)
 
 
@@ -161,18 +153,27 @@ def clean() -> int:
     for session in sessions():
         if not alive(session):
             if session.bridge_project:
-                subprocess.run(
-                    [
-                        "docker",
-                        "compose",
-                        "--project-name",
-                        session.bridge_project,
-                        "down",
-                        "--remove-orphans",
-                    ],
-                    check=False,
-                    capture_output=True,
-                )
+                _stop_bridge(session)
             _path(session.id).unlink(missing_ok=True)
             removed += 1
     return removed
+
+
+def _stop_bridge(session: Session) -> None:
+    command = [
+        "docker",
+        "compose",
+        "--project-name",
+        session.bridge_project,
+        "--file",
+        "-",
+        "down",
+        "--remove-orphans",
+    ]
+    subprocess.run(
+        command,
+        input=session.bridge_yaml,
+        text=True,
+        check=False,
+        capture_output=True,
+    )

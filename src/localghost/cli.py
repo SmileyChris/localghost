@@ -8,11 +8,12 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 import click
@@ -54,7 +55,10 @@ from .runner import (
     django_settings_warnings,
     execute,
     find_route_collision,
+    start_bridge,
+    stop_bridge,
 )
+from .sessions import alive as session_alive
 from .sessions import clean as clean_sessions
 from .sessions import create as create_session
 from .sessions import find_matching, sessions
@@ -150,7 +154,7 @@ def manage_list(as_json: bool) -> None:
 def _manage_list(as_json: bool) -> None:
     records = []
     for session in sessions():
-        status = "running" if (session.pid and _pid_alive(session.pid)) else "stopped"
+        status = "running" if session_alive(session) else "stopped"
         item = session.as_dict()
         item["status"] = status
         records.append(item)
@@ -201,14 +205,6 @@ def manage_stop(session_id: str | None, stop_all: bool) -> None:
 @manage.command("clean")
 def manage_clean() -> None:
     success(f"Removed {clean_sessions()} stale session(s).")
-
-
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    return True
 
 
 @cli.command()
@@ -347,8 +343,10 @@ def run(
 ) -> None:
     """Run a configured host or Compose application behind the proxy."""
     cwd = working_directory or Path.cwd()
+    explicit_run_settings = bool(command) or any(
+        value is not None for value in (name, framework, port, mode, config)
+    )
     settings = load_config(config_path(cwd, config))
-    explicit_command = bool(command)
     command = command or settings.command
     name = name or settings.name
     framework = framework or settings.framework
@@ -365,11 +363,14 @@ def run(
         return
     plan = build_plan(cwd, name, framework, port, command)
     matching = find_matching(name=plan.name, cwd=cwd)
-    if matching and not (explicit_command or mode or config or framework or port):
-        click.echo(
+    if matching:
+        message = (
             f"Session {matching.id} is already running; attach with: "
             f"localghost manage attach {matching.id}"
         )
+        if explicit_run_settings:
+            raise click.ClickException(message)
+        click.echo(message)
         return
     if dry_run:
         _print_run_plan(plan, dry_run=True)
@@ -403,36 +404,38 @@ def _session_log_path(name: str) -> Path:
 
 def _detach_host(plan: RunPlan, cwd: Path) -> None:
     _run_proxy("up", https_enabled=_https_configured())
-    from .runner import start_bridge
-
     start_bridge(plan)
     log = _session_log_path(plan.name)
-    log.parent.mkdir(parents=True, exist_ok=True)
-    handle = log.open("ab")
+    child: subprocess.Popen[bytes] | None = None
     try:
-        child = subprocess.Popen(
-            list(plan.command),
-            cwd=cwd,
-            stdout=handle,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("ab") as handle:
+            child = subprocess.Popen(
+                list(plan.command),
+                cwd=cwd,
+                stdout=handle,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+            create_session(
+                mode="host",
+                name=plan.name,
+                port=plan.port,
+                cwd=cwd,
+                command=plan.command,
+                log=log,
+                pid=child.pid,
+                bridge_project=plan.project,
+                bridge_yaml=plan.bridge_yaml,
+            )
     except OSError as exc:
-        handle.close()
+        if child is not None:
+            with suppress(ProcessLookupError, PermissionError):
+                os.killpg(child.pid, signal.SIGTERM)
+        stop_bridge(plan)
         raise click.ClickException(
-            f"could not start application command: {exc}"
+            f"could not start detached application: {exc}"
         ) from exc
-    create_session(
-        mode="host",
-        name=plan.name,
-        port=plan.port,
-        cwd=cwd,
-        command=plan.command,
-        log=log,
-        pid=child.pid,
-        bridge_project=plan.project,
-    )
-    handle.close()
     success(f"Started detached session for {plan.name}.localhost.")
 
 
