@@ -532,6 +532,25 @@ def test_laravel_detection_from_public_directory(monkeypatch, tmp_path):
     )
 
 
+def test_build_plan_runs_a_generic_php_project(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner.shutil, "which", lambda name: "/usr/bin/php")
+    (tmp_path / ".git").mkdir()
+    _composer_at(tmp_path)
+    public = tmp_path / "public"
+    public.mkdir()
+    (public / "index.php").touch()
+
+    # An explicit name sidesteps deriving one from tmp_path's basename, which
+    # pytest gives underscores and would fail DNS-safe validation.
+    plan = runner.build_plan(tmp_path, "php-site", None, None, ())
+
+    # The field is still named `framework` here; Task 6 renames it to `type`
+    # and updates this assertion.
+    assert plan.framework == "php"
+    assert plan.project_root == tmp_path
+    assert plan.working_directory == public
+
+
 def test_php_and_javascript_markers_at_same_root_are_ambiguous(tmp_path):
     (tmp_path / "artisan").touch()
     (tmp_path / "composer.json").write_text(
@@ -924,6 +943,37 @@ def test_laravel_requires_artisan_and_its_dependency(tmp_path):
         runner.laravel_command(tmp_path, None)
 
 
+def test_php_command_serves_the_docroot_from_the_project_root(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner.shutil, "which", lambda name: "/usr/bin/php")
+    public = tmp_path / "public"
+    public.mkdir()
+    (public / "index.php").touch()
+
+    port, command, working_directory = runner.php_command(tmp_path, None)
+
+    assert port == 8080
+    assert command == ("php", "-S", "0.0.0.0:{port}")
+    assert working_directory == public
+
+
+def test_php_command_honours_a_requested_port(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner.shutil, "which", lambda name: "/usr/bin/php")
+    (tmp_path / "index.php").touch()
+
+    port, _, working_directory = runner.php_command(tmp_path, 9001)
+
+    assert port == 9001
+    assert working_directory == tmp_path
+
+
+def test_php_command_requires_the_php_executable(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner.shutil, "which", lambda name: None)
+    (tmp_path / "index.php").touch()
+
+    with pytest.raises(click.ClickException, match="PHP project runner"):
+        runner.php_command(tmp_path, None)
+
+
 def test_discover_framework_reports_a_missing_requested_root(tmp_path):
     (tmp_path / ".git").mkdir()
 
@@ -1092,6 +1142,13 @@ def test_a_laravel_project_missing_artisan_degrades_to_php(tmp_path):
 def test_dockerfile_is_generate_only(tmp_path):
     assert "dockerfile" in runner.GENERATE_TYPES
     assert "dockerfile" not in runner.RUN_TYPES
+
+
+def test_default_ports_cover_every_runnable_host_type():
+    host_types = [
+        item for item in runner.RUN_TYPES if item not in ("compose",)
+    ]
+    assert set(runner.DEFAULT_PORTS) == set(host_types)
 
 
 def test_generic_php_resolves_to_the_outermost_php_root(tmp_path):

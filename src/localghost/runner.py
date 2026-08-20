@@ -53,6 +53,15 @@ SUPPORTED_TYPES = (
 RUN_TYPES = tuple(item for item in SUPPORTED_TYPES if item != "dockerfile")
 GENERATE_TYPES = SUPPORTED_TYPES
 
+DEFAULT_PORTS = {
+    "django": 8000,
+    "vite": 5173,
+    "astro": 4321,
+    "cakephp": 8765,
+    "laravel": 8000,
+    "php": 8080,
+}
+
 COMPOSE_FILENAMES = (
     "compose.yaml",
     "compose.yml",
@@ -132,6 +141,10 @@ def build_plan(
             )
         elif selected_framework == "laravel":
             default_port, selected_command = laravel_command(project_root, port)
+        elif selected_framework == "php":
+            default_port, selected_command, working_directory = php_command(
+                project_root, port
+            )
         else:  # Click validates the public option; retain this for direct callers.
             raise click.ClickException(type_choices("--type"))
         selected_port = select_port(port or default_port, strict=port is not None)
@@ -417,6 +430,19 @@ def laravel_command(
         "serve",
         "--host=0.0.0.0",
         "--port={port}",
+    )
+
+
+def php_command(
+    cwd: Path, requested_port: int | None
+) -> tuple[int, tuple[str, ...], Path]:
+    """Serve a plain PHP project from its docroot with the built-in server."""
+    _require_executable("php", "PHP project runner")
+    docroot = _php_docroot(cwd) or cwd
+    return (
+        requested_port or DEFAULT_PORTS["php"],
+        ("php", "-S", "0.0.0.0:{port}"),
+        docroot,
     )
 
 
