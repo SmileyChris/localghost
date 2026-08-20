@@ -11,7 +11,7 @@ from pathlib import Path
 
 import click
 
-from .runner import SUPPORTED_FRAMEWORKS, framework_choices, host_project_root
+from .runner import SUPPORTED_TYPES, host_project_root, type_choices
 
 CONFIG_NAME = ".localghost.toml"
 
@@ -46,8 +46,8 @@ def load_config(path: Path) -> RunConfig:
     if name is not None and (not isinstance(name, str) or not name):
         raise click.ClickException("[run].name must be a non-empty string")
     framework = values.get("framework")
-    if framework is not None and framework not in SUPPORTED_FRAMEWORKS:
-        raise click.ClickException(framework_choices("[run].framework"))
+    if framework is not None and framework not in SUPPORTED_TYPES:
+        raise click.ClickException(type_choices("[run].framework"))
     command = values.get("command", ())
     if not isinstance(command, (list, tuple)) or not all(
         isinstance(item, str) for item in command

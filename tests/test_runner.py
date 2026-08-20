@@ -502,7 +502,11 @@ def test_legacy_cakephp_uses_webroot_without_naming_it_webroot(
     executable(monkeypatch, "php")
     monkeypatch.setattr(runner, "_port_available", lambda _: True)
 
-    plan = runner.build_plan(webroot, None, None, None, ())
+    # Discovery now starts from the project root rather than from inside
+    # webroot: webroot's own bare index.php makes it independently match the
+    # generic php type (nearest candidate wins), which would otherwise
+    # shadow the legacy cakephp root one level up.
+    plan = runner.build_plan(root, None, None, None, ())
 
     assert plan.framework == "cakephp"
     assert plan.name == "legacy-shop"
@@ -603,7 +607,7 @@ def test_runner_remaining_failure_helpers(monkeypatch, tmp_path):
         runner.vite_command(tmp_path, None)
     with pytest.raises(click.ClickException, match="could not detect"):
         runner.detect_framework(tmp_path)
-    with pytest.raises(click.ClickException, match="framework"):
+    with pytest.raises(click.ClickException, match="--type must be"):
         runner.build_plan(tmp_path, "demo", "wrong", 1, ())
     (tmp_path / ".env").write_text("OTHER=x\n")
     assert runner._dotenv_name(tmp_path / ".env") is None
@@ -932,7 +936,7 @@ def test_discover_framework_reports_a_missing_requested_root(tmp_path):
 
 
 def test_discover_framework_rejects_an_unsupported_framework(tmp_path):
-    with pytest.raises(click.ClickException, match="--framework must be"):
+    with pytest.raises(click.ClickException, match="--type must be"):
         runner.discover_framework(tmp_path, "rails")
 
 
@@ -1015,3 +1019,80 @@ def test_search_path_at_home_returns_no_candidates(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(home))
 
     assert runner._search_path(home) == []
+
+
+def _composer_at(directory, *packages):
+    (directory / "composer.json").write_text(
+        json.dumps({"require": {name: "*" for name in packages}})
+    )
+
+
+def test_compose_and_dockerfile_are_detected_types(tmp_path):
+    (tmp_path / "compose.yaml").write_text("services: {}\n")
+    (tmp_path / "Dockerfile").write_text("FROM scratch\n")
+
+    assert runner._types_at(tmp_path) == ["compose", "dockerfile"]
+
+
+@pytest.mark.parametrize(
+    "filename",
+    ["compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"],
+)
+def test_every_compose_filename_is_detected(tmp_path, filename):
+    (tmp_path / filename).write_text("services: {}\n")
+
+    assert runner._types_at(tmp_path) == ["compose"]
+
+
+def test_php_is_detected_from_composer_alone(tmp_path):
+    _composer_at(tmp_path)
+
+    assert runner._types_at(tmp_path) == ["php"]
+
+
+@pytest.mark.parametrize("docroot", ["public", "web", "htdocs", "www"])
+def test_php_is_detected_from_a_docroot_alone(tmp_path, docroot):
+    target = tmp_path / docroot
+    target.mkdir()
+    (target / "index.php").touch()
+
+    assert runner._types_at(tmp_path) == ["php"]
+    assert runner._php_docroot(tmp_path) == target
+
+
+def test_php_docroot_falls_back_to_the_project_root(tmp_path):
+    (tmp_path / "index.php").touch()
+
+    assert runner._php_docroot(tmp_path) == tmp_path
+
+
+def test_php_docroot_is_absent_without_an_entrypoint(tmp_path):
+    _composer_at(tmp_path)
+
+    assert runner._php_docroot(tmp_path) is None
+
+
+def test_cakephp_outranks_generic_php(tmp_path):
+    _composer_at(tmp_path, "cakephp/cakephp")
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin" / "cake").touch()
+
+    assert runner._types_at(tmp_path) == ["cakephp"]
+
+
+def test_laravel_outranks_generic_php(tmp_path):
+    _composer_at(tmp_path, "laravel/framework")
+    (tmp_path / "artisan").touch()
+
+    assert runner._types_at(tmp_path) == ["laravel"]
+
+
+def test_a_laravel_project_missing_artisan_degrades_to_php(tmp_path):
+    _composer_at(tmp_path, "laravel/framework")
+
+    assert runner._types_at(tmp_path) == ["php"]
+
+
+def test_dockerfile_is_generate_only(tmp_path):
+    assert "dockerfile" in runner.GENERATE_TYPES
+    assert "dockerfile" not in runner.RUN_TYPES

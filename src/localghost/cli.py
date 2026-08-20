@@ -59,7 +59,7 @@ from .generator import (
 from .paths import state_directory
 from .routes import active_routes, proxy_is_running
 from .runner import (
-    SUPPORTED_FRAMEWORKS,
+    SUPPORTED_TYPES,
     RunPlan,
     build_plan,
     django_settings_warnings,
@@ -342,7 +342,7 @@ def _trust_status() -> None:
 @click.option(
     "framework",
     "--framework",
-    type=click.Choice(SUPPORTED_FRAMEWORKS),
+    type=click.Choice(SUPPORTED_TYPES),
     help="Resolve otherwise ambiguous framework detection.",
 )
 @click.option("port", "--port", type=click.IntRange(1, 65535), help="Host HTTP port.")

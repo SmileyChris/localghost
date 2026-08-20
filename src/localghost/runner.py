@@ -40,12 +40,31 @@ class RunPlan:
     working_directory: Path | None = None
 
 
-SUPPORTED_FRAMEWORKS = ("django", "vite", "astro", "cakephp", "laravel")
+SUPPORTED_TYPES = (
+    "compose",
+    "dockerfile",
+    "django",
+    "vite",
+    "astro",
+    "cakephp",
+    "laravel",
+    "php",
+)
+RUN_TYPES = tuple(item for item in SUPPORTED_TYPES if item != "dockerfile")
+GENERATE_TYPES = SUPPORTED_TYPES
+
+COMPOSE_FILENAMES = (
+    "compose.yaml",
+    "compose.yml",
+    "docker-compose.yaml",
+    "docker-compose.yml",
+)
+PHP_DOCROOTS = ("public", "web", "htdocs", "www")
 
 
-def framework_choices(prefix: str) -> str:
-    """Render the supported framework list for an error message."""
-    *leading, last = SUPPORTED_FRAMEWORKS
+def type_choices(prefix: str, allowed: tuple[str, ...] = SUPPORTED_TYPES) -> str:
+    """Render a type list for an error message."""
+    *leading, last = allowed
     return f"{prefix} must be {', '.join(leading)}, or {last}"
 
 
@@ -114,7 +133,7 @@ def build_plan(
         elif selected_framework == "laravel":
             default_port, selected_command = laravel_command(project_root, port)
         else:  # Click validates the public option; retain this for direct callers.
-            raise click.ClickException(framework_choices("--framework"))
+            raise click.ClickException(type_choices("--type"))
         selected_port = select_port(port or default_port, strict=port is not None)
         selected_command = tuple(
             part.format(port=selected_port) for part in selected_command
@@ -148,18 +167,18 @@ def host_project_root(cwd: Path) -> Path | None:
     later with framework-specific guidance.
     """
     for candidate in _search_path(cwd.resolve()):
-        if _frameworks_at(candidate):
+        if _host_types_at(candidate):
             return candidate
     return None
 
 
 def discover_framework(cwd: Path, requested: str | None = None) -> tuple[str, Path]:
     """Return the nearest matching framework and its application root."""
-    if requested is not None and requested not in SUPPORTED_FRAMEWORKS:
-        raise click.ClickException(framework_choices("--framework"))
+    if requested is not None and requested not in SUPPORTED_TYPES:
+        raise click.ClickException(type_choices("--type"))
     start = cwd.resolve()
     for candidate in _search_path(start):
-        detected = _frameworks_at(candidate)
+        detected = _host_types_at(candidate)
         if requested is not None:
             if requested in detected:
                 return requested, candidate
@@ -210,29 +229,70 @@ def _search_path(start: Path) -> list[Path]:
     return candidates
 
 
-def _frameworks_at(cwd: Path) -> list[str]:
-    composer = _composer_manifest(cwd)
+def _compose_file(cwd: Path) -> Path | None:
+    for filename in COMPOSE_FILENAMES:
+        candidate = cwd / filename
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _php_docroot(cwd: Path) -> Path | None:
+    """The directory holding index.php, or None when there is no entrypoint."""
+    for name in PHP_DOCROOTS:
+        candidate = cwd / name
+        if (candidate / "index.php").is_file():
+            return candidate
+    if (cwd / "index.php").is_file():
+        return cwd
+    return None
+
+
+def _php_type(cwd: Path, composer: dict[str, object] | None) -> str | None:
+    """Resolve the PHP tier: the most specific framework wins."""
     cake_dependency = composer is not None and _has_composer_dependency(
         composer, "cakephp/cakephp"
     )
+    if (cake_dependency and (cwd / "bin" / "cake").is_file()) or _legacy_cakephp_root(
+        cwd
+    ):
+        return "cakephp"
     laravel_dependency = composer is not None and _has_composer_dependency(
         composer, "laravel/framework"
     )
-    return [
-        framework
-        for framework, detected in (
-            ("django", (cwd / "manage.py").is_file()),
-            ("vite", _vite_manifest(cwd) is not None),
-            ("astro", _astro_manifest(cwd) is not None),
-            (
-                "cakephp",
-                (cake_dependency and (cwd / "bin" / "cake").is_file())
-                or _legacy_cakephp_root(cwd),
-            ),
-            ("laravel", laravel_dependency and (cwd / "artisan").is_file()),
-        )
-        if detected
-    ]
+    if laravel_dependency and (cwd / "artisan").is_file():
+        return "laravel"
+    if composer is not None or _php_docroot(cwd) is not None:
+        return "php"
+    return None
+
+
+def _types_at(cwd: Path) -> list[str]:
+    """Every project type present at this directory, in SUPPORTED_TYPES order."""
+    detected = []
+    if _compose_file(cwd) is not None:
+        detected.append("compose")
+    if (cwd / "Dockerfile").is_file():
+        detected.append("dockerfile")
+    if (cwd / "manage.py").is_file():
+        detected.append("django")
+    if _vite_manifest(cwd) is not None:
+        detected.append("vite")
+    if _astro_manifest(cwd) is not None:
+        detected.append("astro")
+    php = _php_type(cwd, _composer_manifest(cwd))
+    if php is not None:
+        detected.append(php)
+    return detected
+
+
+def _host_types_at(cwd: Path) -> list[str]:
+    """Detected types that run as a host process.
+
+    A stopgap while `config.detect_mode` still exists; Task 4 replaces it
+    with per-command filtering in `discover_type`.
+    """
+    return [item for item in _types_at(cwd) if item not in ("compose", "dockerfile")]
 
 
 def django_command(
