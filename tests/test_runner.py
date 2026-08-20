@@ -502,11 +502,7 @@ def test_legacy_cakephp_uses_webroot_without_naming_it_webroot(
     executable(monkeypatch, "php")
     monkeypatch.setattr(runner, "_port_available", lambda _: True)
 
-    # Discovery now starts from the project root rather than from inside
-    # webroot: webroot's own bare index.php makes it independently match the
-    # generic php type (nearest candidate wins), which would otherwise
-    # shadow the legacy cakephp root one level up.
-    plan = runner.build_plan(root, None, None, None, ())
+    plan = runner.build_plan(webroot, None, None, None, ())
 
     assert plan.framework == "cakephp"
     assert plan.name == "legacy-shop"
@@ -1096,3 +1092,49 @@ def test_a_laravel_project_missing_artisan_degrades_to_php(tmp_path):
 def test_dockerfile_is_generate_only(tmp_path):
     assert "dockerfile" in runner.GENERATE_TYPES
     assert "dockerfile" not in runner.RUN_TYPES
+
+
+def test_generic_php_resolves_to_the_outermost_php_root(tmp_path):
+    """A bare index.php in public/ must not make public/ the project root."""
+    root = tmp_path / "brochure-site"
+    public = root / "public"
+    public.mkdir(parents=True)
+    (root / ".git").mkdir()
+    (public / "index.php").touch()
+
+    assert runner.discover_framework(public) == ("php", root)
+
+
+def test_generic_php_resolves_at_its_own_root(tmp_path):
+    root = tmp_path / "solo-site"
+    root.mkdir()
+    (root / ".git").mkdir()
+    (root / "index.php").touch()
+
+    assert runner.discover_framework(root) == ("php", root)
+
+
+def test_requested_php_also_resolves_to_the_outermost_root(tmp_path):
+    root = tmp_path / "brochure-site"
+    public = root / "public"
+    public.mkdir(parents=True)
+    (root / ".git").mkdir()
+    (public / "index.php").touch()
+
+    assert runner.discover_framework(public, "php") == ("php", root)
+
+
+def test_laravel_outranks_generic_php_found_first_in_its_public_dir(tmp_path):
+    """Invoked from public/, which itself matches generic php, must still
+    walk out to the laravel root rather than stopping on the shadow match."""
+    root = tmp_path / "orders"
+    public = root / "public"
+    public.mkdir(parents=True)
+    (root / ".git").mkdir()
+    (root / "artisan").touch()
+    (root / "composer.json").write_text(
+        json.dumps({"require": {"laravel/framework": "^12.0"}})
+    )
+    (public / "index.php").touch()
+
+    assert runner.discover_framework(public) == ("laravel", root)

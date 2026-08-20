@@ -177,19 +177,29 @@ def discover_framework(cwd: Path, requested: str | None = None) -> tuple[str, Pa
     if requested is not None and requested not in SUPPORTED_TYPES:
         raise click.ClickException(type_choices("--type"))
     start = cwd.resolve()
+    fallback: tuple[str, Path] | None = None
     for candidate in _search_path(start):
         detected = _host_types_at(candidate)
         if requested is not None:
             if requested in detected:
+                if requested == "php":
+                    # Keep walking: the outermost php is the project root.
+                    fallback = (requested, candidate)
+                    continue
                 return requested, candidate
             continue
+        if detected == ["php"]:
+            fallback = ("php", candidate)
+            continue
         if len(detected) > 1:
-            choices = " or ".join(f"--framework {item}" for item in detected)
+            choices = " or ".join(f"--type {item}" for item in detected)
             raise click.ClickException(
                 f"both {' and '.join(detected)} were detected; rerun with {choices}"
             )
         if detected:
             return detected[0], candidate
+    if fallback is not None:
+        return fallback
     names = "Django, Vite, Astro, CakePHP, or Laravel"
     if requested is not None:
         raise click.ClickException(
