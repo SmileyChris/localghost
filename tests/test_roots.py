@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import click
 import pytest
 
@@ -45,14 +47,40 @@ def test_the_flag_outranks_every_other_source(tmp_path):
 
 
 def test_configured_root_resolves_against_the_config_directory(tmp_path):
-    config_dir = tmp_path / "tools"
-    config_dir.mkdir()
+    # `start` and `config_dir` sit at different depths, so "resolve '..'
+    # against config_dir" and "resolve '..' against start" land on different
+    # directories: a regression that resolves [run].root against `start`
+    # instead of `config_dir` changes the result and this test catches it.
+    start = tmp_path / "elsewhere"
+    start.mkdir()
+    config_dir = tmp_path / "project" / "tools"
+    config_dir.mkdir(parents=True)
 
     resolved = roots.resolve_root(
-        start=config_dir, flag=None, configured="..", config_dir=config_dir
+        start=start, flag=None, configured="..", config_dir=config_dir
     )
 
-    assert resolved == tmp_path
+    assert resolved == tmp_path / "project"
+
+
+def test_the_root_flag_resolves_against_the_process_working_directory(
+    tmp_path, monkeypatch
+):
+    # `start` points somewhere else entirely, so a regression that resolves
+    # --root against `start` instead of Path.cwd() changes the result and
+    # this test catches it.
+    start = tmp_path / "elsewhere"
+    start.mkdir()
+    cwd = tmp_path / "cwd"
+    target = cwd / "app"
+    target.mkdir(parents=True)
+    monkeypatch.chdir(cwd)
+
+    resolved = roots.resolve_root(
+        start=start, flag=Path("app"), configured=None, config_dir=None
+    )
+
+    assert resolved == target
 
 
 def test_an_absolute_configured_root_is_taken_as_given(tmp_path):
@@ -102,3 +130,20 @@ def test_a_file_is_not_a_valid_root(tmp_path):
         roots.resolve_root(
             start=tmp_path, flag=None, configured=str(target), config_dir=tmp_path
         )
+
+
+def test_the_root_flag_at_a_file_names_the_value_and_the_cwd(tmp_path, monkeypatch):
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    target = cwd / "file.txt"
+    target.touch()
+    monkeypatch.chdir(cwd)
+
+    with pytest.raises(click.ClickException) as error:
+        roots.resolve_root(
+            start=tmp_path, flag=Path("file.txt"), configured=None, config_dir=None
+        )
+
+    assert "file.txt" in str(error.value)
+    assert str(cwd) in str(error.value)
+    assert "not a directory" in str(error.value)

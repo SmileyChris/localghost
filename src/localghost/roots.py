@@ -35,7 +35,7 @@ def resolve_root(
         return _validated(flag, Path.cwd(), "--root")
     if configured is not None:
         base = config_dir or start
-        return _validated(Path(configured), base, f"[run].root in {base}")
+        return _validated(Path(configured), base, "[run].root")
     if config_dir is not None:
         return config_dir.resolve()
     return None
@@ -45,8 +45,12 @@ def _validated(value: Path, base: Path, source: str) -> Path:
     resolved = (base / value).resolve() if not value.is_absolute() else value.resolve()
     if not resolved.exists():
         raise click.ClickException(
-            f"{source}: '{value}' does not exist (resolved against '{base}')"
+            f"{source} '{value}' (resolved against '{base}') does not exist; "
+            "provide a path to an existing directory"
         )
     if not resolved.is_dir():
-        raise click.ClickException(f"{source}: '{value}' is not a directory")
+        raise click.ClickException(
+            f"{source} '{value}' (resolved against '{base}') is not a directory; "
+            "provide a directory path"
+        )
     return resolved
