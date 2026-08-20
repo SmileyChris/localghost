@@ -1,5 +1,6 @@
 import json
 import socket
+from pathlib import Path
 from subprocess import CompletedProcess
 
 import click
@@ -943,3 +944,43 @@ def test_discover_framework_keeps_walking_past_an_unrelated_root(tmp_path):
     (nested / "package.json").write_text(json.dumps({"scripts": {"dev": "vite"}}))
 
     assert runner.discover_framework(nested, "django") == ("django", tmp_path)
+
+
+def test_search_path_stops_at_any_vcs_directory(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    for marker in (".git", ".hg", ".svn"):
+        root = tmp_path / marker.lstrip(".")
+        nested = root / "a" / "b"
+        nested.mkdir(parents=True)
+        (root / marker).mkdir()
+
+        candidates = runner._search_path(nested)
+
+        assert candidates[0] == nested
+        assert candidates[-1] == root, f"{marker} did not bound the search"
+
+
+def test_search_path_never_reaches_home_or_above(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    nested = home / "projects" / "app"
+    nested.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+
+    candidates = runner._search_path(nested)
+
+    assert home not in candidates, "$HOME must never be a project root"
+    assert tmp_path not in candidates, "directories above $HOME must be excluded"
+    assert candidates == [nested, home / "projects"]
+
+
+def test_search_path_outside_home_stops_below_the_filesystem_root(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("HOME", str(tmp_path / "elsewhere"))
+    nested = tmp_path / "a" / "b"
+    nested.mkdir(parents=True)
+
+    candidates = runner._search_path(nested)
+
+    assert Path("/") not in candidates
+    assert nested in candidates

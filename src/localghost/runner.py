@@ -147,7 +147,7 @@ def host_project_root(cwd: Path) -> Path | None:
     know whether a host application exists, and an ambiguous root is reported
     later with framework-specific guidance.
     """
-    for candidate in _framework_search_path(cwd.resolve()):
+    for candidate in _search_path(cwd.resolve()):
         if _frameworks_at(candidate):
             return candidate
     return None
@@ -158,7 +158,7 @@ def discover_framework(cwd: Path, requested: str | None = None) -> tuple[str, Pa
     if requested is not None and requested not in SUPPORTED_FRAMEWORKS:
         raise click.ClickException(framework_choices("--framework"))
     start = cwd.resolve()
-    for candidate in _framework_search_path(start):
+    for candidate in _search_path(start):
         detected = _frameworks_at(candidate)
         if requested is not None:
             if requested in detected:
@@ -182,12 +182,31 @@ def discover_framework(cwd: Path, requested: str | None = None) -> tuple[str, Pa
     )
 
 
-def _framework_search_path(start: Path) -> list[Path]:
+VCS_MARKERS = (".git", ".hg", ".svn")
+
+
+def _search_path(start: Path) -> list[Path]:
+    """Candidate project directories, nearest first.
+
+    Stops after the first directory holding a VCS marker, which is itself a
+    candidate. Failing that, stops below `$HOME`: the home directory and
+    everything above it are never a project root, so a stray manifest there
+    cannot be adopted.
+    """
     candidates = [start, *start.parents]
-    boundary = next((path for path in candidates if (path / ".git").exists()), None)
-    if boundary is None:
-        return candidates
-    return candidates[: candidates.index(boundary) + 1]
+    boundary = next(
+        (
+            path
+            for path in candidates
+            if any((path / marker).exists() for marker in VCS_MARKERS)
+        ),
+        None,
+    )
+    if boundary is not None:
+        return candidates[: candidates.index(boundary) + 1]
+    home = Path.home().resolve()
+    excluded = {home, *home.parents}
+    return [path for path in candidates if path not in excluded]
 
 
 def _frameworks_at(cwd: Path) -> list[str]:
