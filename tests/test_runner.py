@@ -28,7 +28,7 @@ def test_django_detection_and_runner_precedence(monkeypatch, tmp_path):
     (tmp_path / "manage.py").touch()
     (tmp_path / "uv.lock").touch()
     executable(monkeypatch, "uv")
-    assert runner.detect_framework(tmp_path) == "django"
+    assert runner.discover_type(tmp_path)[0] == "django"
     assert runner.django_command(tmp_path, None)[1][:3] == ("uv", "run", "python")
 
 
@@ -182,7 +182,7 @@ def test_vite_detection_manager_and_priority(monkeypatch, tmp_path):
     )
     (tmp_path / "pnpm-lock.yaml").touch()
     executable(monkeypatch, "pnpm")
-    assert runner.detect_framework(tmp_path) == "vite"
+    assert runner.discover_type(tmp_path)[0] == "vite"
     assert runner.vite_command(tmp_path, None)[1] == (
         "pnpm", "run", "dev", "--host", "0.0.0.0", "--port", "{port}",
         "--strictPort",
@@ -220,7 +220,7 @@ def test_framework_ambiguity_and_custom_plan(monkeypatch, tmp_path):
         json.dumps({"scripts": {"dev": "vite"}, "dependencies": {"vite": "x"}})
     )
     with pytest.raises(click.ClickException, match="both django and vite"):
-        runner.detect_framework(tmp_path)
+        runner.discover_type(tmp_path)
     monkeypatch.setattr(runner, "_port_available", lambda _: True)
     plan = runner.build_plan(tmp_path, "hello", None, 3000, ("echo", "ok"))
     assert plan.framework == "custom" and plan.command == ("echo", "ok")
@@ -334,7 +334,7 @@ def test_astro_detection_and_command(monkeypatch, tmp_path):
         })
     )
     executable(monkeypatch, "npm")
-    assert runner.detect_framework(tmp_path) == "astro"
+    assert runner.discover_type(tmp_path)[0] == "astro"
     assert runner._astro_manifest(tmp_path) is not None
     assert runner.astro_command(tmp_path, None) == (4321, (
         "npm", "run", "dev", "--",
@@ -364,7 +364,7 @@ def test_astro_vite_ambiguity(monkeypatch, tmp_path):
         })
     )
     with pytest.raises(click.ClickException, match="both vite and astro"):
-        runner.detect_framework(tmp_path)
+        runner.discover_type(tmp_path)
 
 
 def test_astro_django_ambiguity(monkeypatch, tmp_path):
@@ -376,7 +376,7 @@ def test_astro_django_ambiguity(monkeypatch, tmp_path):
         })
     )
     with pytest.raises(click.ClickException, match="both django and astro"):
-        runner.detect_framework(tmp_path)
+        runner.discover_type(tmp_path)
 
 
 def test_astro_command_missing_manifest(monkeypatch, tmp_path):
@@ -444,7 +444,7 @@ def test_framework_search_stops_at_worktree_boundary(tmp_path):
     (outside / "manage.py").touch()
 
     with pytest.raises(click.ClickException, match="could not detect"):
-        runner.detect_framework(nested)
+        runner.discover_type(nested)
 
 
 def test_modern_cakephp_detection_and_plan(monkeypatch, tmp_path):
@@ -561,7 +561,7 @@ def test_php_and_javascript_markers_at_same_root_are_ambiguous(tmp_path):
     )
 
     with pytest.raises(click.ClickException, match="both vite and laravel"):
-        runner.detect_framework(tmp_path)
+        runner.discover_type(tmp_path)
 
 
 def test_vite_plan_through_build_plan(monkeypatch, tmp_path):
@@ -621,7 +621,7 @@ def test_runner_remaining_failure_helpers(monkeypatch, tmp_path):
     with pytest.raises(click.ClickException, match="Vite requires"):
         runner.vite_command(tmp_path, None)
     with pytest.raises(click.ClickException, match="could not detect"):
-        runner.detect_framework(tmp_path)
+        runner.discover_type(tmp_path)
     with pytest.raises(click.ClickException, match="--type must be"):
         runner.build_plan(tmp_path, "demo", "wrong", 1, ())
     (tmp_path / ".env").write_text("OTHER=x\n")
@@ -974,26 +974,65 @@ def test_php_command_requires_the_php_executable(tmp_path, monkeypatch):
         runner.php_command(tmp_path, None)
 
 
-def test_discover_framework_reports_a_missing_requested_root(tmp_path):
+def test_discover_type_reports_a_missing_requested_root(tmp_path):
     (tmp_path / ".git").mkdir()
 
     with pytest.raises(click.ClickException, match="could not find a django project"):
-        runner.discover_framework(tmp_path, "django")
+        runner.discover_type(tmp_path, "django")
 
 
-def test_discover_framework_rejects_an_unsupported_framework(tmp_path):
+def test_requesting_an_unknown_type_lists_the_valid_ones(tmp_path):
     with pytest.raises(click.ClickException, match="--type must be"):
-        runner.discover_framework(tmp_path, "rails")
+        runner.discover_type(tmp_path, "rails")
 
 
-def test_discover_framework_keeps_walking_past_an_unrelated_root(tmp_path):
+def test_a_requested_type_keeps_walking_past_an_unrelated_root(tmp_path):
     (tmp_path / ".git").mkdir()
     (tmp_path / "manage.py").touch()
     nested = tmp_path / "frontend"
     nested.mkdir()
     (nested / "package.json").write_text(json.dumps({"scripts": {"dev": "vite"}}))
 
-    assert runner.discover_framework(nested, "django") == ("django", tmp_path)
+    assert runner.discover_type(nested, "django") == ("django", tmp_path)
+
+
+def test_a_dockerfile_does_not_make_a_django_project_ambiguous(tmp_path):
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "manage.py").touch()
+    (tmp_path / "Dockerfile").write_text("FROM scratch\n")
+
+    assert runner.discover_type(tmp_path) == ("django", tmp_path)
+
+
+def test_generate_sees_the_dockerfile_django_pair_as_ambiguous(tmp_path):
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "manage.py").touch()
+    (tmp_path / "Dockerfile").write_text("FROM scratch\n")
+
+    with pytest.raises(click.ClickException) as error:
+        runner.discover_type(tmp_path, allowed=runner.GENERATE_TYPES)
+
+    assert "both dockerfile and django were detected" in str(error.value)
+    assert "--type dockerfile or --type django" in str(error.value)
+
+
+def test_compose_and_django_are_ambiguous_for_run(tmp_path):
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "manage.py").touch()
+    (tmp_path / "compose.yaml").write_text("services: {}\n")
+
+    with pytest.raises(click.ClickException, match="both compose and django"):
+        runner.discover_type(tmp_path)
+
+
+def test_requesting_a_type_the_command_rejects_says_so(tmp_path):
+    (tmp_path / "Dockerfile").write_text("FROM scratch\n")
+
+    with pytest.raises(click.ClickException) as error:
+        runner.discover_type(tmp_path, "dockerfile")
+
+    assert "'dockerfile' cannot be run" in str(error.value)
+    assert "localghost generate --type dockerfile" in str(error.value)
 
 
 def test_search_path_stops_at_any_vcs_directory(tmp_path, monkeypatch):
@@ -1159,7 +1198,7 @@ def test_generic_php_resolves_to_the_outermost_php_root(tmp_path):
     (root / ".git").mkdir()
     (public / "index.php").touch()
 
-    assert runner.discover_framework(public) == ("php", root)
+    assert runner.discover_type(public) == ("php", root)
 
 
 def test_generic_php_resolves_at_its_own_root(tmp_path):
@@ -1168,7 +1207,7 @@ def test_generic_php_resolves_at_its_own_root(tmp_path):
     (root / ".git").mkdir()
     (root / "index.php").touch()
 
-    assert runner.discover_framework(root) == ("php", root)
+    assert runner.discover_type(root) == ("php", root)
 
 
 def test_requested_php_also_resolves_to_the_outermost_root(tmp_path):
@@ -1178,7 +1217,7 @@ def test_requested_php_also_resolves_to_the_outermost_root(tmp_path):
     (root / ".git").mkdir()
     (public / "index.php").touch()
 
-    assert runner.discover_framework(public, "php") == ("php", root)
+    assert runner.discover_type(public, "php") == ("php", root)
 
 
 def test_weak_php_match_prefers_the_nearer_of_two_bare_index_files(tmp_path):
@@ -1192,7 +1231,7 @@ def test_weak_php_match_prefers_the_nearer_of_two_bare_index_files(tmp_path):
     (root / "index.php").touch()
     (webroot / "index.php").touch()
 
-    assert runner.discover_framework(webroot) == ("php", webroot)
+    assert runner.discover_type(webroot) == ("php", webroot)
 
 
 def test_php_project_root_does_not_cross_into_an_unrelated_parent(tmp_path):
@@ -1205,7 +1244,7 @@ def test_php_project_root_does_not_cross_into_an_unrelated_parent(tmp_path):
     (root / "composer.json").write_text(json.dumps({"require": {"some/pkg": "^1.0"}}))
     _composer_at(billing, "some/other-pkg")
 
-    assert runner.discover_framework(billing) == ("php", billing)
+    assert runner.discover_type(billing) == ("php", billing)
 
 
 def test_php_project_root_from_a_docroot_inside_a_monorepo(tmp_path):
@@ -1218,7 +1257,7 @@ def test_php_project_root_from_a_docroot_inside_a_monorepo(tmp_path):
     _composer_at(billing, "some/other-pkg")
     (public / "index.php").touch()
 
-    assert runner.discover_framework(public) == ("php", billing)
+    assert runner.discover_type(public) == ("php", billing)
 
 
 def test_laravel_outranks_generic_php_found_first_in_its_public_dir(tmp_path):
@@ -1234,4 +1273,4 @@ def test_laravel_outranks_generic_php_found_first_in_its_public_dir(tmp_path):
     )
     (public / "index.php").touch()
 
-    assert runner.discover_framework(public) == ("laravel", root)
+    assert runner.discover_type(public) == ("laravel", root)

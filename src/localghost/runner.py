@@ -127,7 +127,7 @@ def build_plan(
             part.replace("{port}", str(selected_port)) for part in command
         )
     else:
-        selected_framework, project_root = discover_framework(cwd, framework)
+        selected_framework, project_root = discover_type(cwd, framework)
         working_directory = project_root
         if selected_framework == "django":
             default_port, selected_command = django_command(project_root, port)
@@ -168,16 +168,12 @@ def build_plan(
     )
 
 
-def detect_framework(cwd: Path) -> str:
-    return discover_framework(cwd)[0]
-
-
 def host_project_root(cwd: Path) -> Path | None:
     """Return the nearest application root, or None when none is detected.
 
-    Unlike `discover_framework` this never raises: mode detection only needs to
+    Unlike `discover_type` this never raises: mode detection only needs to
     know whether a host application exists, and an ambiguous root is reported
-    later with framework-specific guidance.
+    later with type-specific guidance.
     """
     for candidate in _search_path(cwd.resolve()):
         if _host_types_at(candidate):
@@ -185,20 +181,35 @@ def host_project_root(cwd: Path) -> Path | None:
     return None
 
 
-def discover_framework(cwd: Path, requested: str | None = None) -> tuple[str, Path]:
-    """Return the nearest matching framework and its application root."""
+def discover_type(
+    cwd: Path,
+    requested: str | None = None,
+    allowed: tuple[str, ...] = RUN_TYPES,
+) -> tuple[str, Path]:
+    """Return the nearest project type this command supports, and its root.
+
+    Ambiguity is computed after filtering to `allowed`, so a type another
+    command handles never blocks this one. Generic `php` defers to anything
+    stronger found further up; see `_php_project_strength`.
+    """
     if requested is not None and requested not in SUPPORTED_TYPES:
         raise click.ClickException(type_choices("--type"))
+    if requested is not None and requested not in allowed:
+        if requested == "dockerfile":
+            raise click.ClickException(
+                "'dockerfile' cannot be run directly; run `localghost generate "
+                "--type dockerfile` to build a Compose file first"
+            )
+        raise click.ClickException(
+            f"'{requested}' is not available here; {type_choices('--type', allowed)}"
+        )
     start = cwd.resolve()
     fallback: tuple[str, Path] | None = None
     for candidate in _search_path(start):
-        detected = _host_types_at(candidate)
+        detected = [item for item in _types_at(candidate) if item in allowed]
         if requested is not None:
             if requested in detected:
                 if requested == "php" and _php_project_strength(candidate) != "strong":
-                    # A weak (bare index.php) match defers to a stronger
-                    # one closer to here; use it only if nothing better
-                    # turns up.
                     if fallback is None:
                         fallback = (requested, candidate)
                     continue
@@ -219,14 +230,13 @@ def discover_framework(cwd: Path, requested: str | None = None) -> tuple[str, Pa
             return detected[0], candidate
     if fallback is not None:
         return fallback
-    names = "Django, Vite, Astro, CakePHP, or Laravel"
     if requested is not None:
         raise click.ClickException(
             f"could not find a {requested} project root from '{start}'"
         )
     raise click.ClickException(
-        f"could not detect {names}; provide a command after -- "
-        "together with --port"
+        f"could not detect a project type from '{start}'; provide --type, or a "
+        "command after -- together with --port"
     )
 
 
