@@ -188,12 +188,15 @@ VCS_MARKERS = (".git", ".hg", ".svn")
 def _search_path(start: Path) -> list[Path]:
     """Candidate project directories, nearest first.
 
-    Stops after the first directory holding a VCS marker, which is itself a
-    candidate. Failing that, stops below `$HOME`: the home directory and
-    everything above it are never a project root, so a stray manifest there
-    cannot be adopted.
+    `$HOME` itself and everything above it, including the filesystem root,
+    are never candidates, so a stray manifest there cannot be adopted — even
+    when `$HOME` holds a VCS marker. Search then stops after the first
+    remaining directory holding a VCS marker, which is itself a candidate.
     """
     candidates = [start, *start.parents]
+    home = Path.home().resolve()
+    excluded = {home, *home.parents}
+    candidates = [path for path in candidates if path not in excluded]
     boundary = next(
         (
             path
@@ -204,9 +207,7 @@ def _search_path(start: Path) -> list[Path]:
     )
     if boundary is not None:
         return candidates[: candidates.index(boundary) + 1]
-    home = Path.home().resolve()
-    excluded = {home, *home.parents}
-    return [path for path in candidates if path not in excluded]
+    return candidates
 
 
 def _frameworks_at(cwd: Path) -> list[str]:

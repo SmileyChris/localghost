@@ -976,11 +976,42 @@ def test_search_path_never_reaches_home_or_above(tmp_path, monkeypatch):
 def test_search_path_outside_home_stops_below_the_filesystem_root(
     tmp_path, monkeypatch
 ):
-    monkeypatch.setenv("HOME", str(tmp_path / "elsewhere"))
-    nested = tmp_path / "a" / "b"
+    # Build a project tree and a $HOME that are siblings under tmp_path, so
+    # the only shared ancestor is tmp_path itself. The expected candidates
+    # are pinned exactly, so the assertion cannot pass because of a stray
+    # VCS marker somewhere in the ambient filesystem above tmp_path.
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    nested = tmp_path / "elsewhere" / "a" / "b"
     nested.mkdir(parents=True)
 
     candidates = runner._search_path(nested)
 
+    assert candidates == [nested, nested.parent, tmp_path / "elsewhere"]
     assert Path("/") not in candidates
-    assert nested in candidates
+
+
+def test_search_path_excludes_home_even_when_home_has_a_vcs_marker(
+    tmp_path, monkeypatch
+):
+    home = tmp_path / "home"
+    nested = home / "projects" / "app"
+    nested.mkdir(parents=True)
+    (home / ".git").mkdir()
+    monkeypatch.setenv("HOME", str(home))
+
+    candidates = runner._search_path(nested)
+
+    assert home not in candidates, (
+        "$HOME must never be a candidate, even with a VCS marker"
+    )
+    assert candidates == [nested, home / "projects"]
+
+
+def test_search_path_at_home_returns_no_candidates(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+
+    assert runner._search_path(home) == []
