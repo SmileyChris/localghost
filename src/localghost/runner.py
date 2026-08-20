@@ -182,14 +182,20 @@ def discover_framework(cwd: Path, requested: str | None = None) -> tuple[str, Pa
         detected = _host_types_at(candidate)
         if requested is not None:
             if requested in detected:
-                if requested == "php":
-                    # Keep walking: the outermost php is the project root.
-                    fallback = (requested, candidate)
+                if requested == "php" and _php_project_strength(candidate) != "strong":
+                    # A weak (bare index.php) match defers to a stronger
+                    # one closer to here; use it only if nothing better
+                    # turns up.
+                    if fallback is None:
+                        fallback = (requested, candidate)
                     continue
                 return requested, candidate
             continue
         if detected == ["php"]:
-            fallback = ("php", candidate)
+            if _php_project_strength(candidate) == "strong":
+                return "php", candidate
+            if fallback is None:
+                fallback = ("php", candidate)
             continue
         if len(detected) > 1:
             choices = " or ".join(f"--type {item}" for item in detected)
@@ -255,6 +261,22 @@ def _php_docroot(cwd: Path) -> Path | None:
             return candidate
     if (cwd / "index.php").is_file():
         return cwd
+    return None
+
+
+def _php_project_strength(cwd: Path) -> str | None:
+    """How strongly this directory looks like a php project root.
+
+    `composer.json` or a populated docroot means a project; a bare
+    `index.php` means a directory that is probably itself a docroot.
+    """
+    if _composer_manifest(cwd) is not None:
+        return "strong"
+    for name in PHP_DOCROOTS:
+        if (cwd / name / "index.php").is_file():
+            return "strong"
+    if (cwd / "index.php").is_file():
+        return "weak"
     return None
 
 

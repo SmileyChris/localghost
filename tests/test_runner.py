@@ -1124,6 +1124,46 @@ def test_requested_php_also_resolves_to_the_outermost_root(tmp_path):
     assert runner.discover_framework(public, "php") == ("php", root)
 
 
+def test_weak_php_match_prefers_the_nearer_of_two_bare_index_files(tmp_path):
+    """Round 2 reverses round 1's 'outermost wins' for a bare index.php:
+    with no stronger project signal anywhere, the nearest weak match wins,
+    not the outermost one."""
+    root = tmp_path / "legacy-shop"
+    webroot = root / "app" / "webroot"
+    webroot.mkdir(parents=True)
+    (root / ".git").mkdir()
+    (root / "index.php").touch()
+    (webroot / "index.php").touch()
+
+    assert runner.discover_framework(webroot) == ("php", webroot)
+
+
+def test_php_project_root_does_not_cross_into_an_unrelated_parent(tmp_path):
+    """A composer.json project root must win immediately over walking
+    further out to an unrelated composer.json higher in the tree."""
+    root = tmp_path / "monorepo"
+    billing = root / "services" / "billing"
+    billing.mkdir(parents=True)
+    (root / ".git").mkdir()
+    (root / "composer.json").write_text(json.dumps({"require": {"some/pkg": "^1.0"}}))
+    _composer_at(billing, "some/other-pkg")
+
+    assert runner.discover_framework(billing) == ("php", billing)
+
+
+def test_php_project_root_from_a_docroot_inside_a_monorepo(tmp_path):
+    root = tmp_path / "monorepo"
+    billing = root / "services" / "billing"
+    public = billing / "public"
+    public.mkdir(parents=True)
+    (root / ".git").mkdir()
+    (root / "composer.json").write_text(json.dumps({"require": {"some/pkg": "^1.0"}}))
+    _composer_at(billing, "some/other-pkg")
+    (public / "index.php").touch()
+
+    assert runner.discover_framework(public) == ("php", billing)
+
+
 def test_laravel_outranks_generic_php_found_first_in_its_public_dir(tmp_path):
     """Invoked from public/, which itself matches generic php, must still
     walk out to the laravel root rather than stopping on the shadow match."""
