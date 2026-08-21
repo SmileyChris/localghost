@@ -1038,6 +1038,30 @@ def test_compose_run_rejects_a_host_command(tmp_path) -> None:
     assert "compose mode does not accept" in result.output.lower()
 
 
+def test_compose_run_dry_run_prints_the_plan_and_starts_nothing(
+    monkeypatch, tmp_path
+) -> None:
+    (tmp_path / "compose.yaml").write_text("services: {}\n")
+    monkeypatch.setattr(
+        "localghost.cli._run_proxy",
+        lambda *args, **kwargs: pytest.fail("started the proxy"),
+    )
+    monkeypatch.setattr(
+        "localghost.cli.subprocess.run",
+        lambda *args, **kwargs: pytest.fail("ran docker compose"),
+    )
+
+    result = CliRunner().invoke(
+        cli, ["run", "-C", str(tmp_path), "--type", "compose", "--dry-run"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Dry run:" in result.output
+    assert "Type: compose" in result.output
+    assert f"Project: {tmp_path.name}" in result.output
+    assert "Public URL: http://" in result.output
+
+
 def test_generate_command_requires_a_port() -> None:
     runner = CliRunner()
     with runner.isolated_filesystem():

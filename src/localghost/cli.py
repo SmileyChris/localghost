@@ -29,6 +29,7 @@ from .config import (
 from .feedback import (
     action,
     choices,
+    compose_dry_run,
     details,
     info,
     next_actions,
@@ -419,7 +420,12 @@ def run(
                 "compose mode does not accept host command, framework, or "
                 "port settings; Compose owns them"
             )
-        _run_compose(pinned or cwd, name, detach)
+        compose_root = pinned or cwd
+        project = name or compose_root.name
+        if dry_run:
+            compose_dry_run(project=project, url=_proxy_origin(project))
+            return
+        _run_compose(compose_root, name, detach)
         return
     plan = build_plan(pinned or cwd, name, selected_type, port, command, pinned=pinned)
     matching = find_matching(name=plan.name, cwd=plan.project_root or cwd)

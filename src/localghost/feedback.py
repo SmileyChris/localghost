@@ -131,6 +131,20 @@ def warning(title: str, messages: Iterable[str]) -> None:
         _console(True).print(f"Warning: {message}")
 
 
+def _labeled_block(rows: list[tuple[str, str]], *, title: str, err: bool) -> None:
+    """Render label/value rows under a title, as a Panel or a plain heading."""
+    if _rich_terminal(err):
+        table = Table.grid(padding=(0, 1))
+        table.add_column(style="bold")
+        table.add_column()
+        for label, value in rows:
+            table.add_row(label, value)
+        _console(err).print(Panel(table, title=title, border_style=MINT))
+        return
+    lines = [f"{title}:", *(f"  {label}: {value}" for label, value in rows)]
+    _console(err).print("\n".join(lines))
+
+
 def run_plan(
     *,
     type: str,
@@ -153,21 +167,18 @@ def run_plan(
             ("Public URL", url),
         ]
     )
-    destination_is_error = dry_run
-    if _rich_terminal(destination_is_error):
-        table = Table.grid(padding=(0, 1))
-        table.add_column(style="bold")
-        table.add_column()
-        for label, value in rows:
-            table.add_row(label, value)
-        title = "Dry run" if dry_run else "Run configuration"
-        _console(destination_is_error).print(
-            Panel(table, title=title, border_style=MINT)
-        )
-        return
-    heading = "Dry run:" if dry_run else "Run configuration:"
-    lines = [heading, *(f"  {label}: {value}" for label, value in rows)]
-    _console(destination_is_error).print("\n".join(lines))
+    title = "Dry run" if dry_run else "Run configuration"
+    _labeled_block(rows, title=title, err=dry_run)
+
+
+def compose_dry_run(*, project: str, url: str) -> None:
+    """The Compose analogue of `run_plan`'s dry-run block.
+
+    Compose owns its own port and command, so those rows never apply here;
+    only the type, the project name, and the public URL are meaningful.
+    """
+    rows = [("Type", "compose"), ("Project", project), ("Public URL", url)]
+    _labeled_block(rows, title="Dry run", err=True)
 
 
 def routes(items: Iterable[tuple[str, str]]) -> None:
