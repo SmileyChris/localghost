@@ -51,7 +51,12 @@ SUPPORTED_TYPES = (
     "php",
 )
 RUN_TYPES = tuple(item for item in SUPPORTED_TYPES if item != "dockerfile")
-GENERATE_TYPES = SUPPORTED_TYPES
+# `compose` is never a legitimate `generate --type` value: with no Compose
+# file present it would ask generate to scaffold a *host* bridge for a type
+# named "compose", and with one present, `--type` is already rejected
+# outright regardless of its value. Excluding it here removes the dead,
+# actively-misleading choice instead of special-casing it at every call site.
+GENERATE_TYPES = tuple(item for item in SUPPORTED_TYPES if item != "compose")
 
 DEFAULT_PORTS = {
     "django": 8000,
@@ -108,6 +113,51 @@ def validate_name(name: str) -> None:
         )
 
 
+def resolve_pinned_type(
+    pinned: Path,
+    requested: str | None,
+    *,
+    allowed: tuple[str, ...] = RUN_TYPES,
+    from_flag: bool = True,
+) -> tuple[str, Path]:
+    """Resolve the project type at an exact, already-pinned root.
+
+    A pinned root never walks: it resolves entirely against what is detected
+    at that exact directory, including a weak php match (a bare index.php) —
+    pinning means "this is the root", so there is nothing further out to
+    defer to. Shared by `build_plan`'s own pinned handling and by `run`'s
+    up-front compose check, so both resolve type and root from one piece of
+    logic rather than two independently maintained copies.
+
+    `from_flag` controls whether the mismatch error may suggest dropping
+    `--root`: that advice is only true when the pin actually came from the
+    flag, not from `[run].root` or a discovered `.localghost.toml`.
+    """
+    detected = [item for item in _types_at(pinned) if item in allowed]
+    if requested is not None:
+        if requested not in detected:
+            available = ", ".join(detected) if detected else "nothing"
+            hint = "drop --type to auto-detect"
+            if from_flag:
+                hint += ", or drop --root to search from the current directory"
+            raise click.ClickException(
+                f"no {requested} project at '{pinned}'; detected "
+                f"{available} there; {hint}"
+            )
+        return requested, pinned
+    if not detected:
+        raise click.ClickException(
+            f"could not detect a project type from '{pinned}'; provide "
+            "--type, or a command after -- together with --port"
+        )
+    if len(detected) > 1:
+        choices = " or ".join(f"--type {item}" for item in detected)
+        raise click.ClickException(
+            f"both {' and '.join(detected)} were detected; rerun with {choices}"
+        )
+    return detected[0], pinned
+
+
 def build_plan(
     cwd: Path,
     name: str | None,
@@ -116,6 +166,7 @@ def build_plan(
     command: tuple[str, ...],
     *,
     pinned: Path | None = None,
+    pinned_from_flag: bool = True,
 ) -> RunPlan:
     cwd = cwd.resolve()
     if command:
@@ -130,33 +181,9 @@ def build_plan(
         )
     else:
         if pinned is not None:
-            # A pinned root never walks: resolve entirely against what is
-            # detected at that exact directory, including a weak php match
-            # (a bare index.php) — pinning means "this is the root", so
-            # there is nothing further out to defer to.
-            detected = [item for item in _types_at(pinned) if item in RUN_TYPES]
-            if framework is not None:
-                if framework not in detected:
-                    available = ", ".join(detected) if detected else "nothing"
-                    raise click.ClickException(
-                        f"no {framework} project at '{pinned}'; detected "
-                        f"{available} there; drop --type to auto-detect, or "
-                        "drop --root to search from the current directory"
-                    )
-                selected_type, project_root = framework, pinned
-            elif not detected:
-                raise click.ClickException(
-                    f"could not detect a project type from '{pinned}'; provide "
-                    "--type, or a command after -- together with --port"
-                )
-            elif len(detected) > 1:
-                choices = " or ".join(f"--type {item}" for item in detected)
-                raise click.ClickException(
-                    f"both {' and '.join(detected)} were detected; rerun with "
-                    f"{choices}"
-                )
-            else:
-                selected_type, project_root = detected[0], pinned
+            selected_type, project_root = resolve_pinned_type(
+                pinned, framework, from_flag=pinned_from_flag
+            )
         else:
             selected_type, project_root = discover_type(cwd, framework)
         working_directory = project_root

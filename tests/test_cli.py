@@ -544,6 +544,8 @@ def test_a_pinned_root_rejects_a_type_not_present_there(monkeypatch, tmp_path) -
     assert str(root) in result.output
     assert "detected django there" in result.output
     assert "Project root:" not in result.output
+    # --root was actually used here, so the hint to drop it is accurate.
+    assert "drop --root" in result.output
 
 
 def test_a_pinned_root_from_config_rejects_a_mismatched_type(
@@ -1217,7 +1219,7 @@ def test_compose_run_rejects_host_only_settings(tmp_path) -> None:
     )
 
     assert result.exit_code != 0
-    assert "compose mode does not accept" in result.output.lower()
+    assert "compose does not accept" in result.output.lower()
 
 
 def test_compose_run_rejects_a_host_command(tmp_path) -> None:
@@ -1228,7 +1230,7 @@ def test_compose_run_rejects_a_host_command(tmp_path) -> None:
     )
 
     assert result.exit_code != 0
-    assert "compose mode does not accept" in result.output.lower()
+    assert "compose does not accept" in result.output.lower()
 
 
 def test_compose_run_dry_run_prints_the_plan_and_starts_nothing(
@@ -1372,6 +1374,124 @@ def test_a_configured_compose_type_skips_the_routing_check(
     assert "http://demo.localhost" in result.output
 
 
+def test_a_pinned_root_with_only_a_configured_name_still_detects_compose(
+    monkeypatch, tmp_path
+) -> None:
+    """A .localghost.toml that sets only `name` still pins the root (through
+    config_dir), but that must not skip compose detection at that same root.
+    Before the fix, a pinned root with no explicit --type never called
+    discover_type at all, so selected_type stayed None, fell through to
+    build_plan, and build_plan's pinned branch cannot build a compose plan
+    (compose is a Compose-owned dispatch, not a host type)."""
+    (tmp_path / "compose.yaml").write_text("services: {}\n")
+    (tmp_path / ".localghost.toml").write_text('[run]\nname = "demo"\n')
+    install_compose(monkeypatch, routed_compose_model())
+    monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
+
+    result = CliRunner().invoke(cli, ["run", "-C", str(tmp_path), "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "Type: compose" in result.output
+    assert "Project: demo" in result.output
+    assert "demo.localhost" in result.output
+
+
+def test_a_root_flag_pinned_compose_project_is_still_detected(
+    monkeypatch, tmp_path
+) -> None:
+    root = tmp_path / "app"
+    root.mkdir()
+    (root / "compose.yaml").write_text("services: {}\n")
+    install_compose(monkeypatch, routed_compose_model(project="app"))
+    monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
+
+    result = CliRunner().invoke(cli, ["run", "--root", str(root), "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "Type: compose" in result.output
+
+
+def test_compose_run_from_a_subdirectory_uses_the_project_root(
+    monkeypatch, tmp_path
+) -> None:
+    """`docker compose config` performs its own upward discovery from
+    compose_root, so it can find a parent's wired project even when the
+    printed URL and project name were wrongly derived from cwd instead. This
+    proves --project-name, the printed URL, and the real `docker compose
+    up`'s cwd= all come from the SAME resolved root, not the subdirectory --
+    do not pass --name here, or the project-name derivation bug would be
+    masked."""
+    root = tmp_path / "site"
+    root.mkdir()
+    (root / ".git").mkdir()
+    (root / "compose.yaml").write_text("services: {}\n")
+    nested = root / "services" / "api"
+    nested.mkdir(parents=True)
+    install_compose(monkeypatch, routed_compose_model(project="site"))
+    monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
+    recorded: dict[str, object] = {}
+
+    def _run(command, **kwargs):
+        recorded["command"] = command
+        recorded["cwd"] = kwargs.get("cwd")
+        return CompletedProcess(command, 0)
+
+    monkeypatch.setattr("localghost.cli.subprocess.run", _run)
+
+    result = CliRunner().invoke(cli, ["run", "-C", str(nested)])
+
+    assert result.exit_code == 0, result.output
+    assert recorded["command"] == [
+        "docker",
+        "compose",
+        "--project-name",
+        "site",
+        "up",
+    ]
+    assert recorded["cwd"] == root
+    assert "site.localhost" in result.output
+
+
+def test_run_accepts_the_deprecated_framework_alias_for_compose(
+    monkeypatch, tmp_path
+) -> None:
+    """--framework's choice spans every RUN_TYPES value, including compose,
+    and the CHANGELOG says --framework 'keeps working'; before the fix, the
+    compose host-only-settings guard tested the alias variable itself
+    (still set to 'compose') rather than the actual host-only settings it
+    means to guard, so this hard-errored."""
+    (tmp_path / "compose.yaml").write_text("services: {}\n")
+    install_compose(monkeypatch, routed_compose_model())
+    monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
+
+    result = CliRunner().invoke(
+        cli, ["run", "-C", str(tmp_path), "--framework", "compose", "--dry-run"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "deprecated" in result.output.lower()
+    assert "Type: compose" in result.output
+
+
+def test_pinned_root_from_discovered_config_does_not_claim_a_root_flag(
+    tmp_path,
+) -> None:
+    """The pin here comes from a discovered .localghost.toml, not --root, so
+    the mismatch error must not tell the user to drop a flag they never
+    used."""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".localghost.toml").write_text("[run]\n")
+    (tmp_path / "package.json").write_text(
+        json.dumps({"scripts": {"dev": "vite"}, "dependencies": {"vite": "x"}})
+    )
+
+    result = CliRunner().invoke(cli, ["run", "--type", "django", "-C", str(tmp_path)])
+
+    assert result.exit_code != 0
+    assert "no django project at" in result.output
+    assert "--root" not in result.output
+
+
 def test_generate_command_requires_a_port() -> None:
     runner = CliRunner()
     with runner.isolated_filesystem():
@@ -1400,6 +1520,90 @@ def test_generate_command_rejects_dockerfile_type() -> None:
 
     assert result.exit_code != 0
     assert "cannot be combined with --type dockerfile" in result.output
+
+
+def test_generate_no_longer_offers_compose_as_a_type() -> None:
+    """compose was never a legitimate generate --type value: with no Compose
+    file present it asked generate to scaffold a *host* bridge for a type
+    named "compose"; with one present, --type is rejected outright
+    regardless of its value. It is dropped from GENERATE_TYPES rather than
+    special-cased."""
+    runner_ = CliRunner()
+    with runner_.isolated_filesystem():
+        result = runner_.invoke(
+            cli, ["generate", "--no-input", "--type", "compose", "--port", "80"]
+        )
+
+    assert result.exit_code != 0
+    assert "not one of" in result.output
+    assert "'compose'" in result.output
+    assert "'dockerfile'" in result.output
+
+
+def test_generate_command_rejects_compose_type_for_a_command(
+    tmp_path, monkeypatch, cli_module
+) -> None:
+    """`_generate_without_compose`'s upward detection can land on 'compose'
+    through an ancestor's compose.yaml even though compose is no longer an
+    offered --type value; the command-writing path must still refuse it
+    explicitly rather than writing type = "compose" into .localghost.toml --
+    which run would then either refuse outright, or, if the recorded
+    command were later dropped by hand, treat as a project that skips the
+    compose routing check despite never actually being wired."""
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(
+        click.ClickException, match="cannot be combined with --type compose"
+    ):
+        cli_module._generate_without_compose(
+            service_name=None,
+            port=3000,
+            output=None,
+            selected_type="compose",
+            dry_run=False,
+            interactive=False,
+            command=("./server",),
+        )
+
+
+def test_generate_detects_a_dockerfile_from_a_subdirectory_and_writes_at_the_root(
+    tmp_path, monkeypatch
+) -> None:
+    """generate's upward detection can resolve a type from an ancestor
+    directory; every check and default downstream of that detection must
+    use the same root, not silently fall back to the invocation directory.
+    Before the fix, the Dockerfile existence check stayed cwd-only, so a
+    Dockerfile detected two levels up produced "requires a Dockerfile in the
+    current directory" -- naming a flag (--type dockerfile) the user never
+    passed, about a file that manifestly exists."""
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / ".git").mkdir()
+    (root / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+    nested = root / "services" / "api"
+    nested.mkdir(parents=True)
+    monkeypatch.chdir(nested)
+
+    result = CliRunner().invoke(
+        cli,
+        ["generate", "--no-input", "--port", "80"],
+        env={"COMPOSE_PROJECT_NAME": "root-detected-dockerfile"},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (root / "compose.yaml").exists()
+    assert not (nested / "compose.yaml").exists()
+    assert "build:" in (root / "compose.yaml").read_text(encoding="utf-8")
+
+
+def test_run_rejects_a_missing_config_path(tmp_path) -> None:
+    result = CliRunner().invoke(
+        cli,
+        ["run", "-C", str(tmp_path), "--config", str(tmp_path / "missing.toml")],
+    )
+
+    assert result.exit_code != 0
+    assert "does not exist" in result.output.lower()
 
 
 def test_generate_command_writes_and_then_extends_the_config() -> None:
@@ -1463,12 +1667,14 @@ def test_compose_run_starts_the_proxy_and_reports_the_public_url(
     (tmp_path / "compose.yaml").write_text("services: {}\n")
     install_compose(monkeypatch, routed_compose_model())
     calls: list[object] = []
+    real_kwargs: dict[str, object] = {}
     monkeypatch.setattr(
         "localghost.cli._run_proxy", lambda *args, **kwargs: calls.append("proxy")
     )
 
     def _run(command, **kwargs):
         calls.append(command)
+        real_kwargs.update(kwargs)
         return CompletedProcess(command, 0)
 
     monkeypatch.setattr("localghost.cli.subprocess.run", _run)
@@ -1480,6 +1686,11 @@ def test_compose_run_starts_the_proxy_and_reports_the_public_url(
     assert result.exit_code == 0, result.output
     assert calls[0] == "proxy", "the proxy must be up before the application starts"
     assert calls[1] == ["docker", "compose", "--project-name", "demo", "up"]
+    # The real docker compose up's cwd= must match compose_root; a spy that
+    # discards kwargs (as this one used to) can't catch a regression that
+    # derives the project name/URL from one directory and the real
+    # invocation's cwd from another.
+    assert real_kwargs.get("cwd") == tmp_path
     assert "http://demo.localhost" in result.output
 
 

@@ -69,6 +69,7 @@ from .runner import (
     django_settings_warnings,
     execute,
     find_route_collision,
+    resolve_pinned_type,
     start_bridge,
     stop_bridge,
     type_choices,
@@ -371,7 +372,7 @@ def _trust_status() -> None:
 @click.option(
     "config",
     "--config",
-    type=click.Path(path_type=Path),
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
     help="Run configuration TOML path.",
 )
 @click.option(
@@ -400,6 +401,11 @@ def run(
             raise click.UsageError("--type and --framework cannot both be given")
         warning("Deprecated option", ["--framework is deprecated; use --type"])
         selected_type = framework
+        # The alias is now fully folded into `selected_type`; clearing it
+        # stops any later check from testing the alias variable itself
+        # (which would still read "compose" etc.) instead of the actual
+        # host-only settings it means to guard.
+        framework = None
     config_file = config or discover_config(cwd)
     settings = load_config(config_file) if config_file else RunConfig()
     config_dir = config_file.parent if config_file else None
@@ -410,23 +416,34 @@ def run(
     name = name or settings.name
     selected_type = selected_type or settings.type
     port = port or settings.port
+    root_from_flag = root is not None
     pinned = resolve_root(
         start=cwd, flag=root, configured=settings.root, config_dir=config_dir
     )
-    if selected_type is None and pinned is None and not command:
+    resolved_root: Path | None = None
+    if selected_type is None and not command:
         # Only compose is dispatched from here; every other detected type is
         # re-discovered inside build_plan, which also needs the ambiguity
-        # and "nothing detected" errors this raises.
-        selected_type, _ = discover_type(cwd, None)
+        # and "nothing detected" errors this raises. Type and root are
+        # resolved together here for a pinned root exactly as much as an
+        # unpinned one, so compose's project name, routing check, and
+        # `docker compose` invocation below all anchor to the same
+        # directory build_plan would use for a host type.
+        if pinned is not None:
+            selected_type, resolved_root = resolve_pinned_type(
+                pinned, None, from_flag=root_from_flag
+            )
+        else:
+            selected_type, resolved_root = discover_type(cwd, None)
     if selected_type == "compose":
         # Compose owns the application's configuration, so host-only
         # settings are rejected; --root is orthogonal and stays allowed.
-        if command or framework is not None or port is not None:
+        if command or port is not None:
             raise click.ClickException(
-                "compose mode does not accept host command, framework, or "
-                "port settings; Compose owns them"
+                "compose does not accept a host command or --port; Compose "
+                "owns them"
             )
-        compose_root = pinned or cwd
+        compose_root = resolved_root or pinned or cwd
         project = name or compose_root.name
         trusted = settings.type == "compose"
         if not trusted:
@@ -436,7 +453,15 @@ def run(
             return
         _run_compose(compose_root, name, detach)
         return
-    plan = build_plan(pinned or cwd, name, selected_type, port, command, pinned=pinned)
+    plan = build_plan(
+        pinned or cwd,
+        name,
+        selected_type,
+        port,
+        command,
+        pinned=pinned,
+        pinned_from_flag=root_from_flag,
+    )
     matching = find_matching(name=plan.name, cwd=plan.project_root or cwd)
     if matching:
         message = (
@@ -968,7 +993,7 @@ def generate(
         _generate_without_compose(
             service_name=service_name,
             port=port,
-            output=output or Path("compose.yaml"),
+            output=output,
             selected_type=selected_type,
             dry_run=dry_run,
             interactive=interactive,
@@ -1045,30 +1070,42 @@ def generate(
 def _generate_without_compose(
     service_name: str | None,
     port: int | None,
-    output: Path,
+    output: Path | None,
     selected_type: str | None,
     dry_run: bool,
     interactive: bool,
     command: tuple[str, ...] = (),
     extend: bool = False,
 ) -> None:
+    # Detection may walk to an ancestor root; every cwd-scoped check and
+    # default below is anchored to that same root throughout, rather than
+    # silently re-reading the invocation directory once detection has
+    # already moved on (see the Dockerfile check below).
+    invocation_directory = Path.cwd()
+    root = invocation_directory
     if selected_type is None:
         # A genuine "nothing here" failure is deferred to the prompt/error
         # below, but an ambiguity error (two types detected) must propagate
         # as-is rather than being silently swallowed into a generic prompt.
         try:
-            selected_type, _ = discover_type(
-                Path.cwd(), None, allowed=GENERATE_TYPES
-            )
+            selected_type, root = discover_type(root, None, allowed=GENERATE_TYPES)
         except click.ClickException as exc:
             if "could not detect a project type" not in exc.message:
                 raise
             selected_type = None
 
     if command:
-        if selected_type == "dockerfile":
+        if selected_type in ("dockerfile", "compose"):
+            # dockerfile has no host command to record; compose is not a
+            # host type at all (see GENERATE_TYPES) and must never reach
+            # here, but detection above can still land on it through an
+            # ancestor's compose.yaml, so it is refused explicitly rather
+            # than being written into .localghost.toml, where it would both
+            # make `run` refuse the very command just recorded and, were
+            # `command` ever dropped by hand, disarm run's compose routing
+            # check for a project that was never actually wired.
             raise click.ClickException(
-                "a command cannot be combined with --type dockerfile"
+                f"a command cannot be combined with --type {selected_type}"
             )
         if port is None:
             raise click.ClickException("a custom command requires --port")
@@ -1087,14 +1124,21 @@ def _generate_without_compose(
         if backup:
             info(f"Backup: {backup}")
         return
+    # A relative default reads far better than an absolute one, and applies
+    # whenever detection didn't have to walk away from the invocation
+    # directory -- the overwhelmingly common case.
+    default_output = (
+        Path("compose.yaml") if root == invocation_directory else root / "compose.yaml"
+    )
+    output = output or default_output
     if output.exists() and not dry_run:
         raise click.ClickException(f"refusing to overwrite existing '{output}'")
-    validate_project_name_value(_local_project_name())
+    validate_project_name_value(_local_project_name(root))
 
     if selected_type is None and interactive:
         selected_type = click.prompt(
             "No Compose file found. Application type",
-            default="dockerfile" if Path("Dockerfile").is_file() else "php",
+            default="dockerfile" if (root / "Dockerfile").is_file() else "php",
             type=click.Choice(GENERATE_TYPES),
             show_choices=True,
         )
@@ -1120,9 +1164,9 @@ def _generate_without_compose(
         port = click.prompt(prompt, type=click.IntRange(1, 65535))
 
     if selected_type == "dockerfile":
-        if not Path("Dockerfile").is_file():
+        if not (root / "Dockerfile").is_file():
             raise click.ClickException(
-                "--type dockerfile requires a Dockerfile in the current directory"
+                "--type dockerfile requires a Dockerfile in the project directory"
             )
         document = create_dockerfile_compose(service_name, port)
         description = "Dockerfile application"
@@ -1160,18 +1204,19 @@ def _is_interactive(no_input: bool) -> bool:
     return not no_input and sys.stdin.isatty()
 
 
-def _local_project_name() -> str:
+def _local_project_name(root: Path | None = None) -> str:
     if project_name := os.environ.get("COMPOSE_PROJECT_NAME"):
         return project_name
 
-    dotenv = Path(".env")
+    root = root or Path.cwd()
+    dotenv = root / ".env"
     if dotenv.is_file():
         for line in dotenv.read_text(encoding="utf-8").splitlines():
             match = re.match(r"\s*COMPOSE_PROJECT_NAME\s*=\s*(.*?)\s*$", line)
             if match:
                 return match.group(1).strip("'\"")
 
-    normalized = re.sub(r"[^a-z0-9_-]+", "", Path.cwd().name.lower())
+    normalized = re.sub(r"[^a-z0-9_-]+", "", root.name.lower())
     return normalized.lstrip("-_")
 
 
