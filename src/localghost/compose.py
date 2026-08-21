@@ -10,8 +10,16 @@ from typing import Any
 import click
 
 
-def resolve_compose(files: tuple[Path, ...]) -> dict[str, Any]:
-    """Return Docker Compose's normalized JSON model."""
+def resolve_compose(
+    files: tuple[Path, ...], *, cwd: Path | None = None
+) -> dict[str, Any]:
+    """Return Docker Compose's normalized JSON model.
+
+    `cwd` lets a caller resolve a project that isn't the process's own
+    working directory (e.g. `run -C`) while still relying on Compose's own
+    file discovery -- passing explicit `files` here instead would disable
+    the automatic `compose.override.yaml` merge.
+    """
     command = ["docker", "compose"]
     for compose_file in files:
         command.extend(["--file", str(compose_file)])
@@ -20,6 +28,7 @@ def resolve_compose(files: tuple[Path, ...]) -> dict[str, Any]:
     try:
         result = subprocess.run(
             command,
+            cwd=cwd,
             check=False,
             capture_output=True,
             text=True,

@@ -524,10 +524,16 @@ def _check_compose_routing(compose_root: Path, project: str) -> None:
     since the routing labels may arrive from an override file or a `-f`
     stack that only the resolved model reflects. `docker compose config`
     is read-only, so this is safe to run on the `--dry-run` path too.
+
+    Never passes an explicit `--file`: that disables Compose's automatic
+    `compose.override.yaml` merge, so a project `generate` just fixed would
+    still be refused. `_run_compose`'s real `docker compose up` also passes
+    no `--file`, relying on Compose's own discovery against `cwd`, so this
+    matches it exactly -- including running against `compose_root` rather
+    than the process's own working directory, for `-C`/`--root` runs.
     """
     compose_file = _compose_file(compose_root)
-    files = (compose_file,) if compose_file else ()
-    problem = routing_problem(resolve_compose(files))
+    problem = routing_problem(resolve_compose((), cwd=compose_root))
     if problem is None:
         return
     label = compose_file.name if compose_file else "the Compose project"

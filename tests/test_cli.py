@@ -756,7 +756,7 @@ def compose_model(
 
 
 def install_compose(monkeypatch, model: dict) -> None:
-    monkeypatch.setattr("localghost.cli.resolve_compose", lambda files: model)
+    monkeypatch.setattr("localghost.cli.resolve_compose", lambda files, **kwargs: model)
 
 
 def routed_compose_model(*, project: str = "demo") -> dict:
@@ -1161,7 +1161,7 @@ def test_compose_run_refuses_an_unrouted_project(monkeypatch, tmp_path) -> None:
     (tmp_path / "compose.yaml").write_text("services:\n  web:\n    image: nginx\n")
     monkeypatch.setattr(
         "localghost.cli.resolve_compose",
-        lambda files: {"networks": {}, "services": {"web": {}}},
+        lambda files, **kwargs: {"networks": {}, "services": {"web": {}}},
     )
     monkeypatch.setattr(
         "localghost.cli._run_proxy",
@@ -1179,6 +1179,62 @@ def test_compose_run_refuses_an_unrouted_project(monkeypatch, tmp_path) -> None:
     assert "demo.localhost" in result.output
 
 
+def test_compose_routing_check_never_pins_an_explicit_file(
+    monkeypatch, tmp_path
+) -> None:
+    """Passing --file to `docker compose config` disables Compose's own
+    compose.override.yaml merge, so a project `generate` just fixed would
+    still be refused with the identical error. The check must therefore let
+    Compose's own discovery run, against compose_root -- not the process's
+    own cwd, for -C/--root runs -- rather than pinning an explicit file."""
+    (tmp_path / "compose.yaml").write_text("services: {}\n")
+    recorded: dict[str, object] = {}
+
+    def spy(files, **kwargs):
+        recorded["files"] = files
+        recorded["cwd"] = kwargs.get("cwd")
+        return routed_compose_model()
+
+    monkeypatch.setattr("localghost.cli.resolve_compose", spy)
+    monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "localghost.cli.subprocess.run",
+        lambda command, **kwargs: CompletedProcess(command, 0),
+    )
+
+    result = CliRunner().invoke(
+        cli, ["run", "-C", str(tmp_path), "--type", "compose", "--name", "demo"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert recorded["files"] == ()
+    assert recorded["cwd"] == tmp_path
+
+
+def test_compose_run_routes_after_generate_fixes_an_override() -> None:
+    """End-to-end against real `docker compose config` (no mocking): a run
+    refused for missing routing labels must un-refuse once `generate` writes
+    them, proving the check reads the same merged model `generate` writes to
+    and `_run_compose` itself would read. --dry-run avoids needing a daemon."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        Path("compose.yaml").write_text(
+            "services:\n  web:\n    image: nginx\n    expose:\n      - '80'\n"
+        )
+
+        refused = runner.invoke(cli, ["run", "--type", "compose", "--dry-run"])
+        assert refused.exit_code != 0, refused.output
+        assert "run localghost generate" in refused.output
+
+        generated = runner.invoke(cli, ["generate", "--no-input", "--port", "80"])
+        assert generated.exit_code == 0, generated.output
+        assert Path("compose.override.yaml").exists()
+
+        routed = runner.invoke(cli, ["run", "--type", "compose", "--dry-run"])
+        assert routed.exit_code == 0, routed.output
+        assert "Public URL:" in routed.output
+
+
 def test_a_configured_compose_type_skips_the_routing_check(
     monkeypatch, tmp_path
 ) -> None:
@@ -1186,7 +1242,9 @@ def test_a_configured_compose_type_skips_the_routing_check(
     (tmp_path / ".localghost.toml").write_text('[run]\ntype = "compose"\n')
     monkeypatch.setattr(
         "localghost.cli.resolve_compose",
-        lambda files: pytest.fail("resolved the model despite an explicit type"),
+        lambda files, **kwargs: pytest.fail(
+            "resolved the model despite an explicit type"
+        ),
     )
     monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
     monkeypatch.setattr(
