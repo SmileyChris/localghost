@@ -19,7 +19,7 @@ class Route:
 
 
 def proxy_is_running() -> bool:
-    """Return whether the fixed shared proxy container is already running."""
+    """Return whether the fixed hub container is already running."""
     result = _docker(
         [
             "ps",

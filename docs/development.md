@@ -5,7 +5,7 @@
 - `compose.yaml` is the stable public interface and must remain self-contained.
 - `examples/compose.yaml` supplies primary, secondary, and unlabelled fixtures.
 - `scripts/integration-test.sh` exercises the compatibility contract.
-- `src/localghost/` contains the packaged Click CLI, bundled proxy Compose
+- `src/localghost/` contains the packaged Click CLI, bundled hub Compose
   definition, override generator, and source-loaded Traefik provider.
 - `pyproject.toml` and `uv.lock` define the build and locked development
   environment.
@@ -16,7 +16,7 @@
   updates. The pinned Caddy host-bridge image lives in `generator.py`, so review
   it explicitly during dependency maintenance.
 
-The proxy Compose file must not gain application-specific mounts, state, or
+The hub Compose file must not gain application-specific mounts, state, or
 configuration files. Consumers rely on the fixed `localghost` project and
 `localghost` network names.
 
@@ -64,8 +64,8 @@ already exist and cleans up resources it creates even after failure. Ports 80,
 
 Coverage includes:
 
-- validation and proxy-first external-network failure;
-- repeated idempotent proxy startup and container health;
+- validation and hub-first external-network failure;
+- repeated idempotent hub startup and container health;
 - exact loopback port publication and absence of raw API port publication;
 - two concurrent fixture projects with isolated primary routes;
 - secondary-service routing and rejection of an unlabelled container;
@@ -74,8 +74,8 @@ Coverage includes:
 - trusted HTTPS routing with the bootstrapped public root, without changing the
   host trust store;
 - dashboard root redirection and internal dashboard access;
-- removal of one application without affecting another or the proxy;
-- proxy restart and forced reconciliation without consumer recreation; and
+- removal of one application without affecting another or the hub;
+- hub restart and forced reconciliation without consumer recreation; and
 - recreation on a non-default loopback port.
 
 Override test names or ports only when necessary:
@@ -125,7 +125,7 @@ uvx --from . localghost generate --help
 ## Release-candidate test
 
 The checked-in source test does not prove that the packaged CLI contains the
-proxy definition it starts. Before release, build a candidate wheel, then run
+hub definition it starts. Before release, build a candidate wheel, then run
 the lifecycle commands from that wheel:
 
 ```sh
@@ -157,7 +157,7 @@ does not support account username-and-password uploads; use an API token.
 ## Release checklist
 
 1. Review dependency changes and security implications, including the Traefik
-   proxy image and generated Caddy host-bridge image.
+   hub image and generated Caddy host-bridge image.
 2. Run static validation and the local integration suite.
 3. Pilot two independent checkouts with unique Compose project names (e.g. two
    checkouts of the same application).

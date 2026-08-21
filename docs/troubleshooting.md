@@ -1,6 +1,6 @@
 # Troubleshooting local<span class="brand-accent">ghost</span>
 
-Start with the proxy status and logs:
+Start with the hub status and logs:
 
 ```sh
 docker ps --filter label=com.docker.compose.project=localghost
@@ -15,7 +15,7 @@ Typical error:
 network localghost declared as external, but could not be found
 ```
 
-The proxy has not yet created its shared network. Run `uvx localghost`
+The hub has not yet created its shared network. Run `uvx localghost`
 once, then rerun the application's `docker compose up` command.
 
 Do not change the application network to a normal, implicitly created network.
@@ -23,8 +23,8 @@ That would create a project-scoped network that Traefik cannot share reliably.
 
 ## Network exists but every route is unavailable
 
-Consumer containers can run while the proxy container is stopped. Check that
-the proxy is running and healthy with `ps`, then inspect its logs. Reconcile it
+Consumer containers can run while the hub container is stopped. Check that
+the hub is running and healthy with `ps`, then inspect its logs. Reconcile it
 with `uvx localghost` if needed.
 
 Also confirm the URL uses the configured `LOCALGHOST_HTTP_PORT` when it is
@@ -85,7 +85,7 @@ docker ps --filter publish=80
 
 Stop the conflicting listener if appropriate, or use
 `LOCALGHOST_HTTP_PORT` consistently as described in
-[Operating the proxy](operations.md#use-another-http-port). The proxy binds to
+[Operating the hub](operations.md#use-another-http-port). The hub binds to
 `127.0.0.1`, but a process bound to `0.0.0.0:80` still conflicts with it.
 
 ## HTTP works but HTTPS does not
@@ -97,7 +97,7 @@ uvx localghost trust --status
 uvx localghost --status
 ```
 
-HTTPS requires `mkcert`, an installed Localghost public root, and a running proxy
+HTTPS requires `mkcert`, an installed Localghost public root, and a running hub
 with the `websecure` entrypoint enabled. The application also needs a secure
 router with `websecure`, its normal `Host(...)` rule and service, and `tls=true`.
 Generated configurations include this router; compare hand-written labels with
@@ -105,7 +105,7 @@ Generated configurations include this router; compare hand-written labels with
 
 If a custom `LOCALGHOST_HTTPS_PORT` is configured, include it in the URL. When
 only a browser rejects the certificate, restart it and recheck its system or NSS
-trust store. When every client fails to connect, inspect the proxy logs and host
+trust store. When every client fails to connect, inspect the hub logs and host
 port publication instead.
 
 ## Hostname resolution or HTTP proxy problems

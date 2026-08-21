@@ -9,7 +9,7 @@ deployment.
 - Keep `compose.yaml` self-contained and free of application-specific state.
 - Keep the Compose project named `localghost` and the Docker network named
   `localghost`.
-- Consumer projects own their lifecycle; do not include the proxy Compose file
+- Consumer projects own their lifecycle; do not include the hub Compose file
   in their normal `up` or `down` commands.
 - Preserve loopback-only HTTP publishing, explicit `traefik.enable=true`
   opt-in, and `exposedByDefault=false`.

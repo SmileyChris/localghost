@@ -61,7 +61,7 @@ the integration suite before release.
 ## Application responsibility
 
 Opting into Traefik makes a container reachable from local browsers through the
-proxy. Applications remain responsible for trusted hosts, CSRF, CORS, callback
+hub. Applications remain responsible for trusted hosts, CSRF, CORS, callback
 URLs, authentication, cookies, and safe handling of development data.
 
 The shared Docker network also permits network connections between attached
@@ -106,7 +106,7 @@ The foreground `run` command executes detected Django runners and Vite package
 scripts with the checkout user's normal host permissions. Review application
 scripts as you would when running them directly.
 
-Managed host runs store their checkout path in a Docker label so the proxy's
+Managed host runs store their checkout path in a Docker label so the hub's
 route listing can identify their location. Anyone with Docker inspection access
 can read that label; do not use a sensitive checkout path.
 

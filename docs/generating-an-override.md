@@ -2,7 +2,7 @@
 
 Compose automatically merges `compose.override.yaml` with `compose.yaml`. The
 optional generator creates that local file, adding the most likely HTTP service
-to the shared proxy without modifying the application's base Compose file.
+to the hub without modifying the application's base Compose file.
 
 The helper requires Docker Compose 5.x (CI tests 5.1.4) and
 [uv](https://docs.astral.sh/uv/getting-started/installation/). `uvx` installs the
@@ -34,7 +34,7 @@ The generated override:
 - selects an explicit container port; and
 - leaves every other service unchanged.
 
-The proxy must already be running so the external network exists.
+The hub must already be running so the external network exists.
 
 ## How selection works
 
@@ -76,17 +76,23 @@ when the existing configuration cannot be merged safely.
 For non-interactive use, pass `--extend` explicitly. Use another output file or
 `--dry-run` when you prefer to merge the result manually.
 
-## Host run configuration
+## What generate writes
 
-Passing a command after `--` writes a `.localghost.toml` run configuration
-instead of a Compose override, recording the argv `localghost run` should use:
+Project type does not fully determine the output artifact. The rule is the
+same regardless of type:
+
+- a command is given after `--` → generate writes a `.localghost.toml` run
+  configuration, recording the argv `localghost run` should use;
+- otherwise → generate writes Compose configuration (a new `compose.yaml`, or
+  an override to an existing one).
 
 ```sh
 uvx localghost generate --port 8080 -- ./server --port 8080
 ```
 
 `--port` is required in this form, and it cannot be combined with
-`--mode dockerfile`. The same protections apply as for Compose overrides: an
+`--type dockerfile`, since a Dockerfile-based project has no host command to
+record. The same protections apply as for Compose overrides: an
 existing `.localghost.toml` is left alone unless `--extend` is given, a `.bak`
 copy is kept before rewriting (rotating to `.bak.1`, `.bak.2`, and so on), and
 `--dry-run` prints the configuration without writing it. See
@@ -112,27 +118,53 @@ duplicated, or not the hostname you want.
 ## Projects without Compose
 
 The same command provides a guided path when the current directory has no
-Compose file:
+Compose file, generating for any of the eight project types:
+`compose` (only meaningful when a Compose file already exists), `dockerfile`,
+`django`, `vite`, `astro`, `cakephp`, `laravel`, and `php`:
 
 ```sh
 uvx localghost generate
 ```
 
-If a `Dockerfile` exists, the default is a new `compose.yaml` with `build: .`,
-the external proxy network, and the primary route. The CLI asks for the
-container HTTP port.
-
-For an application running directly on the host, choose `host`. The generated
-Compose project runs a pinned Caddy bridge between Traefik and the host port:
+Type is detected the same way `run` detects it, searching upward to the
+nearest project root. Pass `--type` to skip detection or resolve an
+ambiguity — for example a directory holding both a `Dockerfile` and a
+framework root:
 
 ```sh
-uvx localghost generate --mode host --port 3000
+uvx localghost generate --type dockerfile
 ```
 
-The host process must listen on a Docker-reachable interface such as `0.0.0.0`;
-a process bound only to host `127.0.0.1` is normally unreachable from the bridge
-container. The bridge connects through `host.docker.internal` and does not
-publish another host port.
+If `--type dockerfile` is selected (or detected, when a `Dockerfile` exists
+and nothing else does), the default is a new `compose.yaml` with `build: .`,
+the external hub network, and the primary route. The CLI asks for the
+container HTTP port.
+
+For an application running directly on the host, select the specific
+framework type instead of a generic "host" answer — `django`, `vite`,
+`astro`, `cakephp`, `laravel`, or `php`. Naming the framework lets generate
+take that type's default port without prompting:
+
+| Type | Default port |
+|------|---------------|
+| `django`, `laravel` | 8000 |
+| `vite` | 5173 |
+| `astro` | 4321 |
+| `cakephp` | 8765 |
+| `php` | 8080 |
+
+`compose` and `dockerfile` have no default port: the port comes from the
+Compose model, or is prompted for.
+
+```sh
+uvx localghost generate --type php --port 3000
+```
+
+The generated Compose project runs a pinned Caddy bridge between the hub and
+the host port. The host process must listen on a Docker-reachable interface
+such as `0.0.0.0`; a process bound only to host `127.0.0.1` is normally
+unreachable from the bridge container. The bridge connects through
+`host.docker.internal` and does not publish another host port.
 
 Binding a development server to `0.0.0.0` may also make its host port reachable
 from the local network. Prefer binding specifically to a Docker-reachable host
@@ -140,43 +172,45 @@ interface when the framework supports it, and use the host firewall on untrusted
 networks.
 
 For scripts and other non-interactive use, pass `--no-input` together with
-`--mode` and `--port`.
+`--type` and `--port`.
 
 ## Run a host-native server
 
-`run` is the ephemeral alternative to persistent `generate --mode host`: it
-writes no Compose file in the checkout, starts a foreground application and an
-owned Caddy bridge, then removes that bridge when the application exits. The
-shared Traefik proxy remains running.
+`run` is the ephemeral alternative to persistent `generate --type <type>`:
+it writes no Compose file in the checkout, starts a foreground application and
+an owned Caddy bridge, then removes that bridge when the application exits.
+The hub remains running.
 
 ```sh
 uvx localghost run
-uvx localghost run --framework django --name review-123 --port 8010
+uvx localghost run --type django --name review-123 --port 8010
 uvx localghost run --port 3000 -- npm run custom-dev -- --port 3000
 uv run localghost run --directory /path/to/application
 ```
 
-It detects Django, Vite, Astro, CakePHP, and Laravel from framework-specific
-root markers. Django uses the project runner (uv, Poetry, Pipenv, or a
-virtualenv); Vite and Astro use the declared package manager, or select the
-first installed manager from lockfiles in the order Bun, pnpm, Yarn, then npm.
-CakePHP and Laravel use their framework development-server commands.
-An ambiguous project needs `--framework`; custom commands always need `--port`.
+It detects Django, Vite, Astro, CakePHP, Laravel, and plain PHP from
+type-specific root markers. Django uses the project runner (uv, Poetry,
+Pipenv, or a virtualenv); Vite and Astro use the declared package manager, or
+select the first installed manager from lockfiles in the order Bun, pnpm,
+Yarn, then npm. CakePHP and Laravel use their framework development-server
+commands; plain PHP uses PHP's built-in server from its docroot.
+An ambiguous project needs `--type`; custom commands always need `--port`.
 Detected servers bind to `0.0.0.0`, which can expose the raw development port to
 a LAN, and run package scripts with your normal host permissions. The lockfile
 order is only a fallback heuristic; use `packageManager` when multiple
 lockfiles are intentional or one may be stale.
 
-For detected applications, Localghost searches upward to the nearest framework
-root without crossing the Git worktree boundary. `--name` takes precedence
-over `COMPOSE_PROJECT_NAME`, then `.env`, then that root's normalized name.
-Default ports are 8000 for Django and Laravel, 5173 for Vite, 4321 for Astro,
-and 8765 for CakePHP. Localghost chooses the next free port when needed; an
-explicit `--port` is strict and fails if occupied. `--dry-run` performs no
-Docker inspection or startup.
+For detected applications, Localghost searches upward to the nearest project
+root, subject to the search boundary described in
+[Running host applications](running-host-apps.md#project-root-and-configuration-discovery).
+`--name` takes precedence over `COMPOSE_PROJECT_NAME`, then `.env`, then that
+root's normalized name. Default ports are 8000 for Django and Laravel, 5173
+for Vite, 4321 for Astro, 8765 for CakePHP, and 8080 for plain PHP. Localghost
+chooses the next free port when needed; an explicit `--port` is strict and
+fails if occupied. `--dry-run` performs no Docker inspection or startup.
 
 The command removes its bridge on normal exit, Ctrl+C, or SIGTERM, while leaving
-the shared proxy running. It refuses an existing route instead of replacing it;
+the hub running. It refuses an existing route instead of replacing it;
 see [route collisions](troubleshooting.md#route-already-exists).
 
 Django projects must allow the `<name>.localhost` host and configure CSRF
@@ -184,5 +218,5 @@ trusted origins as appropriate. Vite's HTTP, HMR, and WebSocket traffic all
 pass through the bridge; `.localhost` needs no additional Vite host allowlist.
 For Django, `run` checks the loaded settings when it can and warns if the host
 or HTTP origin is absent; startup still proceeds when settings cannot load.
-Use `--dry-run` to print the chosen framework, command, URL, port, and bridge
+Use `--dry-run` to print the chosen type, command, URL, port, and bridge
 YAML without starting Docker or the application.

@@ -3,20 +3,60 @@
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## [2.0.0] - 2026-08-21
+
+### Breaking
+
+- `run --mode` and `generate --mode` are removed. Both commands now take a
+  single `--type` option, spanning `compose`, `dockerfile` (generate-only),
+  `django`, `vite`, `astro`, `cakephp`, `laravel`, and `php`.
+- `[run].mode` in `.localghost.toml` is rejected. There is no direct
+  replacement: a `mode = "compose"` file should set `type = "compose"`
+  instead; a `mode = "host"` file should remove the key and let detection
+  choose, or name the specific type.
+- `--framework` and `[run].framework` are deprecated in favor of `--type` and
+  `[run].type`. They still work and still resolve ambiguous detection, but
+  now print a deprecation warning; `--framework` is hidden from `--help`.
+- A directory containing both a Compose file and a host framework now errors
+  and asks for `--type` instead of silently picking one. (In 1.2.0 such a
+  directory ran as a host application; this restores that as an explicit
+  choice rather than an implicit default.)
+- A `compose`-type `run` now refuses to start a project that has no service
+  wired to the `localghost` network with `traefik.enable=true`, instead of
+  starting Compose and printing a public URL that would never route. Setting
+  `type = "compose"` in `.localghost.toml` opts out of this check, since a
+  committed config file is the project declaring itself already wired.
+- The upward project search used by both type detection and config discovery
+  no longer adopts a marker above a VCS root (`.git`, `.hg`, `.svn`) or
+  anywhere at or above `$HOME`. A stray `~/package.json` or forgotten
+  `~/.localghost.toml` can no longer be mistaken for a project.
 
 ### Added
 
+- `php` and `dockerfile` join the project type set. `php` detects a generic
+  PHP application from `composer.json` or a docroot `index.php` and serves it
+  with PHP's built-in server (default port 8080); `dockerfile` is a
+  generate-only type that turns a bare `Dockerfile` into a `compose.yaml`.
+- `--root PATH` (and `[run].root` in `.localghost.toml`) pins the project
+  root explicitly instead of relying on the upward search.
+- `.localghost.toml` is now discovered automatically by walking upward from
+  the working directory, the same way project type is detected, so a project
+  that has one needs no `--root`.
 - `localghost run` now detects modern and legacy CakePHP applications and
   Laravel applications, using their conventional development servers and
   default ports.
-- Framework detection searches upward to the nearest application root without
-  crossing the Git worktree boundary. The detected root controls the default
-  hostname while a framework may select a different process working directory.
+- Type detection searches upward to the nearest project root without
+  crossing the search boundary described above. The detected root controls
+  the default hostname while a type may select a different process working
+  directory.
 - Add configured host/Compose runs, detached session metadata, and the
   `localghost manage` session commands.
 - Validate configured run values and interpolate `{port}` placeholders in
   configured argv commands.
+- Adopt "the hub" and "a bridge" as the names for the two halves of the
+  system in documentation, `--help` text, and console messages: the hub is
+  the single machine-wide Traefik container, and a bridge is whatever
+  connects one application to it.
 
 ### Changed
 
@@ -35,14 +75,14 @@ uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- Run-mode detection now performs the same upward framework search as the
-  runner, so `localghost run` detects CakePHP, Laravel, and any project
-  invoked from a subdirectory instead of refusing with "could not detect a
-  run mode".
-- `[run].framework` in `.localghost.toml` accepts every framework `--framework`
-  accepts; CakePHP and Laravel were previously rejected by the config file.
-- `localghost run --mode compose` starts the shared proxy and reports the
-  public URL. It previously ran `docker compose up` with nothing routing to it.
+- Type detection now performs the same upward search everywhere it runs, so
+  `localghost run` detects CakePHP, Laravel, and any project invoked from a
+  subdirectory instead of refusing with "could not detect a project type".
+- `[run].framework` (now `[run].type`) in `.localghost.toml` accepts every
+  type `--type` accepts; CakePHP and Laravel were previously rejected by the
+  config file.
+- A `compose`-type `localghost run` starts the hub and reports the public
+  URL. It previously ran `docker compose up` with nothing routing to it.
 - Detached runs start in the framework's working directory and record the
   project root, so legacy CakePHP serves the right docroot and a session
   started from a subdirectory is matched instead of duplicated.

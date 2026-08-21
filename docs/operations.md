@@ -1,6 +1,6 @@
 # Operating local<span class="brand-accent">ghost</span>
 
-Application commands must not include the proxy Compose file. The proxy and
+Application commands must not include the hub Compose file. The hub and
 applications are intentionally separate lifecycle domains.
 
 ## Start or reconcile
@@ -11,10 +11,10 @@ uvx localghost
 
 The command runs the Compose configuration bundled with the CLI. It is
 idempotent: running it again reconciles the existing `localghost` Compose
-project rather than creating another proxy, and waits for Traefik to become
+project rather than creating another hub, and waits for Traefik to become
 healthy.
 
-To inspect the current proxy state and routes without starting or reconciling
+To inspect the current hub state and routes without starting or reconciling
 it, run:
 
 ```sh
@@ -23,7 +23,7 @@ uvx localghost --status
 
 ## Optional trusted HTTPS
 
-The proxy begins HTTP-only. Trusted HTTPS requires `mkcert` on the host. In an
+The hub begins HTTP-only. Trusted HTTPS requires `mkcert` on the host. In an
 interactive terminal with `mkcert` installed, the first start offers to enable
 HTTPS and names the public root fingerprint before any privilege prompt
 appears. Otherwise, the successful HTTP startup ends by showing the command to
@@ -34,15 +34,15 @@ uvx localghost trust
 ```
 
 `trust` runs `mkcert` with `TRUST_STORES=system,nss` and a `CAROOT` containing
-only this proxy's exported `rootCA.pem`. The private root and the online
+only the hub's exported `rootCA.pem`. The private root and the online
 intermediate remain in Docker volumes. It also imports the exact public root
 into detected Zen NSS profiles, because Zen is not reliably discovered by
 mkcert. A missing `mkcert`, declined authorization, or failed verification
 leaves HTTPS unpublished and HTTP working.
 
-When the proxy is already running, a successful trust change reconciles it to
+When the hub is already running, a successful trust change reconciles it to
 the corresponding HTTP or HTTPS configuration. Neither `trust` nor `trust
---remove` starts a stopped proxy.
+--remove` starts a stopped hub.
 
 Check the state without modifying a trust store:
 
@@ -87,19 +87,19 @@ replace application logs when a backend itself is failing.
 uvx localghost down
 ```
 
-Compose removes the proxy container and attempts to remove its network. Docker
+Compose removes the hub container and attempts to remove its network. Docker
 will retain the network if running consumer containers still have endpoints on
 it. Stop those applications before removing the shared network completely.
 
 `down` deliberately preserves the `localghost_localghost-ca-root` and
 `localghost_localghost-ca-signer` Docker volumes. This keeps the same trusted
-root available when the proxy is restarted, avoiding another host trust-store
+root available when the hub is restarted, avoiding another host trust-store
 change. `trust --remove` disables HTTPS and removes the public root from the
 managed host stores, but leaves those private Docker volumes and the public
 `rootCA.pem` copy in Localghost's state directory available for an intentional
 re-enable.
 
-For complete removal, remove host trust first, stop the proxy, then delete the
+For complete removal, remove host trust first, stop the hub, then delete the
 two CA volumes:
 
 ```sh
@@ -118,22 +118,22 @@ public, but removing it completes the local cleanup.
 Deleting the CA volumes is irreversible. A later `localghost trust` creates a
 new root and requires that new public root to be installed. If Docker reports a
 volume is in use, stop remaining `localghost` project containers before
-retrying; do not force-remove a volume from a running proxy.
+retrying; do not force-remove a volume from a running hub.
 
 Running `docker compose down` inside an application checkout affects only that
-application and leaves the proxy running.
+application and leaves the hub running.
 
 ## Upgrade
 
 The ordinary command may reuse a cached CLI release. To fetch the newest
-published release and reconcile the proxy when you choose, run:
+published release and reconcile the hub when you choose, run:
 
 ```sh
 uvx --refresh localghost
 ```
 
 The top-level project name and shared network name are fixed, so the new bundled
-configuration updates the existing proxy. Consumer containers belong to other
+configuration updates the existing hub. Consumer containers belong to other
 Compose projects and are not recreated or restarted.
 
 When stronger source immutability is required, use a reviewed package version,
@@ -148,7 +148,7 @@ with the same override:
 LOCALGHOST_HTTP_PORT=8080 uvx localghost
 ```
 
-The proxy still binds only to `127.0.0.1`. URLs include the selected port:
+The hub still binds only to `127.0.0.1`. URLs include the selected port:
 
 ```text
 http://my-project.localhost:8080
@@ -156,7 +156,7 @@ http://traefik.localhost:8080
 ```
 
 Framework origin allowlists must include the non-default port. Use the same
-environment prefix whenever you reconcile the proxy.
+environment prefix whenever you reconcile the hub.
 
 When HTTPS is enabled, `LOCALGHOST_HTTPS_PORT` similarly changes its loopback
 port (default `443`). Use the matching `https://` URL and allowlist that port.

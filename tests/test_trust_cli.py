@@ -101,7 +101,7 @@ def test_interactive_start_can_enable_https(monkeypatch) -> None:
 
     assert result.exit_code == 0, result.output
     assert enabled == [True]
-    assert "Shared proxy is ready at https://" in result.output
+    assert "Hub is ready at https://" in result.output
 
 
 def test_proxy_status_reports_running_route_failure(monkeypatch) -> None:
@@ -115,7 +115,7 @@ def test_proxy_status_reports_running_route_failure(monkeypatch) -> None:
     result = CliRunner().invoke(cli, ["--status"])
 
     assert result.exit_code == 0, result.output
-    assert "Proxy: running" in result.output
+    assert "Hub: running" in result.output
     assert "HTTPS configuration: enabled" in result.output
     assert "inspect failed" in result.output
 

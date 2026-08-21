@@ -1,66 +1,76 @@
 # Running host applications with local<span class="brand-accent">ghost</span>
 
-`localghost run` lets you serve a framework application running directly on
-your host machine behind the proxy, without a Dockerfile or Compose file.
+`localghost run` lets you serve an application behind the hub without a
+Dockerfile or Compose file, or hand an existing Compose project to
+`docker compose up` with the hub wired in first.
 
-## Supported frameworks
+## Project types
 
-| Framework | Detection | Default port |
-|-----------|-----------|-------------|
-| **Django** | `manage.py` in the project directory | 8000 |
-| **Vite** | `package.json` with a `dev` script and `vite` dependency | 5173 |
-| **Astro** | `package.json` with a `dev` script and `astro` dependency | 4321 |
-| **CakePHP 3+** | `bin/cake` and a `cakephp/cakephp` Composer dependency | 8765 |
-| **CakePHP 2** | `app/Config/core.php` and `app/webroot/index.php` | 8765 |
-| **Laravel** | `artisan` and a `laravel/framework` Composer dependency | 8000 |
+Every project has a **type**. Detection runs automatically from the selected
+directory; `--type` resolves ambiguity or skips detection entirely.
 
-Detection runs automatically. If more than one framework is detected (for
-example, a Django project that also has a `package.json` with Vite), use
-`--framework` to resolve the ambiguity:
+| Type | Detection | Default port |
+|------|-----------|---------------|
+| **compose** | `compose.yaml`, `compose.yml`, `docker-compose.yaml`, or `docker-compose.yml` | — (Compose owns it) |
+| **django** | `manage.py` in the project directory | 8000 |
+| **vite** | `package.json` with a `dev` script and `vite` dependency | 5173 |
+| **astro** | `package.json` with a `dev` script and `astro` dependency | 4321 |
+| **cakephp** | `bin/cake` with a `cakephp/cakephp` Composer dependency, or a legacy `app/Config/core.php` + `app/webroot/index.php` root | 8765 |
+| **laravel** | `artisan` with a `laravel/framework` Composer dependency | 8000 |
+| **php** | `composer.json`, or `index.php` in `public/`, `web/`, `htdocs/`, `www/`, or the project root | 8080 |
+
+`dockerfile` is an eighth type, but it is generate-only — see
+[Generating an override](generating-an-override.md). Running a Dockerfile
+project first needs `localghost generate --type dockerfile` to produce a
+Compose file; after that the project is `compose`.
+
+Within PHP, `cakephp` and `laravel` are specializations of `php` rather than
+peers: the most specific match wins, and generic `php` only fires when neither
+framework matches. Every other type resolves to the nearest match along the
+upward search.
+
+If more than one type is detected at the same directory (for example, a
+Django project that also has a `package.json` with Vite, or a directory
+holding both a Compose file and a framework), use `--type` to resolve the
+ambiguity:
 
 ```sh
-uvx localghost run --framework django
+uvx localghost run --type django
+uvx localghost run --type compose
 ```
 
-Localghost searches upward from the selected directory to the nearest
-framework root, stopping at the Git worktree boundary. This means it can be
+Localghost searches upward from the selected directory to the nearest project
+root, stopping at the search boundary described below. This means it can be
 run from directories such as `webroot`, `public`, or a nested source package
-without naming the application after that directory. The detected root supplies
-the default public name and application configuration. Frameworks may still
-use a different working directory for their server process.
+without naming the application after that directory. The detected root
+supplies the default public name and application configuration; a framework
+may still use a different working directory for its server process.
 
 ## Usage
 
-Start the proxy first (if it isn't already running), then run your app:
+Start the hub first (if it isn't already running), then run your app:
 
 ```sh
 cd my-django-project
 uvx localghost run
 ```
 
-### Host and Compose runs
-
-`localghost run` serves either a host process or a Docker Compose project. The
-mode is detected from the directory: a Compose file beside the invocation
-selects `compose`, and an application root found by the framework search
-selects `host`. When both are present in the same directory, name the one you
-want:
+A `compose` type hands the project straight to `docker compose up` after
+starting the hub. Because Compose owns the application's configuration, the
+host-only options (`--type` for a framework, `--port`, and a `--` command)
+are rejected when a `compose` type is selected or detected:
 
 ```sh
-uvx localghost run --mode host
-uvx localghost run --mode compose
+uvx localghost run --type compose
 ```
 
-In `compose` mode Localghost starts the shared proxy, then hands the project to
-`docker compose up`. Because Compose owns the application's configuration, the
-host-only options (`--framework`, `--port`, and a `--` command) are rejected in
-this mode.
-
-!!! note
-
-    `run --mode` chooses how an application is *started* and takes `host` or
-    `compose`. It is unrelated to `generate --mode`, which chooses what
-    configuration to *write* and takes `dockerfile` or `host`.
+Before starting anything, a compose run checks that the project is actually
+wired to the hub — the `localghost` network is present, and at least one
+service carries `traefik.enable=true` on that network. A project that has not
+run `generate` is refused with an error naming what's missing, rather than
+starting and printing a URL that would never route. Setting `type = "compose"`
+in `.localghost.toml` skips this check, since a committed config file is the
+project declaring itself already wired.
 
 ### Configured runs
 
@@ -68,26 +78,30 @@ Projects may keep repeatable run settings in `.localghost.toml`:
 
 ```toml
 [run]
-mode = "host"
+type = "django"
 name = "my-app"
-framework = "django"
 port = 8080
 command = ["./server", "--port", "{port}"]
 ```
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `mode` | `"host"` or `"compose"` | How to start the application. Detected when omitted. |
+| `type` | one of the eight project types | Resolves otherwise ambiguous detection, exactly like `--type`. Detected when omitted. Setting `type = "compose"` also skips the routing check described above. |
 | `name` | string | Public name, serving the app at `NAME.localhost`. Defaults to the project root's name. |
-| `framework` | `django`, `vite`, `astro`, `cakephp`, or `laravel` | Resolves otherwise ambiguous detection, exactly like `--framework`. |
-| `port` | integer, 1–65535 | Host HTTP port. The framework default is used when omitted. |
-| `command` | array of strings | Argv to run instead of the framework's server. `{port}` is replaced with the selected port. |
+| `root` | path, relative to the config file | Treat this directory as the project root instead of searching. See [Project root and configuration discovery](#project-root-and-configuration-discovery). |
+| `port` | integer, 1–65535 | Host HTTP port. The type's default is used when omitted. |
+| `command` | array of strings | Argv to run instead of the type's own server. `{port}` is replaced with the selected port. |
 
 Every key is optional, and an unrecognised key is an error rather than being
-ignored — a misspelled setting fails loudly instead of silently doing nothing.
+ignored — a misspelled setting fails loudly instead of silently doing
+nothing. `[run].framework` is still accepted as a deprecated alias for `type`
+and prints a warning; `[run].mode` is rejected outright, since `mode` has no
+direct equivalent — the error names the migration (`type = "compose"`, or
+remove the key and let detection choose).
 
-Settings are layered: a command-line option wins over `.localghost.toml`, which
-wins over automatic detection. Use `--config PATH` to read a different file.
+Settings are layered: a command-line option wins over `.localghost.toml`,
+which wins over automatic detection. Use `--config PATH` to read a different
+file.
 
 `localghost generate` writes this file for you when given a command:
 
@@ -98,6 +112,39 @@ uvx localghost generate --port 8080 -- ./server --port 8080
 It refuses to overwrite an existing `.localghost.toml` unless `--extend` is
 given, keeps a `.bak` copy when it does rewrite one, and prints the
 configuration without writing anything under `--dry-run`.
+
+### Project root and configuration discovery
+
+The project root supplies the hostname and anchors configuration. Resolution
+tries each of the following in order, and the first match wins:
+
+1. `--root PATH` — resolved relative to the process working directory.
+2. `[run].root` in a discovered `.localghost.toml` — resolved relative to the
+   directory holding that config file.
+3. The directory holding the discovered `.localghost.toml`, when one is found
+   but sets no `root`.
+4. The nearest ancestor of `-C`/`--directory` (inclusive) at which a type is
+   detected — the default, unbounded-by-config search.
+
+Both `--root` and `[run].root` accept `..`, so a config file at
+`myrepo/tools/.localghost.toml` can set `root = ".."` to point at `myrepo`.
+When the root is pinned by one of the first three rules, type detection runs
+only at that directory rather than walking upward; a pinned root with no
+detectable type is an error naming the available types.
+
+`.localghost.toml` itself is discovered the same way `--type` detection
+walks: from `-C` upward, within the same search boundary, the first
+`.localghost.toml` found is used. `--config PATH` overrides discovery
+entirely, and that file's directory then anchors the root under rule 3.
+
+**Search boundary.** Both config discovery and type detection stop after the
+first directory containing `.git`, `.hg`, or `.svn` — that directory is
+itself included as a candidate. Without a VCS marker, the walk stops *below*
+`$HOME`: `$HOME` itself and everything above it, including the filesystem
+root, are never candidates, for either detection or config discovery. A
+stray `~/package.json` or a forgotten `~/.localghost.toml` therefore cannot
+be adopted as a project — the latter matters because `[run].command` is
+arbitrary argv that `run` executes.
 
 ### Detached runs
 
@@ -121,8 +168,8 @@ its recorded process ID and a Compose session's by `docker compose ps`.
 `manage stop` asks a host process to exit with `SIGTERM`, then force-quits it
 with `SIGKILL` after a two second grace period; it reports an error and keeps
 the record if the process somehow survives. `localghost manage clean` removes
-records and bridges left by sessions that already exited, leaving running ones
-alone. `localghost down` continues to control only the shared proxy.
+records and bridges left by sessions that already exited, leaving running
+ones alone. `localghost down` continues to control only the hub.
 
 The app is available at `https://my-django-project.localhost`. Press Ctrl+C to
 stop it.
@@ -139,13 +186,16 @@ If the port is free it is used directly. If it is occupied and `--port` was
 given explicitly, an error is raised. Without `--port`, the next free port is
 chosen automatically.
 
-### Explicit framework
+### Explicit type
 
-Skip auto-detection and specify the framework:
+Skip auto-detection and specify the type:
 
 ```sh
-uvx localghost run --framework vite
+uvx localghost run --type vite
 ```
+
+`--framework` still works as a deprecated alias for `--type` and prints a
+warning; it is hidden from `--help`.
 
 ### Custom command
 
@@ -157,13 +207,18 @@ uvx localghost run --port 8080 -- my-custom-server --port 8080
 
 ## How it works
 
-`localghost run` creates an ephemeral Caddy reverse-proxy container on the
-shared `localghost` network. The Caddy container forwards requests from Traefik
-to the host process via `host.docker.internal`. When the foreground process
-exits, the Caddy bridge is removed automatically.
+For host types, `localghost run` creates an ephemeral Caddy bridge container
+on the `localghost` network. The Caddy container forwards requests from the
+hub to the host process via `host.docker.internal`. When the foreground
+process exits, the bridge is removed automatically.
 
 If a previous `localghost run` was interrupted and left a stale bridge
-container, it is detected and removed automatically before the new one starts.
+container, it is detected and removed automatically before the new one
+starts.
+
+For the `compose` type, the bridge is not a container: it is the routing
+labels and `localghost` network membership on the application's own service,
+which `localghost generate` writes.
 
 ## Django runner detection
 
@@ -199,12 +254,22 @@ When `bin/cake` is not executable, Localghost uses `php bin/cake.php` if that
 entry point is present. Legacy CakePHP 2 applications run PHP's development
 server from `app/webroot`, while their hostname remains derived from the
 application root. Laravel applications run `php artisan serve` from the
-application root.
+application root. Plain `php` projects run PHP's built-in server
+(`php -S 0.0.0.0:{port}`) from their docroot — the first of `public/`,
+`web/`, `htdocs/`, `www/` containing `index.php`, otherwise the project root
+itself.
 
 PHP framework detection requires both framework-specific files and Composer
 dependency metadata where modern projects provide it. A generic
-`composer.json`, `public`, or `webroot` directory is not enough to select a
-runner automatically.
+`composer.json`, `public`, or `webroot` directory alone selects the generic
+`php` type, not a specific framework runner.
+
+A bare `index.php` at a directory with nothing else is treated as a probable
+docroot rather than a project root: the search continues upward, and that
+directory is used only if nothing stronger is found above it. This keeps
+`app/webroot` from shadowing a CakePHP root one level up, while a
+self-contained `services/billing/composer.json` inside a monorepo still stays
+at `billing` rather than climbing to an unrelated top-level manifest.
 
 ### Wrapper scripts
 

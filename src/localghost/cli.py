@@ -90,11 +90,11 @@ TRAEFIK_IMAGE = f"localghost-traefik:v{LOCALGHOST_VERSION}"
     "show_status",
     "--status",
     is_flag=True,
-    help="Report proxy state without starting or changing anything.",
+    help="Report hub state without starting or changing anything.",
 )
 @click.pass_context
 def cli(ctx: click.Context, show_status: bool) -> None:
-    """Connect local applications to the shared development proxy."""
+    """Connect local applications to the hub."""
     if show_status:
         if ctx.invoked_subcommand is not None:
             raise click.UsageError("--status cannot be combined with a subcommand")
@@ -113,11 +113,9 @@ def cli(ctx: click.Context, show_status: bool) -> None:
         default_port = 443 if https_enabled else 80
         suffix = "" if port == default_port else f":{port}"
         if was_running:
-            success(
-                f"Shared proxy is already ready at {scheme}://traefik.localhost{suffix}"
-            )
+            success(f"Hub is already ready at {scheme}://traefik.localhost{suffix}")
         else:
-            success(f"Shared proxy is ready at {scheme}://traefik.localhost{suffix}")
+            success(f"Hub is ready at {scheme}://traefik.localhost{suffix}")
         try:
             routes((route.hostname, route.location) for route in active_routes())
         except click.ClickException as exc:
@@ -126,12 +124,12 @@ def cli(ctx: click.Context, show_status: bool) -> None:
 
 
 def _proxy_status() -> None:
-    """Report only observable proxy state; never reconcile the proxy."""
+    """Report only observable hub state; never reconcile the hub."""
     running = proxy_is_running()
     https_state = "enabled" if _https_configured() else "HTTP only"
     details(
         [
-            ("Proxy", "running" if running else "stopped"),
+            ("Hub", "running" if running else "stopped"),
             ("HTTPS configuration", https_state),
         ],
         title="Localghost status",
@@ -146,10 +144,10 @@ def _proxy_status() -> None:
 
 @cli.command()
 def down() -> None:
-    """Stop and remove the shared development proxy."""
+    """Stop and remove the hub."""
     title()
     _run_proxy("down", https_enabled=_https_configured())
-    success("Proxy stopped and removed.")
+    success("Hub stopped and removed.")
 
 
 @cli.group(invoke_without_command=True)
@@ -262,7 +260,7 @@ def manage_clean() -> None:
     help="Show the managed public-root state without changing it.",
 )
 def trust(remove: bool, show_status: bool) -> None:
-    """Install, remove, or inspect this proxy's public development root."""
+    """Install, remove, or inspect the hub's public development root."""
     if remove and show_status:
         raise click.UsageError("--remove and --status cannot be used together")
     title()
@@ -277,12 +275,12 @@ def trust(remove: bool, show_status: bool) -> None:
     _enable_https()
     if was_running and not was_configured:
         _run_proxy("up", already_running=True, https_enabled=True)
-        success("Trusted HTTPS is enabled for the running shared proxy.")
+        success("Trusted HTTPS is enabled for the running hub.")
     elif was_running:
-        success("The shared proxy was already configured for HTTPS.")
+        success("The hub was already configured for HTTPS.")
     else:
         success("Trusted HTTPS is configured.")
-        action("Start the proxy", "localghost")
+        action("Start the hub", "localghost")
 
 
 def _remove_trust() -> None:
@@ -395,7 +393,7 @@ def run(
     dry_run: bool,
     command: tuple[str, ...],
 ) -> None:
-    """Run a configured host or Compose application behind the proxy."""
+    """Run a configured host or Compose application behind the hub."""
     cwd = working_directory or Path.cwd()
     if framework is not None:
         if selected_type is not None:
@@ -550,7 +548,7 @@ def _check_compose_routing(compose_root: Path, project: str) -> None:
 def _run_compose(cwd: Path, name: str | None, detach: bool) -> None:
     project = name or cwd.name
     title()
-    # The proxy has to be reconciled before the application comes up, otherwise
+    # The hub has to be reconciled before the application comes up, otherwise
     # a foreground `compose up` blocks before anything can route to it.
     _run_proxy("up", https_enabled=_https_configured())
     info(f"Public URL: {_proxy_origin(project)}")
@@ -681,7 +679,7 @@ def _run_proxy(
         verb = "Reconciling" if already_running else "Starting"
         if action == "down":
             verb = "Stopping"
-        info(f"{verb} shared proxy…")
+        info(f"{verb} hub…")
         try:
             environment = os.environ.copy()
             environment["LOCALGHOST_IMAGE_TAG"] = f"v{LOCALGHOST_VERSION}"
@@ -694,7 +692,7 @@ def _run_proxy(
     if result.returncode:
         detail = (result.stderr or "").strip() or (result.stdout or "").strip()
         if detail:
-            warning("Proxy command failed", [detail])
+            warning("Hub command failed", [detail])
         raise click.exceptions.Exit(result.returncode)
 
 
@@ -766,7 +764,7 @@ def _enable_https() -> None:
     details(
         [
             ("Authorization", "system authorization is required now"),
-            ("Installer", "mkcert, limited to this proxy's public root"),
+            ("Installer", "mkcert, limited to the hub's public root"),
             ("Trust stores", "system,nss"),
             ("public-root fingerprint", certificate.fingerprint),
             ("public-root file", str(certificate_path)),
@@ -1025,7 +1023,7 @@ def generate(
             )
             info(f"Backup: {backup}")
         else:
-            info(f"{output} already contains the requested proxy configuration.")
+            info(f"{output} already contains the requested bridge configuration.")
     else:
         document = create_override(project_name, candidate, selected_port)
         if dry_run:
@@ -1143,7 +1141,7 @@ def _generate_without_compose(
             "Ensure the host process listens on a Docker-reachable interface "
             "such as 0.0.0.0."
         )
-    info("Start the shared proxy, then run docker compose up.")
+    info("Start the hub, then run docker compose up.")
 
 
 def _has_compose_file() -> bool:

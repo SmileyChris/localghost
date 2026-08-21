@@ -28,8 +28,8 @@ def title(*, welcome: bool = False) -> None:
 
 
 def next_actions(*, https_enabled: bool) -> None:
-    """Show useful commands after a successful proxy launch."""
-    action("Stop the proxy", "uvx localghost down")
+    """Show useful commands after a successful hub launch."""
+    action("Stop the hub", "uvx localghost down")
     action(
         "Add a route",
         "uvx localghost generate",

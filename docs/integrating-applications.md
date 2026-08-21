@@ -1,12 +1,12 @@
 # Integrating applications with local<span class="brand-accent">ghost</span>
 
-An application joins the proxy's external Docker network and describes its
-routes using Traefik labels. The proxy and application remain separate Compose
+An application joins the hub's external Docker network and describes its
+routes using Traefik labels. The hub and application remain separate Compose
 projects.
 
 ## Prerequisites
 
-Start the proxy before the first application. This creates the external
+Start the hub before the first application. This creates the external
 `localghost` network:
 
 ```sh
@@ -60,8 +60,8 @@ The application process must listen on `0.0.0.0:8000`, not `127.0.0.1:8000`,
 inside its container. The backend port label is a container port; it is not a
 host-published port.
 
-Do not add `ports` for a service used only through the proxy. Keeping the
-service off host ports avoids collisions and keeps the proxy as the single HTTP
+Do not add `ports` for a service used only through the hub. Keeping the
+service off host ports avoids collisions and keeps the hub as the single HTTP
 entrypoint. The service can remain on its `default` network for private
 application dependencies.
 
@@ -109,7 +109,7 @@ router/service identifiers must be distinct within the project.
 Each example defines two routers for the same hostname and backend service. The
 ordinary router uses the always-available `web` entrypoint. The `-secure` router
 uses `websecure` with TLS and becomes active after `localghost trust` enables
-the proxy's HTTPS configuration. Keeping both routers means HTTP continues to
+the hub's HTTPS configuration. Keeping both routers means HTTP continues to
 work after HTTPS is enabled.
 
 The generator adds both routers automatically. For hand-written integration,
@@ -141,7 +141,7 @@ checkout                  primary URL
 ```
 
 Compose project names also isolate container and default-network names. Stopping
-one checkout leaves the other checkout and shared proxy running. Override a
+one checkout leaves the other checkout and the hub running. Override a
 name only if two checkout directories have the same basename or a basename is
 not DNS-safe.
 
@@ -168,7 +168,7 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 ```
 
-When the proxy uses a non-default port, the browser origin includes it:
+When the hub uses a non-default port, the browser origin includes it:
 
 ```python
 CSRF_TRUSTED_ORIGINS = ["http://my-project.localhost:8080"]
@@ -181,13 +181,13 @@ browser.
 ## Failure behavior
 
 Because `localghost` is declared external, application startup fails if
-the proxy network has never been created. This is intentional: the application
-must not silently create a private network with the same name. Start the proxy,
+the hub's network has never been created. This is intentional: the application
+must not silently create a private network with the same name. Start the hub,
 then rerun `docker compose up` for the application.
 
 If the network exists but Traefik is stopped, application containers can start
 and communicate on their other networks, but `.localhost` routes remain
-unavailable until the proxy starts again.
+unavailable until the hub starts again.
 
 Unlabelled containers and containers without `traefik.enable=true` receive no
 route even when attached to the shared network.

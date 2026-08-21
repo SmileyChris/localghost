@@ -1,12 +1,14 @@
 # local<span class="brand-accent">ghost</span> architecture
 
 Localghost separates a machine-wide concern from individual application
-checkouts. One long-lived Traefik container owns the host HTTP port; each
-application remains a separate Docker Compose project.
+checkouts. One long-lived Traefik container — **the hub** — owns the host
+HTTP port; each application remains a separate Docker Compose project,
+connected to the hub by **a bridge**: a generated Caddy container for host
+runs, or routing labels and network membership for Compose runs.
 
 ## Ownership boundaries
 
-The proxy Compose project owns:
+The hub Compose project owns:
 
 - the fixed Compose project name `localghost`;
 - one Traefik container;
@@ -17,9 +19,9 @@ The proxy Compose project owns:
 
 An application Compose project owns its containers, default network, data, and
 application-specific configuration. It only references `localghost` as an
-external network. Application lifecycle commands must never include the proxy
+external network. Application lifecycle commands must never include the hub
 Compose file, so stopping or rebuilding an application cannot recreate the
-proxy.
+hub.
 
 Multiple applications—and multiple checkouts of the same application—can run
 at once when every checkout has a unique Compose project name.
@@ -63,7 +65,7 @@ those conditions or is not the desired hostname.
 | --- | --- | --- |
 | Primary service | `<project>.localhost` | `<project>-web` |
 | Secondary service | `<service>.<project>.localhost` | `<project>-<service>` |
-| Proxy dashboard | `traefik.localhost` | `localghost-dashboard` |
+| Hub dashboard | `traefik.localhost` | `localghost-dashboard` |
 
 These conventions make router and service identifiers unique across attached
 Compose projects. `.localhost` is used because it is reserved for loopback and
@@ -77,13 +79,13 @@ entrypoint. The bare `http://traefik.localhost` URL redirects to
 nor published.
 
 The Traefik container health check calls `traefik healthcheck --ping` against
-the enabled internal ping endpoint. Health describes the proxy process; it does
+the enabled internal ping endpoint. Health describes the hub process; it does
 not guarantee that every consumer application is healthy or correctly labelled.
 
 ## Optional HTTPS path
 
 HTTP remains the baseline entrypoint. After `localghost trust` installs the
-proxy's public development root, the proxy also publishes the `websecure`
+hub's public development root, the hub also publishes the `websecure`
 entrypoint on loopback and loads its local certificate provider. The private
 root and online signer stay in Docker volumes; only the public root is copied to
 host state and passed to trust-store tooling.
@@ -91,16 +93,17 @@ host state and passed to trust-store tooling.
 Applications opt into HTTPS with a second, project-scoped router using the same
 hostname and backend service as the HTTP router. The secure router selects the
 `websecure` entrypoint and sets `tls=true`. The generator and checked-in examples
-include both routers, so enabling or disabling the proxy's HTTPS configuration
+include both routers, so enabling or disabling the hub's HTTPS configuration
 does not require regenerating application configuration.
 
 ## Host-native applications
 
 The optional CLI can generate a small consumer Compose project for an HTTP
-process running directly on the host. A pinned Caddy container joins the shared
-network, carries the ordinary Traefik labels, and forwards requests to
-`host.docker.internal`. This keeps host-specific routes out of the persistent
-proxy configuration and gives the bridge an independent application lifecycle.
+process running directly on the host. A pinned Caddy container — the bridge —
+joins the shared network, carries the ordinary Traefik labels, and forwards
+requests to `host.docker.internal`. This keeps host-specific routes out of the
+persistent hub configuration and gives the bridge an independent application
+lifecycle.
 
 The host process must listen on an interface reachable from Docker. Binding only
 to host loopback is generally insufficient.
@@ -108,9 +111,8 @@ to host loopback is generally insufficient.
 `localghost run` uses the same Caddy image but creates its Compose model
 in memory with a unique internal project and foreground ownership labels. Its
 literal `<name>-app` Traefik objects disappear with the child process; the
-shared Traefik container is retained. `generate --mode host` remains the
-persistent, user-managed alternative.
+hub is retained. `generate --type <type>`, naming the specific framework or
+`php`, remains the persistent, user-managed alternative.
 
-The shared proxy is always started as the fixed `localghost` Compose
-project, even when a host application sets `COMPOSE_PROJECT_NAME` for its own
-route.
+The hub is always started as the fixed `localghost` Compose project, even
+when a host application sets `COMPOSE_PROJECT_NAME` for its own route.

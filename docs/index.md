@@ -11,7 +11,7 @@ Requirements: Docker Engine or Docker Desktop, Docker Compose 5.x (CI tests
 5.1.4), [uv](https://docs.astral.sh/uv/getting-started/installation/), and
 loopback port 80 available.
 
-Start the proxy:
+Start the hub:
 
 ```sh
 uvx localghost
@@ -32,18 +32,18 @@ For a Docker Compose application, generate the integration configuration:
 uvx localghost generate
 ```
 
-For a Django, Vite, Astro, CakePHP, or Laravel server running directly on the
-host:
+For a Django, Vite, Astro, CakePHP, Laravel, or plain PHP server running
+directly on the host:
 
 ```sh
 uvx localghost run
 ```
 
-The framework and the run mode are auto-detected, searching upward to the
-nearest application root. `--detach` runs the application in the background and
+The project type is auto-detected, searching upward to the nearest project
+root. `--detach` runs the application in the background and
 `localghost manage` inspects and stops those sessions. See
 [Running host applications](running-host-apps.md) for the full workflow, custom
-ports, explicit framework selection, `.localghost.toml` settings, detached
+ports, explicit type selection, `.localghost.toml` settings, detached
 sessions, and Django runner resolution.
 
 For the complete Compose contract, project naming, secondary services, and

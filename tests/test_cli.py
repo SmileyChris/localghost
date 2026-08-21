@@ -57,8 +57,8 @@ def test_default_command_starts_the_bundled_proxy(monkeypatch) -> None:
     assert kwargs["capture_output"] is True
     assert kwargs["text"] is True
     assert kwargs["env"]["LOCALGHOST_IMAGE_TAG"] == f"v{LOCALGHOST_VERSION}"
-    assert "Shared proxy is ready at http://traefik.localhost" in result.output
-    assert "Stop the proxy: uvx localghost down" in result.output
+    assert "Hub is ready at http://traefik.localhost" in result.output
+    assert "Stop the hub: uvx localghost down" in result.output
     assert "Add a route: uvx localghost generate for Docker Compose" in result.output
     assert "uvx localghost run for a local app." in " ".join(result.output.split())
 
@@ -81,7 +81,7 @@ def test_default_command_reports_existing_proxy_and_routes(monkeypatch) -> None:
     result = CliRunner().invoke(cli)
 
     assert result.exit_code == 0, result.output
-    assert "Shared proxy is already ready" in result.output
+    assert "Hub is already ready" in result.output
     assert "demo.localhost: /work/demo" in result.output
 
 
@@ -146,7 +146,7 @@ def test_first_launch_skips_https_prompt_without_mkcert(monkeypatch) -> None:
     result = CliRunner().invoke(cli)
 
     assert result.exit_code == 0, result.output
-    assert "Shared proxy is ready at http://" in result.output
+    assert "Hub is ready at http://" in result.output
     assert (
         "Enable HTTPS: uvx localghost trust after installing mkcert."
         in result.output
@@ -165,7 +165,7 @@ def test_status_reports_proxy_state_without_reconciling(monkeypatch) -> None:
     result = CliRunner().invoke(cli, ["--status"])
 
     assert result.exit_code == 0, result.output
-    assert "Proxy: stopped" in result.output
+    assert "Hub: stopped" in result.output
     assert "HTTPS configuration: HTTP only" in result.output
     assert "localghost trust --status" in result.output
 
@@ -191,7 +191,7 @@ def test_down_stops_the_bundled_proxy(monkeypatch) -> None:
 
     assert result.exit_code == 0, result.output
     assert commands[0][0][6:] == ["down"]
-    assert "Proxy stopped and removed." in result.output
+    assert "Hub stopped and removed." in result.output
 
 
 def test_trust_configures_a_stopped_proxy_without_starting_it(
@@ -222,7 +222,7 @@ def test_trust_configures_a_stopped_proxy_without_starting_it(
     assert (tmp_path / "https-enabled").is_file()
     assert "public-root fingerprint: SHA256:" in result.output
     assert commands == []
-    assert "Start the proxy: localghost" in result.output
+    assert "Start the hub: localghost" in result.output
 
 
 def test_trust_restarts_a_running_proxy_when_https_becomes_configured(
