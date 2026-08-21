@@ -30,7 +30,7 @@ def discover_config(start: Path) -> Path | None:
         for marker in VCS_MARKERS
     )
     if not has_vcs_marker:
-        candidates = [resolved]
+        candidates = candidates[:1]
     for candidate in candidates:
         path = candidate / CONFIG_NAME
         if path.is_file():

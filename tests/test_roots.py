@@ -51,6 +51,21 @@ def test_config_discovery_never_reaches_home(tmp_path, monkeypatch):
     assert roots.discover_config(nested) is None
 
 
+def test_config_discovery_never_adopts_home_itself(tmp_path, monkeypatch):
+    """`_search_path` correctly returns [] when the start directory IS $HOME
+    (it excludes $HOME and everything above it, even from itself), but the
+    no-VCS-marker fallback used to re-admit the excluded start directory by
+    falling back to `[resolved]` instead of preserving that empty result.
+    That let a stray ~/.localghost.toml be adopted by `run -C $HOME`, even
+    though [run].command is arbitrary argv that `run` then executes."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    (home / ".localghost.toml").write_text("[run]\n")
+
+    assert roots.discover_config(home) is None
+
+
 def test_the_flag_outranks_every_other_source(tmp_path):
     flagged = tmp_path / "flagged"
     flagged.mkdir()
