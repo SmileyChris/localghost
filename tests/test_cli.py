@@ -1016,22 +1016,26 @@ def test_compose_run_propagates_a_failure(monkeypatch, tmp_path) -> None:
     assert sessions_list() == []
 
 
-def test_compose_run_rejects_host_only_settings(monkeypatch, tmp_path) -> None:
-    """Compose dispatch has no routing validation yet (a later task adds it),
-    so a host-only setting like --port is simply irrelevant to it rather than
-    rejected."""
+def test_compose_run_rejects_host_only_settings(tmp_path) -> None:
     (tmp_path / "compose.yaml").write_text("services: {}\n")
-    monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        "localghost.cli.subprocess.run",
-        lambda command, **kwargs: CompletedProcess(command, 0),
-    )
 
     result = CliRunner().invoke(
         cli, ["run", "-C", str(tmp_path), "--type", "compose", "--port", "3000"]
     )
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code != 0
+    assert "compose mode does not accept" in result.output.lower()
+
+
+def test_compose_run_rejects_a_host_command(tmp_path) -> None:
+    (tmp_path / "compose.yaml").write_text("services: {}\n")
+
+    result = CliRunner().invoke(
+        cli, ["run", "-C", str(tmp_path), "--type", "compose", "--", "echo"]
+    )
+
+    assert result.exit_code != 0
+    assert "compose mode does not accept" in result.output.lower()
 
 
 def test_generate_command_requires_a_port() -> None:

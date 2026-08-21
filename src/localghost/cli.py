@@ -410,8 +410,15 @@ def run(
         start=cwd, flag=root, configured=settings.root, config_dir=config_dir
     )
     if selected_type == "compose":
-        # Task 8 adds routing validation (host-only settings, ambiguity with
-        # a detected host framework); this is a plain dispatch for now.
+        # Compose owns the application's configuration, so host-only
+        # settings are rejected; --root is orthogonal and stays allowed.
+        # Task 8 adds validation for ambiguity with a detected host
+        # framework.
+        if command or framework is not None or port is not None:
+            raise click.ClickException(
+                "compose mode does not accept host command, framework, or "
+                "port settings; Compose owns them"
+            )
         _run_compose(pinned or cwd, name, detach)
         return
     plan = build_plan(pinned or cwd, name, selected_type, port, command, pinned=pinned)
