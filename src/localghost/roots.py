@@ -7,12 +7,31 @@ from pathlib import Path
 import click
 
 from .config import CONFIG_NAME
-from .runner import _search_path
+from .runner import VCS_MARKERS, _search_path
 
 
 def discover_config(start: Path) -> Path | None:
-    """The nearest .localghost.toml within the bounded search, or None."""
-    for candidate in _search_path(start.resolve()):
+    """The nearest .localghost.toml within the bounded search, or None.
+
+    Unlike type detection, this executes whatever argv a discovered file
+    names, so it must never wander into a directory the invoker doesn't
+    control. `_search_path` alone isn't a tight enough bound for that: absent
+    a VCS marker, it still returns every ancestor up to (but excluding) $HOME,
+    which includes world-writable shared directories such as /tmp. Without a
+    VCS marker anywhere in that search, only the invocation directory itself
+    is therefore a candidate; type detection keeps walking regardless, since
+    it only inspects files rather than executing them.
+    """
+    resolved = start.resolve()
+    candidates = _search_path(resolved)
+    has_vcs_marker = any(
+        (candidate / marker).exists()
+        for candidate in candidates
+        for marker in VCS_MARKERS
+    )
+    if not has_vcs_marker:
+        candidates = [resolved]
+    for candidate in candidates:
         path = candidate / CONFIG_NAME
         if path.is_file():
             return path

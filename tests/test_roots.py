@@ -20,6 +20,27 @@ def test_config_is_discovered_from_a_subdirectory(tmp_path, monkeypatch):
     assert roots.discover_config(nested) == project / ".localghost.toml"
 
 
+def test_config_discovery_does_not_walk_without_a_vcs_marker(tmp_path, monkeypatch):
+    """Config discovery executes whatever argv a discovered file names, so
+    it must never wander into a shared directory the invoker doesn't
+    control. Without a VCS marker anywhere in the search, only the
+    invocation directory itself is a candidate -- unlike type detection,
+    which keeps walking regardless, since it only inspects files rather
+    than executing them. This is what stops a planted /tmp/.localghost.toml
+    from being adopted by every /tmp subdirectory."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    (shared / ".localghost.toml").write_text("[run]\n")
+    nested = shared / "project"
+    nested.mkdir()
+
+    assert roots.discover_config(nested) is None
+    # The exact invocation directory is still a candidate even without a
+    # VCS marker -- only walking further out is refused.
+    assert roots.discover_config(shared) == shared / ".localghost.toml"
+
+
 def test_config_discovery_never_reaches_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     nested = home / "project"
