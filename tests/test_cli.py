@@ -388,7 +388,12 @@ def test_generate_takes_the_per_type_default_port() -> None:
         Path("manage.py").touch()
 
         result = runner_.invoke(
-            cli, ["generate", "--no-input", "--dry-run", "--type", "django"]
+            cli,
+            ["generate", "--no-input", "--dry-run", "--type", "django"],
+            # A random isolated_filesystem() directory name can contain an
+            # underscore, which fails DNS-safe project-name validation; pin
+            # a safe name so this test does not depend on that draw.
+            env={"COMPOSE_PROJECT_NAME": "django-default-port"},
         )
 
         assert result.exit_code == 0, result.output
@@ -417,6 +422,10 @@ def test_generate_accepts_dockerfile_as_a_type() -> None:
         result = runner_.invoke(
             cli,
             ["generate", "--no-input", "--dry-run", "--type", "dockerfile", "-p", "80"],
+            # See test_generate_takes_the_per_type_default_port: pin a safe
+            # name so a random isolated_filesystem() directory name cannot
+            # fail DNS-safe project-name validation.
+            env={"COMPOSE_PROJECT_NAME": "dockerfile-type"},
         )
 
         assert result.exit_code == 0, result.output
@@ -1309,20 +1318,31 @@ def test_compose_run_routes_after_generate_fixes_an_override() -> None:
     them, proving the check reads the same merged model `generate` writes to
     and `_run_compose` itself would read. --dry-run avoids needing a daemon."""
     runner = CliRunner()
+    # A random isolated_filesystem() directory name can contain an
+    # underscore; real `docker compose config` accepts that as a project
+    # name, but our stricter DNS-safe check does not, so pin a safe name
+    # for every invocation instead of leaving it to the directory's draw.
+    environment = {"COMPOSE_PROJECT_NAME": "routes-after-generate"}
     with runner.isolated_filesystem():
         Path("compose.yaml").write_text(
             "services:\n  web:\n    image: nginx\n    expose:\n      - '80'\n"
         )
 
-        refused = runner.invoke(cli, ["run", "--type", "compose", "--dry-run"])
+        refused = runner.invoke(
+            cli, ["run", "--type", "compose", "--dry-run"], env=environment
+        )
         assert refused.exit_code != 0, refused.output
         assert "run localghost generate" in refused.output
 
-        generated = runner.invoke(cli, ["generate", "--no-input", "--port", "80"])
+        generated = runner.invoke(
+            cli, ["generate", "--no-input", "--port", "80"], env=environment
+        )
         assert generated.exit_code == 0, generated.output
         assert Path("compose.override.yaml").exists()
 
-        routed = runner.invoke(cli, ["run", "--type", "compose", "--dry-run"])
+        routed = runner.invoke(
+            cli, ["run", "--type", "compose", "--dry-run"], env=environment
+        )
         assert routed.exit_code == 0, routed.output
         assert "Public URL:" in routed.output
 
