@@ -7,52 +7,51 @@ uses [Semantic Versioning](https://semver.org/).
 
 ### Breaking
 
-- `run --mode` and `generate --mode` are removed. Both commands now take a
-  single `--type` option, spanning `compose`, `dockerfile` (generate-only),
-  `django`, `vite`, `astro`, `cakephp`, `laravel`, and `php`.
-- `[run].mode` in `.localghost.toml` is rejected. There is no direct
-  replacement: a `mode = "compose"` file should set `type = "compose"`
-  instead; a `mode = "host"` file should remove the key and let detection
-  choose, or name the specific type.
-- `--framework` and `[run].framework` are deprecated in favor of `--type` and
-  `[run].type`. They still work and still resolve ambiguous detection, but
-  now print a deprecation warning; `--framework` is hidden from `--help`.
+- `generate --mode dockerfile|host` is replaced by `generate --type`, which
+  accepts the specific generatable type (`compose`, `dockerfile`, `django`,
+  `vite`, `astro`, `cakephp`, `laravel`, `php`) instead of the generic `host`.
+- `run --framework` is renamed to `run --type` (same values). `--framework`
+  keeps working as a hidden, deprecated alias that prints a warning.
 - A directory containing both a Compose file and a host framework now errors
-  and asks for `--type` instead of silently picking one. (In 1.2.0 such a
-  directory ran as a host application; this restores that as an explicit
-  choice rather than an implicit default.)
-- A `compose`-type `run` now refuses to start a project that has no service
-  wired to the `localghost` network with `traefik.enable=true`, instead of
-  starting Compose and printing a public URL that would never route. Setting
-  `type = "compose"` in `.localghost.toml` opts out of this check, since a
-  committed config file is the project declaring itself already wired.
-- The upward project search used by both type detection and config discovery
-  no longer adopts a marker above a VCS root (`.git`, `.hg`, `.svn`) or
-  anywhere at or above `$HOME`. A stray `~/package.json` or forgotten
-  `~/.localghost.toml` can no longer be mistaken for a project.
+  and asks for `--type` instead of silently picking one. Previously it ran
+  as a host application.
 
 ### Added
 
-- `php` and `dockerfile` join the project type set. `php` detects a generic
-  PHP application from `composer.json` or a docroot `index.php` and serves it
-  with PHP's built-in server (default port 8080); `dockerfile` is a
-  generate-only type that turns a bare `Dockerfile` into a `compose.yaml`.
-- `--root PATH` (and `[run].root` in `.localghost.toml`) pins the project
-  root explicitly instead of relying on the upward search.
-- `.localghost.toml` is now discovered automatically by walking upward from
-  the working directory, the same way project type is detected, so a project
-  that has one needs no `--root`.
+- A single `--type` option now spans every project kind localghost
+  recognizes: `compose`, `dockerfile` (generate-only), `django`, `vite`,
+  `astro`, `cakephp`, `laravel`, and `php`. `php` detects a generic PHP
+  application from `composer.json` or a docroot `index.php` and serves it
+  with PHP's built-in server (default port 8080); `dockerfile` turns a bare
+  `Dockerfile` into a `compose.yaml`.
 - `localghost run` now detects modern and legacy CakePHP applications and
   Laravel applications, using their conventional development servers and
   default ports.
-- Type detection searches upward to the nearest project root without
-  crossing the search boundary described above. The detected root controls
-  the default hostname while a type may select a different process working
-  directory.
-- Add configured host/Compose runs, detached session metadata, and the
-  `localghost manage` session commands.
-- Validate configured run values and interpolate `{port}` placeholders in
-  configured argv commands.
+- Type detection (and `.localghost.toml` config discovery) searches upward
+  from the working directory to the nearest project root, stopping after the
+  first VCS marker (`.git`, `.hg`, `.svn`) and never adopting a marker at or
+  above `$HOME`, so a stray `~/package.json` or `~/.localghost.toml` can
+  never be mistaken for a project. The detected root controls the default
+  hostname while a type may select a different process working directory.
+- `--root PATH` (and `[run].root` in `.localghost.toml`) pins the project
+  root explicitly instead of relying on the upward search.
+- Projects may keep repeatable run settings in a `.localghost.toml` file
+  (`type`, `name`, `root`, `port`, `command`, with `{port}` interpolated into
+  a configured command), which `localghost generate` can write for you and
+  discovers automatically by walking upward the same way project type is.
+- `--detach` and the `localghost manage` command (`list`, `attach`, `stop
+  [--all]`, `clean`) run and track applications in the background, including
+  Compose sessions; a process that survives `SIGKILL` keeps its session
+  record with a reported error rather than being silently forgotten, and an
+  unreadable record is reported rather than hidden.
+- `run --type compose` (or an auto-detected Compose project) hands the
+  project to `docker compose up` behind the hub. Before starting anything it
+  checks the project is actually wired to the hub — the `localghost` network
+  present, with at least one service carrying `traefik.enable=true` on it —
+  and refuses with a message naming what's missing rather than starting
+  Compose and printing a public URL that would never route. Setting
+  `type = "compose"` in `.localghost.toml` skips this check, since a
+  committed config file is the project declaring itself already wired.
 - Adopt "the hub" and "a bridge" as the names for the two halves of the
   system in documentation, `--help` text, and console messages: the hub is
   the single machine-wide Traefik container, and a bridge is whatever
@@ -62,36 +61,6 @@ uses [Semantic Versioning](https://semver.org/).
 
 - Dry-run and run summaries show the detected project root and, when different,
   the application process working directory.
-- Detached session status now handles Compose sessions, failed host startup
-  removes its bridge, and `manage stop`/`manage clean` reuse the stored bridge
-  configuration so they can remove detached bridges reliably.
-- `localghost manage stop` now reports an error and keeps the session record
-  when a process survives `SIGKILL`, instead of discarding the only reference
-  to a still-running application. `manage stop --all` continues past such a
-  session and reports the failures once every other session is stopped.
-- Unreadable session records are reported instead of being silently skipped,
-  so a corrupt file can no longer hide a running application from
-  `manage list`, `manage stop`, and `manage clean`.
-
-### Fixed
-
-- Type detection now performs the same upward search everywhere it runs, so
-  `localghost run` detects CakePHP, Laravel, and any project invoked from a
-  subdirectory instead of refusing with "could not detect a project type".
-- `[run].framework` (now `[run].type`) in `.localghost.toml` accepts every
-  type `--type` accepts; CakePHP and Laravel were previously rejected by the
-  config file.
-- A `compose`-type `localghost run` starts the hub and reports the public
-  URL. It previously ran `docker compose up` with nothing routing to it.
-- Detached runs start in the framework's working directory and record the
-  project root, so legacy CakePHP serves the right docroot and a session
-  started from a subdirectory is matched instead of duplicated.
-- `localghost generate --dry-run` with a command prints the configuration
-  instead of writing `.localghost.toml`.
-- A detached run no longer prints the foreground banner telling the user to
-  pass `--detach`.
-- Detached session state honours `XDG_STATE_HOME`, matching the location
-  documented for every other piece of Localghost state.
 
 ## [1.2.0] - 2026-08-17
 

@@ -2,7 +2,7 @@
 
 <img class="localghost-home-logo" src="assets/logo.png" alt="Localghost" width="360">
 
-Localghost is a loopback-only Docker Compose proxy that gives local
+Localghost is a loopback-only Docker Compose hub that gives local
 applications friendly `.localhost` URLs.
 
 ## Quick start

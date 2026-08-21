@@ -1,8 +1,8 @@
 # Contributor guide
 
-This repository provides a persistent, loopback-only Traefik proxy for local
-Docker Compose projects. It is development infrastructure, not a production
-deployment.
+This repository provides the hub: a persistent, loopback-only Traefik
+container that routes to local Docker Compose projects. It is development
+infrastructure, not a production deployment.
 
 ## Guardrails
 
