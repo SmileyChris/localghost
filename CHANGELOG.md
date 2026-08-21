@@ -43,18 +43,24 @@ uses [Semantic Versioning](https://semver.org/).
 - `localghost run` now detects modern and legacy CakePHP applications and
   Laravel applications, using their conventional development servers and
   default ports.
-- Type detection (and `.localghost.toml` config discovery) searches upward
-  from the working directory to the nearest project root, stopping after the
-  first VCS marker (`.git`, `.hg`, `.svn`) and never adopting a marker at or
-  above `$HOME`, so a stray `~/package.json` or `~/.localghost.toml` can
-  never be mistaken for a project. The detected root controls the default
-  hostname while a type may select a different process working directory.
+- Type detection searches upward from the working directory to the nearest
+  project root, stopping after the first VCS marker (`.git`, `.hg`, `.svn`)
+  and never adopting a marker at or above `$HOME`. `.localghost.toml` config
+  discovery follows that same upward search once a VCS marker is found, but
+  does not walk at all without one — only the invocation directory is a
+  candidate, since `[run].command` is arbitrary argv that `run` executes, so
+  a config file must be inside a project boundary to be trusted. A stray
+  `~/package.json` or a forgotten `~/.localghost.toml` can therefore never
+  be mistaken for, or adopted as, a project. The detected root controls the
+  default hostname while a type may select a different process working
+  directory.
 - `--root PATH` (and `[run].root` in `.localghost.toml`) pins the project
   root explicitly instead of relying on the upward search.
 - Projects may keep repeatable run settings in a `.localghost.toml` file
   (`type`, `name`, `root`, `port`, `command`, with `{port}` interpolated into
   a configured command), which `localghost generate` can write for you and
-  discovers automatically by walking upward the same way project type is.
+  `run` discovers automatically using the bounded config-discovery search
+  described above.
 - `--detach` and the `localghost manage` command (`list`, `attach`, `stop
   [--all]`, `clean`) run and track applications in the background, including
   Compose sessions; a process that survives `SIGKILL` keeps its session

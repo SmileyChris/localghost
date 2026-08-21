@@ -132,19 +132,23 @@ When the root is pinned by one of the first three rules, type detection runs
 only at that directory rather than walking upward; a pinned root with no
 detectable type is an error naming the available types.
 
-`.localghost.toml` itself is discovered the same way `--type` detection
-walks: from `-C` upward, within the same search boundary, the first
-`.localghost.toml` found is used. `--config PATH` overrides discovery
-entirely, and that file's directory then anchors the root under rule 3.
+`.localghost.toml` itself is discovered by the same upward search `--type`
+detection uses, but only once that search has found a VCS marker. Without
+one, config discovery does not walk at all: only the invocation directory
+(`-C`) is a candidate, because `[run].command` is arbitrary argv that `run`
+executes, so a config file must be inside a project boundary to be trusted.
+`--config PATH` overrides discovery entirely, and that file's directory then
+anchors the root under rule 3.
 
-**Search boundary.** Both config discovery and type detection stop after the
-first directory containing `.git`, `.hg`, or `.svn` — that directory is
-itself included as a candidate. Without a VCS marker, the walk stops *below*
-`$HOME`: `$HOME` itself and everything above it, including the filesystem
-root, are never candidates, for either detection or config discovery. A
-stray `~/package.json` or a forgotten `~/.localghost.toml` therefore cannot
-be adopted as a project — the latter matters because `[run].command` is
-arbitrary argv that `run` executes.
+**Search boundary.** Type detection walks upward from `-C`, stopping after
+the first directory containing `.git`, `.hg`, or `.svn` — that directory is
+itself included as a candidate — and never reaches `$HOME` or above: even
+when `$HOME` holds a VCS marker, `$HOME` itself and everything above it,
+including the filesystem root, are never candidates. Config discovery uses
+that same bounded walk *when* a VCS marker is present, but — as above —
+does not walk at all without one. A stray `~/package.json` therefore cannot
+be adopted as a project's type, and a forgotten `~/.localghost.toml` cannot
+be adopted as its config.
 
 ### Detached runs
 
