@@ -12,7 +12,7 @@ from pathlib import Path
 import click
 
 from .feedback import warning
-from .runner import SUPPORTED_TYPES, type_choices
+from .runner import RUN_TYPES, type_choices
 
 CONFIG_NAME = ".localghost.toml"
 
@@ -62,8 +62,15 @@ def load_config(path: Path) -> RunConfig:
             ["[run].framework is deprecated; rename it to [run].type"],
         )
         selected_type = values["framework"]
-    if selected_type is not None and selected_type not in SUPPORTED_TYPES:
-        raise click.ClickException(type_choices("[run].type"))
+    if selected_type is not None and selected_type not in RUN_TYPES:
+        # [run].type configures `run`, which never runs `dockerfile`
+        # directly -- that value only makes `generate --type dockerfile`
+        # meaningful. Validating the run-valid set here, rather than every
+        # type `generate` knows about, means a bad value fails at config
+        # load with a clear message instead of surfacing later, mid-`run`,
+        # as a confusing "detected nothing there" from build_plan's pinned
+        # branch.
+        raise click.ClickException(type_choices("[run].type", RUN_TYPES))
     name = values.get("name")
     if name is not None and (not isinstance(name, str) or not name):
         raise click.ClickException("[run].name must be a non-empty string")

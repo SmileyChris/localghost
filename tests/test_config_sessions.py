@@ -75,6 +75,20 @@ def test_config_accepts_every_supported_type(tmp_path, value):
     assert load_config(path).type == value
 
 
+def test_config_rejects_dockerfile_as_a_run_type(tmp_path):
+    """dockerfile is generate-only: `run` never runs it directly. Before the
+    fix, [run].type was validated against every type generate knows about
+    (including dockerfile), so a bad value passed config load only to fail
+    later, mid-`run`, inside build_plan's pinned branch with a confusing
+    "detected nothing there" -- naming a directory that does hold a
+    Dockerfile, and suggesting --root when none was ever passed."""
+    path = tmp_path / ".localghost.toml"
+    path.write_text('[run]\ntype = "dockerfile"\n')
+
+    with pytest.raises(click.ClickException, match="must be"):
+        load_config(path)
+
+
 def test_config_accepts_framework_as_a_deprecated_alias(tmp_path, capsys):
     path = tmp_path / ".localghost.toml"
     path.write_text('[run]\nframework = "django"\n')
