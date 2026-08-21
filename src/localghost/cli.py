@@ -18,7 +18,7 @@ from pathlib import Path
 
 import click
 
-from .compose import resolve_compose
+from .compose import resolve_compose, routing_problem
 from .config import (
     CONFIG_NAME,
     RunConfig,
@@ -61,7 +61,9 @@ from .routes import active_routes, proxy_is_running
 from .runner import (
     RUN_TYPES,
     RunPlan,
+    _compose_file,
     build_plan,
+    discover_type,
     django_settings_warnings,
     execute,
     find_route_collision,
@@ -410,11 +412,14 @@ def run(
     pinned = resolve_root(
         start=cwd, flag=root, configured=settings.root, config_dir=config_dir
     )
+    if selected_type is None and pinned is None and not command:
+        # Only compose is dispatched from here; every other detected type is
+        # re-discovered inside build_plan, which also needs the ambiguity
+        # and "nothing detected" errors this raises.
+        selected_type, _ = discover_type(cwd, None)
     if selected_type == "compose":
         # Compose owns the application's configuration, so host-only
         # settings are rejected; --root is orthogonal and stays allowed.
-        # Task 8 adds validation for ambiguity with a detected host
-        # framework.
         if command or framework is not None or port is not None:
             raise click.ClickException(
                 "compose mode does not accept host command, framework, or "
@@ -422,6 +427,9 @@ def run(
             )
         compose_root = pinned or cwd
         project = name or compose_root.name
+        trusted = settings.type == "compose"
+        if not trusted:
+            _check_compose_routing(compose_root, project)
         if dry_run:
             compose_dry_run(project=project, url=_proxy_origin(project))
             return
@@ -507,6 +515,26 @@ def _detach_host(plan: RunPlan, cwd: Path) -> None:
             f"could not start detached application: {exc}"
         ) from exc
     success(f"Started detached session for {plan.name}.localhost.")
+
+
+def _check_compose_routing(compose_root: Path, project: str) -> None:
+    """Refuse a compose run whose project isn't wired to the hub.
+
+    Reads the merged model via `resolve_compose`, never a file on disk,
+    since the routing labels may arrive from an override file or a `-f`
+    stack that only the resolved model reflects. `docker compose config`
+    is read-only, so this is safe to run on the `--dry-run` path too.
+    """
+    compose_file = _compose_file(compose_root)
+    files = (compose_file,) if compose_file else ()
+    problem = routing_problem(resolve_compose(files))
+    if problem is None:
+        return
+    label = compose_file.name if compose_file else "the Compose project"
+    raise click.ClickException(
+        f"found {label} but {problem}; nothing would be reachable through "
+        "the hub; run localghost generate to add the routing labels"
+    )
 
 
 def _run_compose(cwd: Path, name: str | None, detach: bool) -> None:

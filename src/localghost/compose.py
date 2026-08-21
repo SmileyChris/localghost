@@ -42,6 +42,41 @@ def resolve_compose(files: tuple[Path, ...]) -> dict[str, Any]:
     return model
 
 
+PROXY_NETWORK = "localghost"
+
+
+def routing_problem(model: dict[str, Any]) -> str | None:
+    """Describe why a Compose project would not route, or None when it will.
+
+    Both conditions are required rather than conventional: the hub runs
+    with `exposedByDefault=false`, so a service without `traefik.enable=true`
+    is invisible to it, and a service off the `localghost` network is
+    unreachable from it regardless of labels.
+    """
+    has_network = PROXY_NETWORK in (model.get("networks") or {})
+    enabled = []
+    attached = []
+    for name, service in (model.get("services") or {}).items():
+        labels = service.get("labels") or {}
+        if labels.get("traefik.enable") == "true":
+            enabled.append(name)
+        if PROXY_NETWORK in (service.get("networks") or {}):
+            attached.append(name)
+    if enabled and not any(name in attached for name in enabled):
+        return (
+            f"service '{enabled[0]}' has traefik.enable but is not attached to "
+            f"the {PROXY_NETWORK} network"
+        )
+    if attached and not enabled:
+        return (
+            f"service '{attached[0]}' is on the {PROXY_NETWORK} network but has "
+            "no traefik.enable=true label"
+        )
+    if not has_network or not enabled:
+        return "no service is configured to route through localghost"
+    return None
+
+
 def declared_ports(service: dict[str, Any]) -> list[int]:
     """Find container ports declared by Compose or existing Traefik labels."""
     ports: set[int] = set()

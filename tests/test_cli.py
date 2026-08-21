@@ -759,6 +759,20 @@ def install_compose(monkeypatch, model: dict) -> None:
     monkeypatch.setattr("localghost.cli.resolve_compose", lambda files: model)
 
 
+def routed_compose_model(*, project: str = "demo") -> dict:
+    """A Compose model wired to the hub: labeled and on the localghost network."""
+    return {
+        "name": project,
+        "networks": {"localghost": {"external": True}},
+        "services": {
+            "web": {
+                "labels": {"traefik.enable": "true"},
+                "networks": {"localghost": None},
+            }
+        },
+    }
+
+
 def test_interactive_user_can_choose_a_non_default_service(monkeypatch) -> None:
     install_compose(monkeypatch, compose_model())
     monkeypatch.setattr("localghost.cli._is_interactive", lambda _: True)
@@ -1055,6 +1069,7 @@ def test_no_compose_interactive_defaults_to_detected_dockerfile(monkeypatch) -> 
 
 def test_compose_run_detached_records_a_session(monkeypatch, tmp_path) -> None:
     (tmp_path / "compose.yaml").write_text("services: {}\n")
+    install_compose(monkeypatch, routed_compose_model())
     commands = []
     monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
 
@@ -1078,6 +1093,7 @@ def test_compose_run_detached_records_a_session(monkeypatch, tmp_path) -> None:
 
 def test_compose_run_propagates_a_failure(monkeypatch, tmp_path) -> None:
     (tmp_path / "compose.yaml").write_text("services: {}\n")
+    install_compose(monkeypatch, routed_compose_model())
     monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         "localghost.cli.subprocess.run",
@@ -1118,6 +1134,9 @@ def test_compose_run_dry_run_prints_the_plan_and_starts_nothing(
     monkeypatch, tmp_path
 ) -> None:
     (tmp_path / "compose.yaml").write_text("services: {}\n")
+    # docker compose config is read-only, but _run_proxy and a docker
+    # compose ... up must never run on a dry run, so those stay pytest.fail.
+    install_compose(monkeypatch, routed_compose_model())
     monkeypatch.setattr(
         "localghost.cli._run_proxy",
         lambda *args, **kwargs: pytest.fail("started the proxy"),
@@ -1136,6 +1155,48 @@ def test_compose_run_dry_run_prints_the_plan_and_starts_nothing(
     assert "Type: compose" in result.output
     assert f"Project: {tmp_path.name}" in result.output
     assert "Public URL: http://" in result.output
+
+
+def test_compose_run_refuses_an_unrouted_project(monkeypatch, tmp_path) -> None:
+    (tmp_path / "compose.yaml").write_text("services:\n  web:\n    image: nginx\n")
+    monkeypatch.setattr(
+        "localghost.cli.resolve_compose",
+        lambda files: {"networks": {}, "services": {"web": {}}},
+    )
+    monkeypatch.setattr(
+        "localghost.cli._run_proxy",
+        lambda *args, **kwargs: pytest.fail("started the proxy"),
+    )
+
+    result = CliRunner().invoke(cli, ["run", "-C", str(tmp_path), "--name", "demo"])
+
+    assert result.exit_code != 0
+    assert "compose.yaml" in result.output
+    assert "localghost generate" in result.output
+    assert "demo.localhost" not in result.output
+
+
+def test_a_configured_compose_type_skips_the_routing_check(
+    monkeypatch, tmp_path
+) -> None:
+    (tmp_path / "compose.yaml").write_text("services: {}\n")
+    (tmp_path / ".localghost.toml").write_text('[run]\ntype = "compose"\n')
+    monkeypatch.setattr(
+        "localghost.cli.resolve_compose",
+        lambda files: pytest.fail("resolved the model despite an explicit type"),
+    )
+    monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "localghost.cli.subprocess.run",
+        lambda command, **kwargs: CompletedProcess(command, 0),
+    )
+
+    result = CliRunner().invoke(cli, ["run", "-C", str(tmp_path), "--name", "demo"])
+
+    assert result.exit_code == 0, result.output
+    # No HTTPS is configured in the test environment, so the public URL is
+    # printed over http, matching the sibling non-skipping compose-run test.
+    assert "http://demo.localhost" in result.output
 
 
 def test_generate_command_requires_a_port() -> None:
@@ -1227,6 +1288,7 @@ def test_compose_run_starts_the_proxy_and_reports_the_public_url(
     monkeypatch, tmp_path
 ) -> None:
     (tmp_path / "compose.yaml").write_text("services: {}\n")
+    install_compose(monkeypatch, routed_compose_model())
     calls: list[object] = []
     monkeypatch.setattr(
         "localghost.cli._run_proxy", lambda *args, **kwargs: calls.append("proxy")
