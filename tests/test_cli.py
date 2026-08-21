@@ -436,6 +436,82 @@ def test_a_pinned_root_without_a_type_errors(tmp_path) -> None:
     assert "could not detect a project type" in result.output
 
 
+def test_a_pinned_root_rejects_a_type_not_present_there(monkeypatch, tmp_path) -> None:
+    """--root must never walk: an ancestor holding the requested type must
+    not be silently adopted just because the pin itself doesn't match."""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "package.json").write_text(
+        json.dumps({"scripts": {"dev": "vite"}, "dependencies": {"vite": "x"}})
+    )
+    root = tmp_path / "backend"
+    root.mkdir()
+    (root / "manage.py").touch()
+    monkeypatch.setattr(
+        "localghost.cli.execute", lambda *args, **kwargs: pytest.fail("ran")
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "run",
+            "--dry-run",
+            "--root",
+            str(root),
+            "--type",
+            "vite",
+            "-C",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "no vite project at" in result.output
+    assert str(root) in result.output
+    assert "detected django there" in result.output
+    assert "Project root:" not in result.output
+
+
+def test_a_pinned_root_from_config_rejects_a_mismatched_type(
+    monkeypatch, tmp_path
+) -> None:
+    """The same rejection must hold with no CLI flags at all: [run].root
+    and [run].type pinning a directory whose type doesn't match."""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "package.json").write_text(
+        json.dumps({"scripts": {"dev": "vite"}, "dependencies": {"vite": "x"}})
+    )
+    root = tmp_path / "backend"
+    root.mkdir()
+    (root / "manage.py").touch()
+    (tmp_path / ".localghost.toml").write_text(
+        '[run]\ntype = "vite"\nroot = "backend"\n'
+    )
+    monkeypatch.setattr(
+        "localghost.cli.execute", lambda *args, **kwargs: pytest.fail("ran")
+    )
+
+    result = CliRunner().invoke(cli, ["run", "--dry-run", "-C", str(tmp_path)])
+
+    assert result.exit_code != 0
+    assert "no vite project at" in result.output
+    assert str(root) in result.output
+
+
+def test_a_pinned_empty_root_rejects_an_explicit_type(tmp_path) -> None:
+    root = tmp_path / "empty"
+    root.mkdir()
+    (tmp_path / ".git").mkdir()
+
+    result = CliRunner().invoke(
+        cli,
+        ["run", "--root", str(root), "--type", "django", "-C", str(tmp_path)],
+    )
+
+    assert result.exit_code != 0
+    assert "no django project at" in result.output
+    assert "detected nothing there" in result.output
+
+
 def test_run_dry_run_prints_plan_without_starting(monkeypatch) -> None:
     plan = RunPlan("demo", "custom", ("echo", "ok"), 3000, "session", "services: {}\n")
     monkeypatch.setattr("localghost.cli.build_plan", lambda *args, **kwargs: plan)

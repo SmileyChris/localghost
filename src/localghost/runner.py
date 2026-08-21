@@ -130,18 +130,33 @@ def build_plan(
         )
     else:
         if pinned is not None:
+            # A pinned root never walks: resolve entirely against what is
+            # detected at that exact directory, including a weak php match
+            # (a bare index.php) — pinning means "this is the root", so
+            # there is nothing further out to defer to.
             detected = [item for item in _types_at(pinned) if item in RUN_TYPES]
-            if framework is not None and framework in detected:
+            if framework is not None:
+                if framework not in detected:
+                    available = ", ".join(detected) if detected else "nothing"
+                    raise click.ClickException(
+                        f"no {framework} project at '{pinned}'; detected "
+                        f"{available} there; drop --type to auto-detect, or "
+                        "drop --root to search from the current directory"
+                    )
                 selected_type, project_root = framework, pinned
-            elif framework is None and len(detected) == 1:
-                selected_type, project_root = detected[0], pinned
-            elif framework is None and not detected:
+            elif not detected:
                 raise click.ClickException(
                     f"could not detect a project type from '{pinned}'; provide "
                     "--type, or a command after -- together with --port"
                 )
+            elif len(detected) > 1:
+                choices = " or ".join(f"--type {item}" for item in detected)
+                raise click.ClickException(
+                    f"both {' and '.join(detected)} were detected; rerun with "
+                    f"{choices}"
+                )
             else:
-                selected_type, project_root = discover_type(pinned, framework)
+                selected_type, project_root = detected[0], pinned
         else:
             selected_type, project_root = discover_type(cwd, framework)
         working_directory = project_root

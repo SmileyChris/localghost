@@ -85,6 +85,14 @@ def test_config_accepts_framework_as_a_deprecated_alias(tmp_path, capsys):
     assert "framework" in capsys.readouterr().err
 
 
+def test_config_rejects_both_type_and_framework(tmp_path):
+    path = tmp_path / ".localghost.toml"
+    path.write_text('[run]\ntype = "django"\nframework = "vite"\n')
+
+    with pytest.raises(click.ClickException, match="sets both type and framework"):
+        load_config(path)
+
+
 def test_config_rejects_mode_with_the_migration(tmp_path):
     path = tmp_path / ".localghost.toml"
     path.write_text('[run]\nmode = "compose"\n')

@@ -1232,6 +1232,48 @@ def test_weak_php_match_prefers_the_nearer_of_two_bare_index_files(tmp_path):
     assert runner.discover_type(webroot) == ("php", webroot)
 
 
+def test_pinned_root_accepts_a_weak_php_match(monkeypatch, tmp_path):
+    """A pinned root never walks, so even a weak bare-index.php match must
+    resolve at the pin itself rather than deferring to a stronger project
+    further out (there is nothing further out to defer to)."""
+    root = tmp_path / "legacy-shop"
+    root.mkdir()
+    (root / "index.php").touch()
+    monkeypatch.setattr(runner.shutil, "which", lambda name: "/usr/bin/php")
+    monkeypatch.setattr(runner, "_port_available", lambda _: True)
+
+    plan = runner.build_plan(root, "legacy-shop", None, None, (), pinned=root)
+
+    assert plan.type == "php"
+    assert plan.project_root == root
+    assert plan.working_directory == root
+
+
+def test_pinned_root_rejects_a_type_not_detected_there(tmp_path):
+    root = tmp_path / "backend"
+    root.mkdir()
+    (root / "manage.py").touch()
+
+    with pytest.raises(click.ClickException, match="no vite project"):
+        runner.build_plan(root, "demo", "vite", None, (), pinned=root)
+
+
+def test_pinned_root_never_walks_to_discover_type(monkeypatch, tmp_path):
+    """Regression: the pinned branch must resolve purely against what is
+    at the pin, never falling through to discover_type's ancestor walk."""
+    root = tmp_path / "backend"
+    root.mkdir()
+    (root / "manage.py").touch()
+
+    def fail_discover_type(*args, **kwargs):
+        pytest.fail("discover_type was called for a pinned root")
+
+    monkeypatch.setattr(runner, "discover_type", fail_discover_type)
+
+    with pytest.raises(click.ClickException, match="no vite project"):
+        runner.build_plan(root, "demo", "vite", None, (), pinned=root)
+
+
 def test_php_project_root_does_not_cross_into_an_unrelated_parent(tmp_path):
     """A composer.json project root must win immediately over walking
     further out to an unrelated composer.json higher in the tree."""
