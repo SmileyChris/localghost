@@ -532,8 +532,9 @@ def _check_compose_routing(compose_root: Path, project: str) -> None:
         return
     label = compose_file.name if compose_file else "the Compose project"
     raise click.ClickException(
-        f"found {label} but {problem}; nothing would be reachable through "
-        "the hub; run localghost generate to add the routing labels"
+        f"found {label} but {problem}, so nothing would be reachable at "
+        f"{_proxy_origin(project)}; run localghost generate to add the "
+        "routing labels"
     )
 
 

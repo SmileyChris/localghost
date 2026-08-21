@@ -1173,7 +1173,10 @@ def test_compose_run_refuses_an_unrouted_project(monkeypatch, tmp_path) -> None:
     assert result.exit_code != 0
     assert "compose.yaml" in result.output
     assert "localghost generate" in result.output
-    assert "demo.localhost" not in result.output
+    # The failure names the URL nothing would answer at, but must never
+    # present it as a working destination.
+    assert "Public URL" not in result.output
+    assert "demo.localhost" in result.output
 
 
 def test_a_configured_compose_type_skips_the_routing_check(
