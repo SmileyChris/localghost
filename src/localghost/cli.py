@@ -421,20 +421,24 @@ def run(
         start=cwd, flag=root, configured=settings.root, config_dir=config_dir
     )
     resolved_root: Path | None = None
-    if selected_type is None and not command:
+    if not command:
         # Only compose is dispatched from here; every other detected type is
         # re-discovered inside build_plan, which also needs the ambiguity
         # and "nothing detected" errors this raises. Type and root are
         # resolved together here for a pinned root exactly as much as an
         # unpinned one, so compose's project name, routing check, and
         # `docker compose` invocation below all anchor to the same
-        # directory build_plan would use for a host type.
+        # directory build_plan would use for a host type. This resolution
+        # runs whether or not --type was given explicitly: an explicit
+        # --type compose still needs its root walked from cwd/pinned
+        # exactly like the undetected case, or compose_root falls back to
+        # cwd below and a subdirectory run hijacks another project's route.
         if pinned is not None:
             selected_type, resolved_root = resolve_pinned_type(
-                pinned, None, from_flag=root_from_flag
+                pinned, selected_type, from_flag=root_from_flag
             )
         else:
-            selected_type, resolved_root = discover_type(cwd, None)
+            selected_type, resolved_root = discover_type(cwd, selected_type)
     if selected_type == "compose":
         # Compose owns the application's configuration, so host-only
         # settings are rejected; --root is orthogonal and stays allowed.

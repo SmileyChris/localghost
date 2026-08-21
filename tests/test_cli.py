@@ -1452,6 +1452,53 @@ def test_compose_run_from_a_subdirectory_uses_the_project_root(
     assert "site.localhost" in result.output
 
 
+def test_compose_run_with_explicit_type_from_a_subdirectory_uses_the_project_root(
+    monkeypatch, tmp_path
+) -> None:
+    """An explicit --type compose must resolve the project root exactly like
+    the unpinned, no --type path does: walking up from a subdirectory to the
+    parent that actually carries compose.yaml. Before the fix, the root
+    resolution block at the top of `run` only ran when `selected_type is
+    None`, so `--type compose` from a subdirectory left `resolved_root`
+    unset, `compose_root` fell back to `cwd` (the subdirectory), and the
+    real `docker compose up` would start a second, wrongly-named stack from
+    the subdirectory's own (nonexistent or wrong) compose file -- hijacking
+    the parent's routed hostname. Recording both cwd= and --project-name of
+    the real invocation catches a divergence between them that asserting
+    only the printed output would miss."""
+    root = tmp_path / "site"
+    root.mkdir()
+    (root / ".git").mkdir()
+    (root / "compose.yaml").write_text("services: {}\n")
+    nested = root / "services" / "api"
+    nested.mkdir(parents=True)
+    install_compose(monkeypatch, routed_compose_model(project="site"))
+    monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
+    recorded: dict[str, object] = {}
+
+    def _run(command, **kwargs):
+        recorded["command"] = command
+        recorded["cwd"] = kwargs.get("cwd")
+        return CompletedProcess(command, 0)
+
+    monkeypatch.setattr("localghost.cli.subprocess.run", _run)
+
+    result = CliRunner().invoke(
+        cli, ["run", "-C", str(nested), "--type", "compose"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert recorded["command"] == [
+        "docker",
+        "compose",
+        "--project-name",
+        "site",
+        "up",
+    ]
+    assert recorded["cwd"] == root
+    assert "site.localhost" in result.output
+
+
 def test_run_accepts_the_deprecated_framework_alias_for_compose(
     monkeypatch, tmp_path
 ) -> None:
