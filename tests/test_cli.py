@@ -373,6 +373,72 @@ def test_run_rejects_the_removed_mode_flag(tmp_path) -> None:
     assert "no such option" in result.output.lower()
 
 
+def test_generate_rejects_the_removed_mode_flag() -> None:
+    runner_ = CliRunner()
+    with runner_.isolated_filesystem():
+        result = runner_.invoke(cli, ["generate", "--mode", "host", "--no-input"])
+
+    assert result.exit_code != 0
+    assert "no such option" in result.output.lower()
+
+
+def test_generate_takes_the_per_type_default_port() -> None:
+    runner_ = CliRunner()
+    with runner_.isolated_filesystem():
+        Path("manage.py").touch()
+
+        result = runner_.invoke(
+            cli, ["generate", "--no-input", "--dry-run", "--type", "django"]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "8000" in result.output
+
+
+def test_generate_records_the_type_in_the_config() -> None:
+    runner_ = CliRunner()
+    with runner_.isolated_filesystem():
+        Path("manage.py").touch()
+
+        result = runner_.invoke(
+            cli,
+            ["generate", "--no-input", "--port", "8000", "--", "./serve"],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert 'type = "django"' in Path(".localghost.toml").read_text()
+
+
+def test_generate_accepts_dockerfile_as_a_type() -> None:
+    runner_ = CliRunner()
+    with runner_.isolated_filesystem():
+        Path("Dockerfile").write_text("FROM scratch\n")
+
+        result = runner_.invoke(
+            cli,
+            ["generate", "--no-input", "--dry-run", "--type", "dockerfile", "-p", "80"],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "build:" in result.output
+
+
+def test_generate_flags_the_dockerfile_django_pair_as_ambiguous() -> None:
+    """Same directory as the run-side sibling test, but generate's allowed
+    types include dockerfile, so the pair is ambiguous here even though it
+    is not for `run` (dockerfile is filtered out of RUN_TYPES)."""
+    runner_ = CliRunner()
+    with runner_.isolated_filesystem():
+        Path(".git").mkdir()
+        Path("manage.py").touch()
+        Path("Dockerfile").write_text("FROM scratch\n")
+
+        result = runner_.invoke(cli, ["generate", "--no-input", "--dry-run"])
+
+        assert result.exit_code != 0
+        assert "both dockerfile and django were detected" in result.output
+
+
 def test_run_accepts_the_deprecated_framework_alias(monkeypatch, tmp_path) -> None:
     (tmp_path / ".git").mkdir()
     (tmp_path / "manage.py").touch()
@@ -855,7 +921,7 @@ def test_dry_run_prints_yaml_without_writing(monkeypatch) -> None:
         assert not Path("compose.override.yaml").exists()
 
 
-def test_generate_rejects_options_for_the_wrong_project_mode(monkeypatch) -> None:
+def test_generate_rejects_options_for_the_wrong_project_type(monkeypatch) -> None:
     install_compose(monkeypatch, compose_model())
     runner = CliRunner()
 
@@ -865,9 +931,9 @@ def test_generate_rejects_options_for_the_wrong_project_mode(monkeypatch) -> Non
         assert "--extend requires an existing Compose project" in no_compose.output
 
         Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
-        compose = runner.invoke(cli, ["generate", "--mode", "host"])
+        compose = runner.invoke(cli, ["generate", "--type", "django"])
         assert compose.exit_code != 0
-        assert "--mode can only be used" in compose.output
+        assert "--type can only be used" in compose.output
 
 
 def test_compose_file_environment_selects_compose_mode(monkeypatch) -> None:
@@ -969,7 +1035,7 @@ def test_existing_complete_override_reports_no_change(monkeypatch) -> None:
         assert not Path("compose.override.yaml.bak").exists()
 
 
-def test_no_compose_mode_reads_project_name_from_dotenv() -> None:
+def test_no_compose_type_reads_project_name_from_dotenv() -> None:
     runner = CliRunner()
 
     with runner.isolated_filesystem():
@@ -978,14 +1044,14 @@ def test_no_compose_mode_reads_project_name_from_dotenv() -> None:
         )
         result = runner.invoke(
             cli,
-            ["generate", "--no-input", "--mode", "host", "--port", "3000"],
+            ["generate", "--no-input", "--type", "php", "--port", "3000"],
         )
 
         assert result.exit_code == 0, result.output
         assert Path("compose.yaml").exists()
 
 
-def test_no_compose_mode_validates_inputs_and_refuses_overwrite() -> None:
+def test_no_compose_type_validates_inputs_and_refuses_overwrite() -> None:
     runner = CliRunner()
 
     with runner.isolated_filesystem():
@@ -995,8 +1061,8 @@ def test_no_compose_mode_validates_inputs_and_refuses_overwrite() -> None:
             [
                 "generate",
                 "--no-input",
-                "--mode",
-                "host",
+                "--type",
+                "php",
                 "--port",
                 "3000",
                 "--service",
@@ -1007,8 +1073,11 @@ def test_no_compose_mode_validates_inputs_and_refuses_overwrite() -> None:
         assert invalid_service.exit_code != 0
         assert "not a valid service name" in invalid_service.output
 
+        # php (like every non-dockerfile, non-compose type) has a default
+        # port, so only dockerfile -- which has none -- can still exercise
+        # the "requires --port" guard here.
         missing_port = runner.invoke(
-            cli, ["generate", "--no-input", "--mode", "host"], env=environment
+            cli, ["generate", "--no-input", "--type", "dockerfile"], env=environment
         )
         assert missing_port.exit_code != 0
         assert "requires --port" in missing_port.output
@@ -1018,7 +1087,7 @@ def test_no_compose_mode_validates_inputs_and_refuses_overwrite() -> None:
             [
                 "generate",
                 "--no-input",
-                "--mode",
+                "--type",
                 "dockerfile",
                 "--port",
                 "8000",
@@ -1034,8 +1103,8 @@ def test_no_compose_mode_validates_inputs_and_refuses_overwrite() -> None:
             [
                 "generate",
                 "--no-input",
-                "--mode",
-                "host",
+                "--type",
+                "php",
                 "--port",
                 "3000",
                 "--output",
@@ -1048,7 +1117,10 @@ def test_no_compose_mode_validates_inputs_and_refuses_overwrite() -> None:
         assert Path("generated.yaml").read_text(encoding="utf-8") == "keep\n"
 
 
-def test_no_compose_interactive_defaults_to_detected_dockerfile(monkeypatch) -> None:
+def test_no_compose_interactive_silently_detects_a_lone_dockerfile(monkeypatch) -> None:
+    """generate now shares run's detect-first behaviour: an unambiguous
+    Dockerfile is picked up without an "Application type" confirmation
+    prompt -- only the still-unresolved port is asked for."""
     monkeypatch.setattr("localghost.cli._is_interactive", lambda _: True)
     runner = CliRunner()
 
@@ -1057,14 +1129,34 @@ def test_no_compose_interactive_defaults_to_detected_dockerfile(monkeypatch) -> 
         result = runner.invoke(
             cli,
             ["generate"],
-            input="\n8080\n",
+            input="8080\n",
+            env={"COMPOSE_PROJECT_NAME": "safe-project"},
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "Application type" not in result.output
+        assert "Container HTTP port" in result.output
+        assert "build: ." in Path("compose.yaml").read_text(encoding="utf-8")
+
+
+def test_no_compose_interactive_prompts_when_nothing_is_detected(monkeypatch) -> None:
+    monkeypatch.setattr("localghost.cli._is_interactive", lambda _: True)
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli,
+            ["generate"],
+            input="\n",
             env={"COMPOSE_PROJECT_NAME": "safe-project"},
         )
 
         assert result.exit_code == 0, result.output
         assert "Application type" in result.output
-        assert "Container HTTP port" in result.output
-        assert "build: ." in Path("compose.yaml").read_text(encoding="utf-8")
+        # php is the fallback default when no Dockerfile is present, and it
+        # has a default port, so no separate port prompt is needed.
+        assert "Container HTTP port" not in result.output
+        assert "for the host application on port 8080" in result.output
 
 
 def test_compose_run_detached_records_a_session(monkeypatch, tmp_path) -> None:
@@ -1269,7 +1361,7 @@ def test_generate_command_requires_a_port() -> None:
     assert "a custom command requires --port" in result.output
 
 
-def test_generate_command_rejects_dockerfile_mode() -> None:
+def test_generate_command_rejects_dockerfile_type() -> None:
     runner = CliRunner()
     with runner.isolated_filesystem():
         result = runner.invoke(
@@ -1277,7 +1369,7 @@ def test_generate_command_rejects_dockerfile_mode() -> None:
             [
                 "generate",
                 "--no-input",
-                "--mode",
+                "--type",
                 "dockerfile",
                 "--port",
                 "3000",
@@ -1287,7 +1379,7 @@ def test_generate_command_rejects_dockerfile_mode() -> None:
         )
 
     assert result.exit_code != 0
-    assert "cannot be combined with --mode dockerfile" in result.output
+    assert "cannot be combined with --type dockerfile" in result.output
 
 
 def test_generate_command_writes_and_then_extends_the_config() -> None:

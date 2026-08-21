@@ -59,6 +59,8 @@ from .paths import state_directory
 from .roots import discover_config, resolve_root
 from .routes import active_routes, proxy_is_running
 from .runner import (
+    DEFAULT_PORTS,
+    GENERATE_TYPES,
     RUN_TYPES,
     RunPlan,
     _compose_file,
@@ -69,6 +71,7 @@ from .runner import (
     find_route_collision,
     start_bridge,
     stop_bridge,
+    type_choices,
 )
 from .sessions import alive as session_alive
 from .sessions import clean as clean_sessions
@@ -929,10 +932,10 @@ def _environment_port(name: str, default: int) -> int:
     help="Output path (defaults to compose.override.yaml or compose.yaml).",
 )
 @click.option(
-    "mode",
-    "--mode",
-    type=click.Choice(["dockerfile", "host"]),
-    help="No-Compose mode: build a Dockerfile or bridge to a host process.",
+    "selected_type",
+    "--type",
+    type=click.Choice(GENERATE_TYPES),
+    help="Project type; detected from the directory when omitted.",
 )
 @click.option(
     "--extend",
@@ -951,7 +954,7 @@ def generate(
     service_name: str | None,
     port: int | None,
     output: Path | None,
-    mode: str | None,
+    selected_type: str | None,
     extend: bool,
     dry_run: bool,
     no_input: bool,
@@ -968,7 +971,7 @@ def generate(
             service_name=service_name,
             port=port,
             output=output or Path("compose.yaml"),
-            mode=mode,
+            selected_type=selected_type,
             dry_run=dry_run,
             interactive=interactive,
             command=command,
@@ -976,9 +979,9 @@ def generate(
         )
         return
 
-    if mode is not None:
+    if selected_type is not None:
         raise click.ClickException(
-            "--mode can only be used when no Compose file is present"
+            "--type can only be used when no Compose file is present"
         )
     if command:
         raise click.ClickException("a command can only be used for host generation")
@@ -1045,20 +1048,35 @@ def _generate_without_compose(
     service_name: str | None,
     port: int | None,
     output: Path,
-    mode: str | None,
+    selected_type: str | None,
     dry_run: bool,
     interactive: bool,
     command: tuple[str, ...] = (),
     extend: bool = False,
 ) -> None:
+    if selected_type is None:
+        # A genuine "nothing here" failure is deferred to the prompt/error
+        # below, but an ambiguity error (two types detected) must propagate
+        # as-is rather than being silently swallowed into a generic prompt.
+        try:
+            selected_type, _ = discover_type(
+                Path.cwd(), None, allowed=GENERATE_TYPES
+            )
+        except click.ClickException as exc:
+            if "could not detect a project type" not in exc.message:
+                raise
+            selected_type = None
+
     if command:
-        if mode == "dockerfile":
+        if selected_type == "dockerfile":
             raise click.ClickException(
-                "a command cannot be combined with --mode dockerfile"
+                "a command cannot be combined with --type dockerfile"
             )
         if port is None:
             raise click.ClickException("a custom command requires --port")
-        config = RunConfig(name=service_name, port=port, command=command)
+        config = RunConfig(
+            type=selected_type, name=service_name, port=port, command=command
+        )
         target = Path(CONFIG_NAME)
         if dry_run:
             click.echo(render_run_config(config), nl=False)
@@ -1075,31 +1093,38 @@ def _generate_without_compose(
         raise click.ClickException(f"refusing to overwrite existing '{output}'")
     validate_project_name_value(_local_project_name())
 
-    default_mode = "dockerfile" if Path("Dockerfile").is_file() else "host"
-    if mode is None and interactive:
-        mode = click.prompt(
+    if selected_type is None and interactive:
+        selected_type = click.prompt(
             "No Compose file found. Application type",
-            default=default_mode,
-            type=click.Choice(["dockerfile", "host"]),
+            default="dockerfile" if Path("Dockerfile").is_file() else "php",
+            type=click.Choice(GENERATE_TYPES),
             show_choices=True,
         )
-    mode = mode or default_mode
+    if selected_type is None:
+        raise click.ClickException(type_choices("--type", GENERATE_TYPES))
+
     service_name = service_name or "app"
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", service_name):
         raise click.ClickException(f"'{service_name}' is not a valid service name")
 
     if port is None:
+        port = DEFAULT_PORTS.get(selected_type)
+    if port is None:
         if not interactive:
             raise click.ClickException(
-                f"no Compose file found; --mode {mode} requires --port"
+                f"no Compose file found; --type {selected_type} requires --port"
             )
-        prompt = "Container HTTP port" if mode == "dockerfile" else "Host HTTP port"
+        prompt = (
+            "Container HTTP port"
+            if selected_type == "dockerfile"
+            else "Host HTTP port"
+        )
         port = click.prompt(prompt, type=click.IntRange(1, 65535))
 
-    if mode == "dockerfile":
+    if selected_type == "dockerfile":
         if not Path("Dockerfile").is_file():
             raise click.ClickException(
-                "--mode dockerfile requires a Dockerfile in the current directory"
+                "--type dockerfile requires a Dockerfile in the current directory"
             )
         document = create_dockerfile_compose(service_name, port)
         description = "Dockerfile application"
@@ -1113,7 +1138,7 @@ def _generate_without_compose(
 
     write_new(output, document)
     success(f"Created {output} for the {description}.")
-    if mode == "host":
+    if selected_type != "dockerfile":
         info(
             "Ensure the host process listens on a Docker-reachable interface "
             "such as 0.0.0.0."

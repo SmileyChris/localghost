@@ -70,7 +70,7 @@ def test_host_bridge_is_scaffolded_without_compose() -> None:
     with runner.isolated_filesystem():
         result = runner.invoke(
             cli,
-            ["generate", "--no-input", "--mode", "host", "--port", "3000"],
+            ["generate", "--no-input", "--type", "php", "--port", "3000"],
             env={"COMPOSE_PROJECT_NAME": "sample-project"},
         )
 

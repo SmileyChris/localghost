@@ -68,7 +68,7 @@ def test_generated_compose_files_resolve_correctly(
     monkeypatch.chdir(host_dir)
     result = runner.invoke(
         cli,
-        ["generate", "--no-input", "--mode", "host", "--port", "3000"],
+        ["generate", "--no-input", "--type", "php", "--port", "3000"],
         env={"COMPOSE_PROJECT_NAME": "host-fixture"},
     )
     assert result.exit_code == 0, result.output
@@ -91,7 +91,7 @@ def test_generated_compose_files_resolve_correctly(
     monkeypatch.chdir(dockerfile_dir)
     result = runner.invoke(
         cli,
-        ["generate", "--no-input", "--mode", "dockerfile", "--port", "80"],
+        ["generate", "--no-input", "--type", "dockerfile", "--port", "80"],
         env={"COMPOSE_PROJECT_NAME": "dockerfile-fixture"},
     )
     assert result.exit_code == 0, result.output
