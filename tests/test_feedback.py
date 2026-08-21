@@ -19,7 +19,7 @@ def test_plain_feedback_is_stable(monkeypatch):
     feedback.success("Done")
     feedback.warning("Settings", ["First", "Second"])
     feedback.run_plan(
-        framework="vite",
+        type="vite",
         command=("npm", "run", "dev"),
         port=5173,
         url="http://demo.localhost",
@@ -40,7 +40,7 @@ def test_rich_feedback_uses_compact_components(monkeypatch):
     feedback.info("Starting")
     feedback.warning("Settings", ["Missing host"])
     feedback.run_plan(
-        framework="django",
+        type="django",
         command=("python", "manage.py", "runserver"),
         port=8000,
         url="http://demo.localhost",

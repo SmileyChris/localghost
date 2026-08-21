@@ -223,7 +223,7 @@ def test_framework_ambiguity_and_custom_plan(monkeypatch, tmp_path):
         runner.discover_type(tmp_path)
     monkeypatch.setattr(runner, "_port_available", lambda _: True)
     plan = runner.build_plan(tmp_path, "hello", None, 3000, ("echo", "ok"))
-    assert plan.framework == "custom" and plan.command == ("echo", "ok")
+    assert plan.type == "custom" and plan.command == ("echo", "ok")
     with pytest.raises(click.ClickException, match="requires --port"):
         runner.build_plan(tmp_path, "hello", None, None, ("echo",))
 
@@ -394,7 +394,7 @@ def test_astro_plan_with_detection(monkeypatch, tmp_path):
     executable(monkeypatch, "npm")
     monkeypatch.setattr(runner, "_port_available", lambda _: True)
     plan = runner.build_plan(tmp_path, "astro-site", None, None, ())
-    assert plan.framework == "astro"
+    assert plan.type == "astro"
     assert plan.port == 4321
     assert plan.command == (
         "npm", "run", "dev", "--",
@@ -412,7 +412,7 @@ def test_astro_plan_explicit_framework(monkeypatch, tmp_path):
     executable(monkeypatch, "npm")
     monkeypatch.setattr(runner, "_port_available", lambda _: True)
     plan = runner.build_plan(tmp_path, "site", "astro", None, ())
-    assert plan.framework == "astro"
+    assert plan.type == "astro"
 
 
 def test_nested_framework_root_drives_name_and_working_directory(
@@ -429,7 +429,7 @@ def test_nested_framework_root_drives_name_and_working_directory(
 
     plan = runner.build_plan(nested, None, None, None, ())
 
-    assert plan.framework == "django"
+    assert plan.type == "django"
     assert plan.name == "customer-portal"
     assert plan.project_root == root
     assert plan.working_directory == root
@@ -462,7 +462,7 @@ def test_modern_cakephp_detection_and_plan(monkeypatch, tmp_path):
 
     plan = runner.build_plan(webroot, None, None, None, ())
 
-    assert plan.framework == "cakephp"
+    assert plan.type == "cakephp"
     assert plan.name == "bakery"
     assert plan.port == 8765
     assert plan.project_root == root
@@ -504,7 +504,7 @@ def test_legacy_cakephp_uses_webroot_without_naming_it_webroot(
 
     plan = runner.build_plan(webroot, None, None, None, ())
 
-    assert plan.framework == "cakephp"
+    assert plan.type == "cakephp"
     assert plan.name == "legacy-shop"
     assert plan.project_root == root
     assert plan.working_directory == webroot
@@ -524,7 +524,7 @@ def test_laravel_detection_from_public_directory(monkeypatch, tmp_path):
 
     plan = runner.build_plan(public, None, None, None, ())
 
-    assert plan.framework == "laravel"
+    assert plan.type == "laravel"
     assert plan.name == "orders"
     assert plan.working_directory == root
     assert plan.command == (
@@ -544,9 +544,7 @@ def test_build_plan_runs_a_generic_php_project(tmp_path, monkeypatch):
     # pytest gives underscores and would fail DNS-safe validation.
     plan = runner.build_plan(tmp_path, "php-site", None, None, ())
 
-    # The field is still named `framework` here; Task 6 renames it to `type`
-    # and updates this assertion.
-    assert plan.framework == "php"
+    assert plan.type == "php"
     assert plan.project_root == tmp_path
     assert plan.working_directory == public
 
@@ -574,7 +572,7 @@ def test_vite_plan_through_build_plan(monkeypatch, tmp_path):
     executable(monkeypatch, "npm")
     monkeypatch.setattr(runner, "_port_available", lambda _: True)
     plan = runner.build_plan(tmp_path, "vite-site", None, None, ())
-    assert plan.framework == "vite"
+    assert plan.type == "vite"
     assert plan.port == 5173
     assert "--host" in plan.command and "--strictPort" in plan.command
 

@@ -22,8 +22,6 @@ from .compose import resolve_compose
 from .config import (
     CONFIG_NAME,
     RunConfig,
-    config_path,
-    detect_mode,
     load_config,
     render_run_config,
     write_run_config,
@@ -57,9 +55,10 @@ from .generator import (
     write_new,
 )
 from .paths import state_directory
+from .roots import discover_config, resolve_root
 from .routes import active_routes, proxy_is_running
 from .runner import (
-    SUPPORTED_TYPES,
+    RUN_TYPES,
     RunPlan,
     build_plan,
     django_settings_warnings,
@@ -340,21 +339,25 @@ def _trust_status() -> None:
     help="Application directory to detect and run (defaults to the current directory).",
 )
 @click.option(
+    "selected_type",
+    "--type",
+    type=click.Choice(RUN_TYPES),
+    help="Project type; detected from the directory when omitted.",
+)
+@click.option(
     "framework",
     "--framework",
-    type=click.Choice(SUPPORTED_TYPES),
-    help="Resolve otherwise ambiguous framework detection.",
+    type=click.Choice(RUN_TYPES),
+    hidden=True,
+    help="Deprecated alias for --type.",
+)
+@click.option(
+    "root",
+    "--root",
+    type=click.Path(file_okay=False, path_type=Path),
+    help="Treat this directory as the project root instead of searching.",
 )
 @click.option("port", "--port", type=click.IntRange(1, 65535), help="Host HTTP port.")
-@click.option(
-    "mode",
-    "--mode",
-    type=click.Choice(["host", "compose"]),
-    help=(
-        "Run the application directly on the host, or hand it to Docker "
-        "Compose. Detected from the project when omitted."
-    ),
-)
 @click.option(
     "detach",
     "--detach",
@@ -377,9 +380,10 @@ def _trust_status() -> None:
 def run(
     name: str | None,
     working_directory: Path | None,
+    selected_type: str | None,
     framework: str | None,
+    root: Path | None,
     port: int | None,
-    mode: str | None,
     detach: bool,
     config: Path | None,
     dry_run: bool,
@@ -387,25 +391,30 @@ def run(
 ) -> None:
     """Run a configured host or Compose application behind the proxy."""
     cwd = working_directory or Path.cwd()
+    if framework is not None:
+        if selected_type is not None:
+            raise click.UsageError("--type and --framework cannot both be given")
+        warning("Deprecated option", ["--framework is deprecated; use --type"])
+        selected_type = framework
+    config_file = config or discover_config(cwd)
+    settings = load_config(config_file) if config_file else RunConfig()
+    config_dir = config_file.parent if config_file else None
     explicit_run_settings = bool(command) or any(
-        value is not None for value in (name, framework, port, mode, config)
+        value is not None for value in (name, selected_type, port, config)
     )
-    settings = load_config(config_path(cwd, config))
     command = command or settings.command
     name = name or settings.name
-    framework = framework or settings.framework
+    selected_type = selected_type or settings.type
     port = port or settings.port
-    selected_mode = (
-        mode or settings.mode or detect_mode(cwd, command=command, framework=framework)
+    pinned = resolve_root(
+        start=cwd, flag=root, configured=settings.root, config_dir=config_dir
     )
-    if selected_mode == "compose":
-        if command or framework or port:
-            raise click.ClickException(
-                "Compose mode does not accept host command, framework, or port settings"
-            )
-        _run_compose(cwd, name, detach)
+    if selected_type == "compose":
+        # Task 8 adds routing validation (host-only settings, ambiguity with
+        # a detected host framework); this is a plain dispatch for now.
+        _run_compose(pinned or cwd, name, detach)
         return
-    plan = build_plan(cwd, name, framework, port, command)
+    plan = build_plan(pinned or cwd, name, selected_type, port, command, pinned=pinned)
     matching = find_matching(name=plan.name, cwd=plan.project_root or cwd)
     if matching:
         message = (
@@ -518,7 +527,7 @@ def _run_compose(cwd: Path, name: str | None, detach: bool) -> None:
 def _print_run_plan(plan: RunPlan, dry_run: bool, detach: bool = False) -> None:
     public_origin = _proxy_origin(plan.name)
     run_plan(
-        framework=plan.framework,
+        type=plan.type,
         command=plan.command,
         port=plan.port,
         url=public_origin,
@@ -1001,7 +1010,7 @@ def _generate_without_compose(
             )
         if port is None:
             raise click.ClickException("a custom command requires --port")
-        config = RunConfig(mode="host", name=service_name, port=port, command=command)
+        config = RunConfig(name=service_name, port=port, command=command)
         target = Path(CONFIG_NAME)
         if dry_run:
             click.echo(render_run_config(config), nl=False)

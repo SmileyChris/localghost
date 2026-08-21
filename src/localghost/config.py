@@ -1,4 +1,4 @@
-"""Project run configuration and conservative mode detection."""
+"""Project run configuration."""
 
 from __future__ import annotations
 
@@ -11,16 +11,17 @@ from pathlib import Path
 
 import click
 
-from .runner import SUPPORTED_TYPES, host_project_root, type_choices
+from .feedback import warning
+from .runner import SUPPORTED_TYPES, type_choices
 
 CONFIG_NAME = ".localghost.toml"
 
 
 @dataclass(frozen=True)
 class RunConfig:
-    mode: str | None = None
+    type: str | None = None
     name: str | None = None
-    framework: str | None = None
+    root: str | None = None
     port: int | None = None
     command: tuple[str, ...] = ()
 
@@ -36,18 +37,39 @@ def load_config(path: Path) -> RunConfig:
     values = document.get("run", {})
     if not isinstance(values, dict):
         raise click.ClickException(f"'{path}' [run] must be a table")
-    unknown = sorted(set(values) - {"mode", "name", "framework", "port", "command"})
+    # `mode` is checked before the unknown-key scan would otherwise reject
+    # it, so the migration message wins; keep it out of the known-key set.
+    if "mode" in values:
+        migration = (
+            'type = "compose"'
+            if values["mode"] == "compose"
+            else "remove the key and let detection choose, or name the type"
+        )
+        raise click.ClickException(f"[run].mode was removed in 2.0; use {migration}")
+    unknown = sorted(
+        set(values) - {"type", "framework", "name", "root", "port", "command"}
+    )
     if unknown:
         raise click.ClickException(f"unknown [run] setting '{unknown[0]}'")
-    mode = values.get("mode")
-    if mode is not None and mode not in {"host", "compose"}:
-        raise click.ClickException("[run].mode must be 'host' or 'compose'")
+    selected_type = values.get("type")
+    if "framework" in values:
+        if selected_type is not None:
+            raise click.ClickException(
+                "[run] sets both type and framework; keep type"
+            )
+        warning(
+            "Deprecated configuration",
+            ["[run].framework is deprecated; rename it to [run].type"],
+        )
+        selected_type = values["framework"]
+    if selected_type is not None and selected_type not in SUPPORTED_TYPES:
+        raise click.ClickException(type_choices("[run].type"))
     name = values.get("name")
     if name is not None and (not isinstance(name, str) or not name):
         raise click.ClickException("[run].name must be a non-empty string")
-    framework = values.get("framework")
-    if framework is not None and framework not in SUPPORTED_TYPES:
-        raise click.ClickException(type_choices("[run].framework"))
+    root = values.get("root")
+    if root is not None and (not isinstance(root, str) or not root):
+        raise click.ClickException("[run].root must be a non-empty string")
     command = values.get("command", ())
     if not isinstance(command, (list, tuple)) or not all(
         isinstance(item, str) for item in command
@@ -59,47 +81,11 @@ def load_config(path: Path) -> RunConfig:
     ):
         raise click.ClickException("[run].port must be between 1 and 65535")
     return RunConfig(
-        mode,
+        selected_type,
         name,
-        framework,
+        root,
         port,
         tuple(command),
-    )
-
-
-def config_path(directory: Path, configured: Path | None = None) -> Path:
-    return (configured or directory / CONFIG_NAME).resolve()
-
-
-def detect_mode(
-    directory: Path, *, command: tuple[str, ...] = (), framework: str | None = None
-) -> str:
-    if command or framework:
-        return "host"
-    compose = any(
-        (directory / filename).is_file()
-        for filename in (
-            "compose.yaml",
-            "compose.yml",
-            "docker-compose.yaml",
-            "docker-compose.yml",
-        )
-    )
-    host_root = host_project_root(directory)
-    if compose and host_root == directory.resolve():
-        raise click.ClickException(
-            "both Compose and a host framework were detected; provide "
-            "--mode host or --mode compose"
-        )
-    if compose:
-        # A Compose file beside the invocation wins over an application root
-        # found further up the tree; the nearer marker is the specific one.
-        return "compose"
-    if host_root is not None:
-        return "host"
-    raise click.ClickException(
-        "could not detect a run mode; provide --mode, a framework, or a "
-        "command after --"
     )
 
 
@@ -116,9 +102,9 @@ def render_run_config(config: RunConfig, existing: str = "") -> str:
         )
     lines += ("\n\n" if lines.strip() else "") + "[run]\n"
     for key, value in (
-        ("mode", config.mode),
+        ("type", config.type),
         ("name", config.name),
-        ("framework", config.framework),
+        ("root", config.root),
     ):
         if value is not None:
             lines += f"{key} = {json.dumps(value)}\n"

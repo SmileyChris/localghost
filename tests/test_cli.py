@@ -330,9 +330,115 @@ def test_proxy_port_defaults_when_the_environment_value_is_empty(monkeypatch) ->
     assert "http://traefik.localhost\n" in result.output
 
 
+def test_run_reports_the_type_not_the_framework(monkeypatch, tmp_path) -> None:
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "manage.py").touch()
+    monkeypatch.setattr(
+        "localghost.cli.execute", lambda *args, **kwargs: pytest.fail("ran")
+    )
+
+    result = CliRunner().invoke(
+        cli, ["run", "--dry-run", "--name", "demo", "-C", str(tmp_path)]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Type: django" in result.output
+    assert "Framework:" not in result.output
+
+
+def test_run_rejects_both_type_and_framework(tmp_path) -> None:
+    result = CliRunner().invoke(
+        cli,
+        [
+            "run",
+            "--type",
+            "django",
+            "--framework",
+            "vite",
+            "-C",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "cannot both be given" in result.output
+
+
+def test_run_rejects_the_removed_mode_flag(tmp_path) -> None:
+    result = CliRunner().invoke(
+        cli, ["run", "--mode", "host", "-C", str(tmp_path)]
+    )
+
+    assert result.exit_code != 0
+    assert "no such option" in result.output.lower()
+
+
+def test_run_accepts_the_deprecated_framework_alias(monkeypatch, tmp_path) -> None:
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "manage.py").touch()
+    monkeypatch.setattr(
+        "localghost.cli.execute", lambda *args, **kwargs: pytest.fail("ran")
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "run",
+            "--dry-run",
+            "--framework",
+            "django",
+            "--name",
+            "demo",
+            "-C",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "deprecated" in result.output.lower()
+
+
+def test_the_framework_alias_is_hidden_from_help() -> None:
+    result = CliRunner().invoke(cli, ["run", "--help"])
+
+    assert result.exit_code == 0, result.output
+    assert "--type" in result.output
+    assert "--framework" not in result.output
+
+
+def test_run_pins_the_root_with_the_flag(monkeypatch, tmp_path) -> None:
+    root = tmp_path / "backend"
+    root.mkdir()
+    (root / "manage.py").touch()
+    (tmp_path / ".git").mkdir()
+    monkeypatch.setattr(
+        "localghost.cli.execute", lambda *args, **kwargs: pytest.fail("ran")
+    )
+
+    result = CliRunner().invoke(
+        cli, ["run", "--dry-run", "--root", str(root), "-C", str(tmp_path)]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "backend.localhost" in result.output
+
+
+def test_a_pinned_root_without_a_type_errors(tmp_path) -> None:
+    root = tmp_path / "empty"
+    root.mkdir()
+    (tmp_path / ".git").mkdir()
+
+    result = CliRunner().invoke(
+        cli, ["run", "--root", str(root), "-C", str(tmp_path)]
+    )
+
+    assert result.exit_code != 0
+    assert "could not detect a project type" in result.output
+
+
 def test_run_dry_run_prints_plan_without_starting(monkeypatch) -> None:
     plan = RunPlan("demo", "custom", ("echo", "ok"), 3000, "session", "services: {}\n")
-    monkeypatch.setattr("localghost.cli.build_plan", lambda *args: plan)
+    monkeypatch.setattr("localghost.cli.build_plan", lambda *args, **kwargs: plan)
     monkeypatch.setattr(
         "localghost.cli.find_route_collision",
         lambda name: pytest.fail("inspected Docker"),
@@ -351,7 +457,7 @@ def test_run_dry_run_prints_plan_without_starting(monkeypatch) -> None:
 
 def test_run_executes_and_refuses_collision(monkeypatch) -> None:
     plan = RunPlan("demo", "custom", ("echo",), 3000, "session", "services: {}\n")
-    monkeypatch.setattr("localghost.cli.build_plan", lambda *args: plan)
+    monkeypatch.setattr("localghost.cli.build_plan", lambda *args, **kwargs: plan)
     monkeypatch.setattr("localghost.cli.find_route_collision", lambda name: None)
     monkeypatch.setattr("localghost.cli.execute", lambda *args, **kwargs: 0)
     result = CliRunner().invoke(cli, ["run", "--port", "3000", "--", "echo"])
@@ -493,7 +599,7 @@ def test_run_uses_effective_origin_for_django_warning_and_preserves_status(
 ) -> None:
     plan = RunPlan("demo", "django", ("echo",), 3000, "session", "services: {}\n")
     recorded = {}
-    monkeypatch.setattr("localghost.cli.build_plan", lambda *args: plan)
+    monkeypatch.setattr("localghost.cli.build_plan", lambda *args, **kwargs: plan)
     monkeypatch.setattr("localghost.cli.find_route_collision", lambda name: None)
     monkeypatch.setattr("localghost.cli._https_configured", lambda: True)
 
@@ -521,7 +627,7 @@ def test_run_uses_the_requested_application_directory(monkeypatch, tmp_path) -> 
     recorded = {}
     plan = RunPlan("demo", "custom", ("echo",), 3000, "session", "services: {}\n")
 
-    def build(cwd, *args):
+    def build(cwd, *args, **kwargs):
         recorded["build_cwd"] = cwd
         return plan
 
@@ -884,7 +990,7 @@ def test_compose_run_detached_records_a_session(monkeypatch, tmp_path) -> None:
 
     result = CliRunner().invoke(
         cli,
-        ["run", "-C", str(tmp_path), "--mode", "compose", "--name", "demo", "--detach"],
+        ["run", "-C", str(tmp_path), "--type", "compose", "--name", "demo", "--detach"],
     )
 
     assert result.exit_code == 0, result.output
@@ -903,22 +1009,29 @@ def test_compose_run_propagates_a_failure(monkeypatch, tmp_path) -> None:
     )
 
     result = CliRunner().invoke(
-        cli, ["run", "-C", str(tmp_path), "--mode", "compose", "--name", "demo"]
+        cli, ["run", "-C", str(tmp_path), "--type", "compose", "--name", "demo"]
     )
 
     assert result.exit_code == 2
     assert sessions_list() == []
 
 
-def test_compose_run_rejects_host_only_settings(tmp_path) -> None:
+def test_compose_run_rejects_host_only_settings(monkeypatch, tmp_path) -> None:
+    """Compose dispatch has no routing validation yet (a later task adds it),
+    so a host-only setting like --port is simply irrelevant to it rather than
+    rejected."""
     (tmp_path / "compose.yaml").write_text("services: {}\n")
-
-    result = CliRunner().invoke(
-        cli, ["run", "-C", str(tmp_path), "--mode", "compose", "--port", "3000"]
+    monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "localghost.cli.subprocess.run",
+        lambda command, **kwargs: CompletedProcess(command, 0),
     )
 
-    assert result.exit_code != 0
-    assert "Compose mode does not accept" in result.output
+    result = CliRunner().invoke(
+        cli, ["run", "-C", str(tmp_path), "--type", "compose", "--port", "3000"]
+    )
+
+    assert result.exit_code == 0, result.output
 
 
 def test_generate_command_requires_a_port() -> None:
@@ -1022,7 +1135,7 @@ def test_compose_run_starts_the_proxy_and_reports_the_public_url(
     monkeypatch.setattr("localghost.cli.subprocess.run", _run)
 
     result = CliRunner().invoke(
-        cli, ["run", "-C", str(tmp_path), "--mode", "compose", "--name", "demo"]
+        cli, ["run", "-C", str(tmp_path), "--type", "compose", "--name", "demo"]
     )
 
     assert result.exit_code == 0, result.output
@@ -1049,7 +1162,7 @@ def test_run_matches_an_existing_session_started_from_the_project_root(
         project_root=root,
         working_directory=root,
     )
-    monkeypatch.setattr("localghost.cli.build_plan", lambda *args: plan)
+    monkeypatch.setattr("localghost.cli.build_plan", lambda *args, **kwargs: plan)
     monkeypatch.setattr(
         "localghost.cli._run_proxy",
         lambda *args, **kwargs: pytest.fail("started the proxy"),
@@ -1088,7 +1201,7 @@ def test_detached_run_does_not_print_the_foreground_banner(
         project_root=tmp_path,
         working_directory=tmp_path,
     )
-    monkeypatch.setattr("localghost.cli.build_plan", lambda *args: plan)
+    monkeypatch.setattr("localghost.cli.build_plan", lambda *args, **kwargs: plan)
     monkeypatch.setattr("localghost.cli.find_route_collision", lambda name: None)
     monkeypatch.setattr("localghost.cli._detach_host", lambda *args: None)
 

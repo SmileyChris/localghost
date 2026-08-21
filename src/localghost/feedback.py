@@ -133,7 +133,7 @@ def warning(title: str, messages: Iterable[str]) -> None:
 
 def run_plan(
     *,
-    framework: str,
+    type: str,
     command: tuple[str, ...],
     port: int,
     url: str,
@@ -141,7 +141,7 @@ def run_plan(
     project_root: Path | None = None,
     working_directory: Path | None = None,
 ) -> None:
-    rows = [("Framework", framework)]
+    rows = [("Type", type)]
     if project_root:
         rows.append(("Project root", str(project_root)))
     if working_directory and working_directory != project_root:

@@ -8,7 +8,6 @@ from localghost import cli as cli_module
 from localghost import sessions as session_store
 from localghost.config import (
     RunConfig,
-    detect_mode,
     load_config,
     render_run_config,
     write_run_config,
@@ -25,54 +24,26 @@ def test_config_loads_argv_and_preserves_other_tables(tmp_path: Path):
     config = load_config(path)
     assert config.port == 8080
     assert config.command == ("./server", "--port", "{port}")
-    rendered = render_run_config(RunConfig(mode="host", port=9000), path.read_text())
+    rendered = render_run_config(RunConfig(type="compose", port=9000), path.read_text())
     assert 'label = "keep"' in rendered
     assert "port = 9000" in rendered
-
-
-def test_mode_detection_is_conservative(tmp_path: Path):
-    (tmp_path / "compose.yaml").touch()
-    assert detect_mode(tmp_path) == "compose"
-    (tmp_path / "manage.py").touch()
-    with pytest.raises(click.ClickException, match="both Compose"):
-        detect_mode(tmp_path)
-    assert detect_mode(tmp_path, command=("./server",)) == "host"
-
-
-def test_mode_detection_finds_php_frameworks(tmp_path: Path):
-    (tmp_path / ".git").mkdir()
-    (tmp_path / "artisan").touch()
-    (tmp_path / "composer.json").write_text(
-        '{"require": {"laravel/framework": "^11.0"}}'
-    )
-
-    assert detect_mode(tmp_path) == "host"
-
-
-def test_mode_detection_walks_up_to_the_project_root(tmp_path: Path):
-    (tmp_path / ".git").mkdir()
-    (tmp_path / "manage.py").touch()
-    nested = tmp_path / "accounts" / "migrations"
-    nested.mkdir(parents=True)
-
-    assert detect_mode(nested) == "host"
 
 
 def test_config_update_requires_extend_noninteractive_and_backups(tmp_path: Path):
     path = tmp_path / ".localghost.toml"
     path.write_text('[other]\nvalue = "keep"\n')
     with pytest.raises(click.ClickException, match="--extend"):
-        write_run_config(path, RunConfig(mode="host"))
-    backup = write_run_config(path, RunConfig(mode="host"), extend=True)
+        write_run_config(path, RunConfig(type="compose"))
+    backup = write_run_config(path, RunConfig(type="compose"), extend=True)
     assert backup and backup.read_text() == '[other]\nvalue = "keep"\n'
-    assert load_config(path).mode == "host"
+    assert load_config(path).type == "compose"
 
 
 @pytest.mark.parametrize(
     ("content", "message"),
     [
         ('[run]\nmode = "other"\n', "mode"),
-        ('[run]\nframework = "other"\n', "framework"),
+        ('[run]\nframework = "other"\n', "must be"),
         ('[run]\nport = true\n', "port"),
         ('[run]\ncommand = "server --port 80"\n', "argv array"),
         ('[run]\nprot = 8000\n', "unknown"),
@@ -93,7 +64,58 @@ def test_config_accepts_every_framework_the_runner_supports(tmp_path, framework)
     path = tmp_path / ".localghost.toml"
     path.write_text(f'[run]\nframework = "{framework}"\n')
 
-    assert load_config(path).framework == framework
+    assert load_config(path).type == framework
+
+
+@pytest.mark.parametrize("value", ["compose", "django", "cakephp", "php"])
+def test_config_accepts_every_supported_type(tmp_path, value):
+    path = tmp_path / ".localghost.toml"
+    path.write_text(f'[run]\ntype = "{value}"\n')
+
+    assert load_config(path).type == value
+
+
+def test_config_accepts_framework_as_a_deprecated_alias(tmp_path, capsys):
+    path = tmp_path / ".localghost.toml"
+    path.write_text('[run]\nframework = "django"\n')
+
+    config = load_config(path)
+
+    assert config.type == "django"
+    assert "framework" in capsys.readouterr().err
+
+
+def test_config_rejects_mode_with_the_migration(tmp_path):
+    path = tmp_path / ".localghost.toml"
+    path.write_text('[run]\nmode = "compose"\n')
+
+    with pytest.raises(click.ClickException) as error:
+        load_config(path)
+
+    assert 'type = "compose"' in str(error.value)
+
+
+def test_config_rejects_host_mode_with_the_migration(tmp_path):
+    path = tmp_path / ".localghost.toml"
+    path.write_text('[run]\nmode = "host"\n')
+
+    with pytest.raises(click.ClickException, match="remove the key"):
+        load_config(path)
+
+
+def test_config_reads_a_root(tmp_path):
+    path = tmp_path / ".localghost.toml"
+    path.write_text('[run]\nroot = "backend"\n')
+
+    assert load_config(path).root == "backend"
+
+
+def test_config_rejects_a_non_string_root(tmp_path):
+    path = tmp_path / ".localghost.toml"
+    path.write_text("[run]\nroot = 5\n")
+
+    with pytest.raises(click.ClickException, match="non-empty string"):
+        load_config(path)
 
 
 def test_config_reports_unreadable_toml(tmp_path):
@@ -124,17 +146,10 @@ def test_missing_config_is_empty(tmp_path):
     assert load_config(tmp_path / "absent.toml") == RunConfig()
 
 
-def test_mode_detection_reports_an_undetectable_directory(tmp_path):
-    (tmp_path / ".git").mkdir()
-
-    with pytest.raises(click.ClickException, match="could not detect a run mode"):
-        detect_mode(tmp_path)
-
-
 def test_writing_a_new_config_makes_no_backup(tmp_path):
     path = tmp_path / ".localghost.toml"
 
-    assert write_run_config(path, RunConfig(mode="host", port=3000)) is None
+    assert write_run_config(path, RunConfig(type="compose", port=3000)) is None
     assert load_config(path).port == 3000
 
 
@@ -151,7 +166,7 @@ def test_repeated_writes_rotate_backups(tmp_path):
 
 def test_rendered_config_escapes_control_characters(tmp_path):
     rendered = render_run_config(
-        RunConfig(mode="host", command=("server", "line\nvalue"))
+        RunConfig(type="compose", command=("server", "line\nvalue"))
     )
     path = tmp_path / ".localghost.toml"
     path.write_text(rendered)

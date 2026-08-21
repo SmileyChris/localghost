@@ -31,7 +31,7 @@ from .generator import (
 @dataclass(frozen=True)
 class RunPlan:
     name: str
-    framework: str
+    type: str
     command: tuple[str, ...]
     port: int
     project: str
@@ -114,6 +114,8 @@ def build_plan(
     framework: str | None,
     port: int | None,
     command: tuple[str, ...],
+    *,
+    pinned: Path | None = None,
 ) -> RunPlan:
     cwd = cwd.resolve()
     if command:
@@ -121,27 +123,41 @@ def build_plan(
         working_directory = cwd
         if port is None:
             raise click.ClickException("a custom command requires --port")
-        selected_framework = "custom"
+        selected_type = "custom"
         selected_port = select_port(port, strict=True)
         selected_command = tuple(
             part.replace("{port}", str(selected_port)) for part in command
         )
     else:
-        selected_framework, project_root = discover_type(cwd, framework)
+        if pinned is not None:
+            detected = [item for item in _types_at(pinned) if item in RUN_TYPES]
+            if framework is not None and framework in detected:
+                selected_type, project_root = framework, pinned
+            elif framework is None and len(detected) == 1:
+                selected_type, project_root = detected[0], pinned
+            elif framework is None and not detected:
+                raise click.ClickException(
+                    f"could not detect a project type from '{pinned}'; provide "
+                    "--type, or a command after -- together with --port"
+                )
+            else:
+                selected_type, project_root = discover_type(pinned, framework)
+        else:
+            selected_type, project_root = discover_type(cwd, framework)
         working_directory = project_root
-        if selected_framework == "django":
+        if selected_type == "django":
             default_port, selected_command = django_command(project_root, port)
-        elif selected_framework == "vite":
+        elif selected_type == "vite":
             default_port, selected_command = vite_command(project_root, port)
-        elif selected_framework == "astro":
+        elif selected_type == "astro":
             default_port, selected_command = astro_command(project_root, port)
-        elif selected_framework == "cakephp":
+        elif selected_type == "cakephp":
             default_port, selected_command, working_directory = cakephp_command(
                 project_root, port
             )
-        elif selected_framework == "laravel":
+        elif selected_type == "laravel":
             default_port, selected_command = laravel_command(project_root, port)
-        elif selected_framework == "php":
+        elif selected_type == "php":
             default_port, selected_command, working_directory = php_command(
                 project_root, port
             )
@@ -156,7 +172,7 @@ def build_plan(
     project = _session_project(project_root)
     return RunPlan(
         public_name,
-        selected_framework,
+        selected_type,
         selected_command,
         selected_port,
         project,
@@ -166,19 +182,6 @@ def build_plan(
         project_root,
         working_directory,
     )
-
-
-def host_project_root(cwd: Path) -> Path | None:
-    """Return the nearest application root, or None when none is detected.
-
-    Unlike `discover_type` this never raises: mode detection only needs to
-    know whether a host application exists, and an ambiguous root is reported
-    later with type-specific guidance.
-    """
-    for candidate in _search_path(cwd.resolve()):
-        if _host_types_at(candidate):
-            return candidate
-    return None
 
 
 def discover_type(
@@ -339,15 +342,6 @@ def _types_at(cwd: Path) -> list[str]:
     if php is not None:
         detected.append(php)
     return detected
-
-
-def _host_types_at(cwd: Path) -> list[str]:
-    """Detected types that run as a host process.
-
-    A stopgap while `config.detect_mode` still exists; Task 4 replaces it
-    with per-command filtering in `discover_type`.
-    """
-    return [item for item in _types_at(cwd) if item not in ("compose", "dockerfile")]
 
 
 def django_command(
@@ -723,7 +717,7 @@ def django_settings_warnings(
     plan: RunPlan, cwd: Path, *, public_origin: str | None = None
 ) -> list[str]:
     """Return advisory warnings from Django's loaded settings, if available."""
-    if plan.framework != "django":
+    if plan.type != "django":
         return []
     command = [
         *plan.command[:-2],
