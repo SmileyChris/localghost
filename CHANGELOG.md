@@ -8,13 +8,29 @@ uses [Semantic Versioning](https://semver.org/).
 ### Breaking
 
 - `generate --mode dockerfile|host` is replaced by `generate --type`, which
-  accepts the specific generatable type (`compose`, `dockerfile`, `django`,
-  `vite`, `astro`, `cakephp`, `laravel`, `php`) instead of the generic `host`.
-- `run --framework` is renamed to `run --type` (same values). `--framework`
-  keeps working as a hidden, deprecated alias that prints a warning.
+  accepts the specific generatable type (`dockerfile`, `django`, `vite`,
+  `astro`, `cakephp`, `laravel`, `php`) instead of the generic `host`.
+  `compose` is not a valid `generate --type` value: a Compose file is either
+  already present, in which case it is detected automatically, or absent, in
+  which case one is created from `--type dockerfile`.
+- `run --framework` is renamed to `run --type`, now spanning seven values
+  (`compose`, `django`, `vite`, `astro`, `cakephp`, `laravel`, `php`) rather
+  than the original three. `--framework` keeps working as a hidden,
+  deprecated alias that prints a warning.
 - A directory containing both a Compose file and a host framework now errors
   and asks for `--type` instead of silently picking one. Previously it ran
   as a host application.
+- The new peer types can make a previously-unambiguous project ambiguous.
+  The most common case: a default Laravel 11 scaffold — `laravel/framework`
+  and `artisan` alongside the stock `package.json`'s Vite dev script — now
+  detects as both `laravel` and `vite` and errors asking for `--type`, where
+  1.2.0 silently ran it as `vite`. Any directory carrying markers for more
+  than one recognized type needs the same disambiguation.
+- `generate` no longer falls back to a host bridge when it cannot detect a
+  project type and no `--type` is given; it now errors and asks for `--type`
+  explicitly. A `generate --no-input --port N` invocation (for example in a
+  CI script) that relied on the implicit `host` default in an unrecognized
+  directory now fails instead of writing a host-bridge `compose.yaml`.
 
 ### Added
 

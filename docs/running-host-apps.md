@@ -86,7 +86,7 @@ command = ["./server", "--port", "{port}"]
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `type` | one of the eight project types | Resolves otherwise ambiguous detection, exactly like `--type`. Detected when omitted. Setting `type = "compose"` also skips the routing check described above. |
+| `type` | one of the seven types `run --type` accepts (not `dockerfile`, which is generate-only) | Resolves otherwise ambiguous detection, exactly like `--type`. Detected when omitted. Setting `type = "compose"` also skips the routing check described above. |
 | `name` | string | Public name, serving the app at `NAME.localhost`. Defaults to the project root's name. |
 | `root` | path, relative to the config file | Treat this directory as the project root instead of searching. See [Project root and configuration discovery](#project-root-and-configuration-discovery). |
 | `port` | integer, 1–65535 | Host HTTP port. The type's default is used when omitted. |

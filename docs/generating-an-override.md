@@ -118,9 +118,11 @@ duplicated, or not the hostname you want.
 ## Projects without Compose
 
 The same command provides a guided path when the current directory has no
-Compose file, generating for any of the eight project types:
-`compose` (only meaningful when a Compose file already exists), `dockerfile`,
-`django`, `vite`, `astro`, `cakephp`, `laravel`, and `php`:
+Compose file, generating for any of the seven project types: `dockerfile`,
+`django`, `vite`, `astro`, `cakephp`, `laravel`, and `php`. `compose` is not
+a valid `--type` here — a Compose file is either already present, in which
+case it's detected automatically and this guided path doesn't apply, or
+absent, in which case one is created from `--type dockerfile`:
 
 ```sh
 uvx localghost generate
@@ -153,8 +155,8 @@ take that type's default port without prompting:
 | `cakephp` | 8765 |
 | `php` | 8080 |
 
-`compose` and `dockerfile` have no default port: the port comes from the
-Compose model, or is prompted for.
+`dockerfile` has no default port: the port comes from the Compose model, or
+is prompted for.
 
 ```sh
 uvx localghost generate --type php --port 3000
