@@ -190,8 +190,31 @@ def test_down_stops_the_bundled_proxy(monkeypatch) -> None:
     result = runner.invoke(cli, ["down"])
 
     assert result.exit_code == 0, result.output
-    assert commands[0][0][6:] == ["down"]
+    assert commands[0][0][-1] == "down"
+    assert commands[0][0][:4] == ["docker", "compose", "--project-name", "localghost"]
     assert "Hub stopped and removed." in result.output
+
+
+def test_down_also_removes_the_profiled_bootstrap_container(monkeypatch) -> None:
+    """`down` must clear the one-shot bootstrap service too.
+
+    It sits behind `profiles: [bootstrap]`, so a plain `down` leaves its
+    exited container behind and Docker still reports the `localghost` project
+    as existing — which silently blocks the integration suite's precondition.
+    """
+    commands = []
+
+    def run(command, **kwargs):
+        commands.append(command)
+        return CompletedProcess(command, 0)
+
+    monkeypatch.setattr("localghost.cli.subprocess.run", run)
+
+    result = CliRunner().invoke(cli, ["down"])
+
+    assert result.exit_code == 0, result.output
+    down = next(item for item in commands if item[-1] == "down")
+    assert "--profile" in down and "bootstrap" in down
 
 
 def test_trust_configures_a_stopped_proxy_without_starting_it(

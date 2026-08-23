@@ -84,6 +84,12 @@ uses [Semantic Versioning](https://semver.org/).
 - Dry-run and run summaries show the detected project root and, when different,
   the application process working directory.
 
+### Fixed
+
+- `localghost down` now also removes the profile-gated `bootstrap` one-shot
+  container. It previously stayed behind, so Docker still reported the
+  `localghost` Compose project as existing.
+
 ## [1.2.0] - 2026-08-17
 
 ### Fixed

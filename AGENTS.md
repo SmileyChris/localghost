@@ -35,6 +35,13 @@ and 18080 are free. Do not weaken its cleanup or isolation checks. For package
 changes, also run `uv build --no-sources` and
 `uvx --from . localghost --help`.
 
+The suite tears the hub down with `--volumes`, so it destroys the CA volumes
+along with everything else named `localghost`. On a machine with trusted HTTPS
+configured that leaves the hub unable to start until `localghost trust` runs
+again, so the suite refuses to begin in that state. Point `LOCALGHOST_STATE_DIR`
+at a scratch directory to leave your own trust configuration alone, or set
+`LOCALGHOST_ACCEPT_CA_RESET=1` to accept the reset.
+
 Treat changes to fixed names, hostnames, labels, or lifecycle commands as
 potentially breaking and update compatibility docs and tests. Follow
 `docs/development.md` for releases.

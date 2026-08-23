@@ -700,6 +700,11 @@ def _run_proxy(
         ]
         if https_enabled:
             command[6:6] = ["--file", str(resource_root / "proxy_compose_https.yaml")]
+        if action == "down":
+            # `bootstrap` sits behind a profile, so a plain `down` leaves its
+            # exited container behind and Docker still reports the project as
+            # existing.
+            command[-1:-1] = ["--profile", "bootstrap"]
         if action == "up":
             command.extend(["--detach", "--wait", "--wait-timeout", "60"])
             if force_recreate:

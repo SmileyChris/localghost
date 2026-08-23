@@ -191,6 +191,27 @@ command -v uv >/dev/null || fail 'uv is required'
 docker compose version >/dev/null || fail 'Docker Compose is required'
 docker info >/dev/null || fail 'A running Docker daemon is required'
 
+# This suite tears the shared hub down with `--volumes`, which deletes the CA
+# volumes along with everything else named `localghost`. That is fine on CI and
+# on a fresh machine, but on a workstation with trusted HTTPS configured it
+# leaves the hub unable to start until the root is bootstrapped again. Check
+# this before the resource guards below, so the surprising consequence is the
+# first thing reported rather than the second round trip.
+localghost_state_dir() {
+  if [[ -n ${LOCALGHOST_STATE_DIR:-} ]]; then
+    printf '%s\n' "${LOCALGHOST_STATE_DIR}"
+  else
+    printf '%s\n' "${XDG_STATE_HOME:-${HOME}/.local/state}/localghost"
+  fi
+}
+if [[ -f "$(localghost_state_dir)/https-enabled" && -z ${LOCALGHOST_ACCEPT_CA_RESET:-} ]]; then
+  fail "trusted HTTPS is configured on this machine, and this suite deletes the
+  localghost CA volumes; the hub will not start again until you run
+  'localghost trust'. Re-run with LOCALGHOST_ACCEPT_CA_RESET=1 to proceed
+  anyway, or point LOCALGHOST_STATE_DIR at a scratch directory to leave your
+  own trust configuration untouched"
+fi
+
 for project in localghost "${PROJECT_A}" "${PROJECT_B}" "${HOST_PROJECT}" \
   "${DOCKERFILE_PROJECT}"; do
   if [[ -n $(docker ps -aq --filter "label=com.docker.compose.project=${project}") ]]; then
@@ -200,6 +221,7 @@ done
 if docker network inspect localghost >/dev/null 2>&1; then
   fail "Docker network 'localghost' already exists; remove it before running this destructive integration test"
 fi
+
 OWNS_RESOURCES=1
 
 log 'Validate Compose files'
