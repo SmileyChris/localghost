@@ -1900,3 +1900,64 @@ def test_detached_start_failure_removes_bridge(monkeypatch, tmp_path, cli_module
         cli_module._detach_host(plan, tmp_path)
 
     assert calls == [("start", plan), ("stop", plan)]
+
+
+def test_compose_run_honours_compose_project_name_from_dotenv(
+    monkeypatch, tmp_path
+) -> None:
+    """`.env` must win over the directory name, as it does for `generate`.
+
+    Otherwise `localghost run --type compose` and a plain `docker compose up`
+    build two different projects from the same directory.
+    """
+    (tmp_path / "compose.yaml").write_text("services: {}\n")
+    (tmp_path / ".env").write_text("COMPOSE_PROJECT_NAME=custom-name\n")
+    monkeypatch.delenv("COMPOSE_PROJECT_NAME", raising=False)
+    monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "localghost.cli.resolve_compose",
+        lambda files, **kwargs: {
+            "networks": {"localghost": {}},
+            "services": {"web": {"labels": {"traefik.enable": "true"},
+                                 "networks": {"localghost": None}}},
+        },
+    )
+
+    result = CliRunner().invoke(
+        cli, ["run", "-C", str(tmp_path), "--type", "compose", "--dry-run"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "custom-name" in result.output
+    assert tmp_path.name not in result.output
+
+
+def test_compose_run_honours_compose_project_name_from_the_environment(
+    monkeypatch, tmp_path
+) -> None:
+    (tmp_path / "compose.yaml").write_text("services: {}\n")
+    monkeypatch.setenv("COMPOSE_PROJECT_NAME", "from-env")
+    commands = []
+    monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "localghost.cli.resolve_compose",
+        lambda files, **kwargs: {
+            "networks": {"localghost": {}},
+            "services": {"web": {"labels": {"traefik.enable": "true"},
+                                 "networks": {"localghost": None}}},
+        },
+    )
+
+    def _run(command, **kwargs):
+        commands.append(command)
+        return CompletedProcess(command, 0)
+
+    monkeypatch.setattr("localghost.cli.subprocess.run", _run)
+
+    result = CliRunner().invoke(
+        cli, ["run", "-C", str(tmp_path), "--type", "compose"]
+    )
+
+    assert result.exit_code == 0, result.output
+    up = next(item for item in commands if item[-1] == "up")
+    assert up[:4] == ["docker", "compose", "--project-name", "from-env"]

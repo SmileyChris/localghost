@@ -448,7 +448,7 @@ def run(
                 "owns them"
             )
         compose_root = resolved_root or pinned or cwd
-        project = name or compose_root.name
+        project = name or _local_project_name(compose_root)
         trusted = settings.type == "compose"
         if not trusted:
             _check_compose_routing(compose_root, project)
@@ -575,7 +575,10 @@ def _check_compose_routing(compose_root: Path, project: str) -> None:
 
 
 def _run_compose(cwd: Path, name: str | None, detach: bool) -> None:
-    project = name or cwd.name
+    # Same precedence generate uses -- COMPOSE_PROJECT_NAME, then .env, then
+    # the directory -- so this and a plain `docker compose up` agree on the
+    # project rather than building two stacks from one directory.
+    project = name or _local_project_name(cwd)
     title()
     # The hub has to be reconciled before the application comes up, otherwise
     # a foreground `compose up` blocks before anything can route to it.

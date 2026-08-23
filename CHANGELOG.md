@@ -3,6 +3,17 @@
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 
+## [2.0.1] - 2026-08-24
+
+### Fixed
+
+- `localghost run` on a Compose project now derives the project name the same
+  way `generate` does — `COMPOSE_PROJECT_NAME`, then a `.env` file, then the
+  directory — instead of always using the directory name. It previously forced
+  its own name onto `docker compose`, so `localghost run` and a plain
+  `docker compose up` built two different projects from one directory and
+  ignored the name the project had configured for itself.
+
 ## [2.0.0] - 2026-08-21
 
 ### Breaking
