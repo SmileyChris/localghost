@@ -87,9 +87,14 @@ replace application logs when a backend itself is failing.
 uvx localghost down
 ```
 
-Compose removes the hub container and attempts to remove its network. Docker
-will retain the network if running consumer containers still have endpoints on
-it. Stop those applications before removing the shared network completely.
+Compose removes the hub container, the one-shot `bootstrap` container that mints
+the CA, and attempts to remove the network. Docker will retain the network if
+running consumer containers still have endpoints on it. Stop those applications
+before removing the shared network completely.
+
+The `bootstrap` container sits behind a Compose profile, so `down` passes
+`--profile bootstrap` to reach it. Without that it stayed behind after `down`,
+and Docker went on reporting the `localghost` project as existing.
 
 `down` deliberately preserves the `localghost_localghost-ca-root` and
 `localghost_localghost-ca-signer` Docker volumes. This keeps the same trusted

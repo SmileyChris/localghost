@@ -81,6 +81,14 @@ Projects may keep repeatable run settings in `.localghost.toml`:
 type = "django"
 name = "my-app"
 port = 8080
+```
+
+Or, to run something other than the type's own server:
+
+```toml
+[run]
+name = "my-app"
+port = 8080
 command = ["./server", "--port", "{port}"]
 ```
 
@@ -89,8 +97,12 @@ command = ["./server", "--port", "{port}"]
 | `type` | one of the seven types `run --type` accepts (not `dockerfile`, which is generate-only) | Resolves otherwise ambiguous detection, exactly like `--type`. Detected when omitted. Setting `type = "compose"` also skips the routing check described above. |
 | `name` | string | Public name, serving the app at `NAME.localhost`. Defaults to the project root's name. |
 | `root` | path, relative to the config file | Treat this directory as the project root instead of searching. See [Project root and configuration discovery](#project-root-and-configuration-discovery). |
-| `port` | integer, 1–65535 | Host HTTP port. The type's default is used when omitted. |
+| `port` | integer, 1–65535 | Host HTTP port. The type's default is used when omitted, except alongside `command`, where it is required. |
 | `command` | array of strings | Argv to run instead of the type's own server. `{port}` is replaced with the selected port. |
+
+Setting `command` makes the run a custom one: the type is reported as `custom`,
+`type` has no effect, and `port` becomes required because there is no framework
+default to fall back on. Set one or the other, not both.
 
 Every key is optional, and an unrecognised key is an error rather than being
 ignored — a misspelled setting fails loudly instead of silently doing

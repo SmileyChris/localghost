@@ -129,7 +129,10 @@ uvx localghost generate
 ```
 
 Type is detected the same way `run` detects it, searching upward to the
-nearest project root. Pass `--type` to skip detection or resolve an
+nearest project root. **The output is written at that detected root, not
+necessarily the directory you ran from** — so running from a nested source
+directory writes the Compose file beside the project's own markers rather than
+beside your working file. Pass `--type` to skip detection or resolve an
 ambiguity — for example a directory holding both a `Dockerfile` and a
 framework root:
 

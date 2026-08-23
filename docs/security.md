@@ -5,7 +5,7 @@ production security design and should not be exposed to a LAN or the internet.
 
 ## Current safeguards
 
-The v1 configuration reduces accidental exposure by:
+The shipped configuration reduces accidental exposure by:
 
 - publishing HTTP only on `127.0.0.1`;
 - leaving Traefik's insecure API mode disabled;
@@ -21,7 +21,7 @@ the Docker API or an untrusted container safe.
 
 ## Docker socket access
 
-Traefik needs Docker metadata and events for label-based discovery. V1 mounts
+Traefik needs Docker metadata and events for label-based discovery. Localghost mounts
 `/var/run/docker.sock` read-only into the Traefik container.
 
 Read-only is a filesystem mount property, not a complete authorization boundary
@@ -32,7 +32,7 @@ trust problem.
 
 Only run reviewed Traefik versions on machines where every user able to modify
 Docker container labels or images is already trusted. A restricted Docker
-socket proxy is a possible future hardening layer, but v1 does not promise one.
+socket proxy is a possible future hardening layer, but localghost does not promise one.
 
 ## Package trust
 
@@ -90,9 +90,9 @@ trust --remove` are not complete data removal. Follow the
 [complete-removal procedure](operations.md#stop-and-remove) after removing the
 public root from host trust stores.
 
-## Out of scope for v1
+## Out of scope
 
-V1 does not include public ACME, non-`.localhost` certificates, authentication
+Localghost does not include public ACME, non-`.localhost` certificates, authentication
 for the dashboard, or a restricted socket proxy. The CLI's scaffolding is
 limited to local Compose integration.
 

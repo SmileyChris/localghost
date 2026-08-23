@@ -62,6 +62,15 @@ The suite is destructive only to Docker resources named `localghost`,
 already exist and cleans up resources it creates even after failure. Ports 80,
 18080, 18443, and 19090 must be available.
 
+**It also destroys the CA volumes.** Teardown runs with `--volumes`, and the
+volumes holding the bootstrapped root are named `localghost` like everything
+else. On a machine with trusted HTTPS configured that leaves the hub unable to
+start — it crash-loops on a missing bootstrapped root — until `localghost trust`
+runs again. The suite therefore refuses to begin in that state. Either point
+`LOCALGHOST_STATE_DIR` at a scratch directory, which leaves your own trust
+configuration untouched, or set `LOCALGHOST_ACCEPT_CA_RESET=1` to accept the
+reset and re-bootstrap afterwards.
+
 Coverage includes:
 
 - validation and hub-first external-network failure;
@@ -86,6 +95,9 @@ TEST_ALTERNATE_PORT=18082 \
 TEST_HTTPS_PORT=18444 \
 ./scripts/integration-test.sh
 ```
+
+`LOCALGHOST_STATE_DIR` and `LOCALGHOST_ACCEPT_CA_RESET` control the trust
+guard described above.
 
 CI should retain the default port-80 run because loopback publication on the
 public default is part of the release contract.
