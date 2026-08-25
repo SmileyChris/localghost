@@ -1,3 +1,4 @@
+import contextlib
 import json
 import socket
 from pathlib import Path
@@ -1314,3 +1315,112 @@ def test_laravel_outranks_generic_php_found_first_in_its_public_dir(tmp_path):
     (public / "index.php").touch()
 
     assert runner.discover_type(public) == ("laravel", root)
+
+
+def _pin_recorder(monkeypatch):
+    """Record how `execute` drives the status bar, without touching a tty."""
+    calls = {}
+
+    @contextlib.contextmanager
+    def fake_pinned(url, *, stream=None, enabled=True, probe=None):
+        calls["url"] = url
+        calls["enabled"] = enabled
+        calls["probe"] = probe
+        calls["closed"] = False
+        try:
+            yield object()
+        finally:
+            calls["closed"] = True
+
+    monkeypatch.setattr(runner.statusbar, "pinned", fake_pinned)
+    return calls
+
+
+def test_execute_pins_the_public_origin_while_the_child_runs(monkeypatch):
+    monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
+    monkeypatch.setattr(runner, "stop_bridge", lambda plan: None)
+    calls = _pin_recorder(monkeypatch)
+
+    class Child:
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *args, **kwargs: Child())
+    plan = runner.RunPlan("demo", "custom", ("x",), 4321, "p", "")
+
+    assert (
+        runner.execute(plan, lambda: None, public_origin="http://demo.localhost") == 0
+    )
+    assert calls["url"] == "http://demo.localhost"
+    assert calls["closed"] is True
+
+
+def test_execute_probes_the_planned_port_for_readiness(monkeypatch):
+    monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
+    monkeypatch.setattr(runner, "stop_bridge", lambda plan: None)
+    calls = _pin_recorder(monkeypatch)
+    probed = {}
+
+    def fake_tcp_probe(port, *args, **kwargs):
+        probed["port"] = port
+        return lambda: True
+
+    monkeypatch.setattr(runner.statusbar, "tcp_probe", fake_tcp_probe)
+
+    class Child:
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *args, **kwargs: Child())
+    plan = runner.RunPlan("demo", "custom", ("x",), 4321, "p", "")
+
+    runner.execute(plan, lambda: None, public_origin="http://demo.localhost")
+
+    assert probed["port"] == 4321
+    assert calls["probe"] is not None
+
+
+def test_execute_releases_the_status_bar_when_interrupted(monkeypatch):
+    monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
+    monkeypatch.setattr(runner, "stop_bridge", lambda plan: None)
+    calls = _pin_recorder(monkeypatch)
+
+    class Child:
+        pid = 4321
+        waits = 0
+
+        def wait(self):
+            # Only the first wait is interrupted; the second is the one
+            # `execute` itself makes while reaping the terminated child.
+            Child.waits += 1
+            if Child.waits == 1:
+                raise KeyboardInterrupt
+            return 0
+
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *args, **kwargs: Child())
+    monkeypatch.setattr(runner, "_terminate_process_tree", lambda child, signum: None)
+    plan = runner.RunPlan("demo", "custom", ("x",), 4321, "p", "")
+
+    runner.execute(plan, lambda: None, public_origin="http://demo.localhost")
+
+    # Leaving the region set would hand the shell a half-scrolling terminal.
+    assert calls["closed"] is True
+
+
+def test_execute_can_be_told_not_to_pin(monkeypatch):
+    monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
+    monkeypatch.setattr(runner, "stop_bridge", lambda plan: None)
+    calls = _pin_recorder(monkeypatch)
+
+    class Child:
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *args, **kwargs: Child())
+    plan = runner.RunPlan("demo", "custom", ("x",), 4321, "p", "")
+
+    runner.execute(
+        plan, lambda: None, public_origin="http://demo.localhost", status_bar=False
+    )
+
+    assert calls["enabled"] is False

@@ -162,6 +162,35 @@ does not walk at all without one. A stray `~/package.json` therefore cannot
 be adopted as a project's type, and a forgotten `~/.localghost.toml` cannot
 be adopted as its config.
 
+### The status bar
+
+A foreground `localghost run` pins the public URL to the bottom row of the
+terminal, so it stays visible while the application's own output scrolls
+above it:
+
+```
+ localghost  ⠹ starting  https://my-django-project.localhost   Ctrl+C to stop
+```
+
+The spinner and the dimmed URL mean the application is not answering yet.
+Localghost probes it — a host application on its port, a Compose project
+through the route itself — and the bar switches to a solid URL once the first
+probe succeeds, so the bar doubles as the readiness signal rather than
+inviting a click that would return a gateway error.
+
+The bar is drawn with a terminal scrolling region that covers every row except
+the last, which leaves the terminal's own scrollback intact: scrolling up
+still reaches everything the application printed. This holds inside terminal
+multiplexers as well — it has been checked against VTE-based terminals, tmux,
+and zellij, in each case reaching the first line the application printed. It is skipped when output is
+not a terminal, when `TERM` is unset or `dumb`, when the window is narrower
+than 40 columns, and on `--detach` and `--dry-run` runs. Pass
+`--no-status-bar` to turn it off:
+
+```sh
+localghost run --no-status-bar
+```
+
 ### Detached runs
 
 `--detach` records the process outside the project directory and keeps its

@@ -19,6 +19,7 @@ from pathlib import Path
 import click
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
+from . import statusbar
 from .feedback import info, warning
 from .generator import (
     DNS_SAFE_PROJECT,
@@ -681,7 +682,12 @@ def _compose(plan: RunPlan, action: list[str]) -> None:
 
 
 def execute(
-    plan: RunPlan, start_proxy: Callable[[], None], *, cwd: Path | None = None
+    plan: RunPlan,
+    start_proxy: Callable[[], None],
+    *,
+    cwd: Path | None = None,
+    public_origin: str | None = None,
+    status_bar: bool = True,
 ) -> int:
     bridge_attempted = False
     child: subprocess.Popen[bytes] | None = None
@@ -692,17 +698,24 @@ def execute(
         start_proxy()
         bridge_attempted = True
         start_bridge(plan)
-        try:
-            child = subprocess.Popen(
-                list(plan.command),
-                cwd=plan.working_directory or cwd or Path.cwd(),
-                start_new_session=True,
-            )
-        except OSError as exc:
-            raise click.ClickException(
-                f"could not start application command: {exc}"
-            ) from exc
-        status = child.wait()
+        # The bar covers the child's lifetime only, so hub and bridge
+        # progress above it and teardown below it scroll as normal output.
+        with statusbar.pinned(
+            public_origin or f"http://{plan.name}.localhost",
+            enabled=status_bar and public_origin is not None,
+            probe=statusbar.tcp_probe(plan.port),
+        ):
+            try:
+                child = subprocess.Popen(
+                    list(plan.command),
+                    cwd=plan.working_directory or cwd or Path.cwd(),
+                    start_new_session=True,
+                )
+            except OSError as exc:
+                raise click.ClickException(
+                    f"could not start application command: {exc}"
+                ) from exc
+            status = child.wait()
     except (KeyboardInterrupt, _TerminationSignal) as interrupted:
         signum = (
             signal.SIGINT

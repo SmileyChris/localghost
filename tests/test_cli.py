@@ -1961,3 +1961,44 @@ def test_compose_run_honours_compose_project_name_from_the_environment(
     assert result.exit_code == 0, result.output
     up = next(item for item in commands if item[-1] == "up")
     assert up[:4] == ["docker", "compose", "--project-name", "from-env"]
+
+
+def test_run_passes_the_public_origin_to_the_status_bar(monkeypatch) -> None:
+    plan = RunPlan("demo", "custom", ("echo",), 3000, "session", "services: {}\n")
+    recorded = {}
+    monkeypatch.setattr("localghost.cli.build_plan", lambda *args, **kwargs: plan)
+    monkeypatch.setattr("localghost.cli.find_route_collision", lambda name: None)
+    monkeypatch.setattr("localghost.cli._https_configured", lambda: False)
+
+    def fake_execute(plan, start_proxy, **kwargs):
+        recorded.update(kwargs)
+        return 0
+
+    monkeypatch.setattr("localghost.cli.execute", fake_execute)
+
+    result = CliRunner().invoke(cli, ["run", "--port", "3000", "--", "echo"])
+
+    assert result.exit_code == 0
+    assert recorded["public_origin"] == "http://demo.localhost"
+    assert recorded["status_bar"] is True
+
+
+def test_run_honours_no_status_bar(monkeypatch) -> None:
+    plan = RunPlan("demo", "custom", ("echo",), 3000, "session", "services: {}\n")
+    recorded = {}
+    monkeypatch.setattr("localghost.cli.build_plan", lambda *args, **kwargs: plan)
+    monkeypatch.setattr("localghost.cli.find_route_collision", lambda name: None)
+    monkeypatch.setattr("localghost.cli._https_configured", lambda: False)
+
+    def fake_execute(plan, start_proxy, **kwargs):
+        recorded.update(kwargs)
+        return 0
+
+    monkeypatch.setattr("localghost.cli.execute", fake_execute)
+
+    result = CliRunner().invoke(
+        cli, ["run", "--no-status-bar", "--port", "3000", "--", "echo"]
+    )
+
+    assert result.exit_code == 0
+    assert recorded["status_bar"] is False

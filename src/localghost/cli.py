@@ -18,6 +18,7 @@ from pathlib import Path
 
 import click
 
+from . import statusbar
 from .compose import resolve_compose, routing_problem
 from .config import (
     CONFIG_NAME,
@@ -381,6 +382,12 @@ def _trust_status() -> None:
     is_flag=True,
     help="Print the plan without starting anything.",
 )
+@click.option(
+    "no_status_bar",
+    "--no-status-bar",
+    is_flag=True,
+    help="Do not pin the public URL to the bottom of the terminal.",
+)
 @click.argument("command", nargs=-1, type=click.UNPROCESSED)
 def run(
     name: str | None,
@@ -392,6 +399,7 @@ def run(
     detach: bool,
     config: Path | None,
     dry_run: bool,
+    no_status_bar: bool,
     command: tuple[str, ...],
 ) -> None:
     """Run a configured host or Compose application behind the hub."""
@@ -455,7 +463,7 @@ def run(
         if dry_run:
             compose_dry_run(project=project, url=_proxy_origin(project))
             return
-        _run_compose(compose_root, name, detach)
+        _run_compose(compose_root, name, detach, status_bar=not no_status_bar)
         return
     plan = build_plan(
         pinned or cwd,
@@ -498,6 +506,8 @@ def run(
         plan,
         lambda: _run_proxy("up", https_enabled=_https_configured()),
         cwd=plan.working_directory or cwd,
+        public_origin=_proxy_origin(plan.name),
+        status_bar=not no_status_bar,
     )
     if status:
         raise click.exceptions.Exit(status)
@@ -574,7 +584,9 @@ def _check_compose_routing(compose_root: Path, project: str) -> None:
     )
 
 
-def _run_compose(cwd: Path, name: str | None, detach: bool) -> None:
+def _run_compose(
+    cwd: Path, name: str | None, detach: bool, *, status_bar: bool = True
+) -> None:
     # Same precedence generate uses -- COMPOSE_PROJECT_NAME, then .env, then
     # the directory -- so this and a plain `docker compose up` agree on the
     # project rather than building two stacks from one directory.
@@ -583,11 +595,21 @@ def _run_compose(cwd: Path, name: str | None, detach: bool) -> None:
     # The hub has to be reconciled before the application comes up, otherwise
     # a foreground `compose up` blocks before anything can route to it.
     _run_proxy("up", https_enabled=_https_configured())
-    info(f"Public URL: {_proxy_origin(project)}")
+    public_origin = _proxy_origin(project)
+    info(f"Public URL: {public_origin}")
     command = ["docker", "compose", "--project-name", project, "up"]
     if detach:
         command.append("--detach")
-    result = subprocess.run(command, cwd=cwd, check=False)
+    with statusbar.pinned(
+        public_origin,
+        # A detached `up` returns immediately, so there is no foreground
+        # lifetime for a bar to span.
+        enabled=status_bar and not detach,
+        # Compose owns its own ports, so readiness has to be asked of the
+        # route itself rather than of a port we chose.
+        probe=statusbar.http_probe(public_origin),
+    ):
+        result = subprocess.run(command, cwd=cwd, check=False)
     if result.returncode:
         raise click.exceptions.Exit(result.returncode)
     if detach:
