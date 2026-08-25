@@ -1474,3 +1474,61 @@ def test_execute_pins_before_the_hub_is_reconciled(monkeypatch):
     assert order.index("status:starting") < order.index("child")
     # Teardown output scrolls normally, after the region is released.
     assert order.index("release") < order.index("stop")
+
+
+def _free_port() -> int:
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+    return port
+
+
+def test_execute_warns_when_the_port_is_already_serving(monkeypatch):
+    """Something already on the port means the app is about to fail to bind."""
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+
+    warnings = []
+    monkeypatch.setattr(
+        runner, "warning", lambda title, messages: warnings.append(list(messages))
+    )
+    monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
+    monkeypatch.setattr(runner, "stop_bridge", lambda plan: None)
+
+    class Child:
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *args, **kwargs: Child())
+    plan = runner.RunPlan("demo", "custom", ("x",), port, "p", "")
+
+    try:
+        runner.execute(plan, lambda: None, public_origin="http://demo.localhost")
+    finally:
+        listener.close()
+
+    assert warnings, "expected a warning about the occupied port"
+    assert str(port) in warnings[0][0]
+
+
+def test_execute_is_quiet_when_the_port_is_free(monkeypatch):
+    warnings = []
+    monkeypatch.setattr(
+        runner, "warning", lambda title, messages: warnings.append(list(messages))
+    )
+    monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
+    monkeypatch.setattr(runner, "stop_bridge", lambda plan: None)
+
+    class Child:
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *args, **kwargs: Child())
+    plan = runner.RunPlan("demo", "custom", ("x",), _free_port(), "p", "")
+
+    runner.execute(plan, lambda: None, public_origin="http://demo.localhost")
+
+    assert warnings == []

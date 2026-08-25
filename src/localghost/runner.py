@@ -709,6 +709,19 @@ def execute(
             bridge_attempted = True
             start_bridge(plan)
             bar.status("starting")
+            if statusbar.tcp_probe(plan.port)():
+                # Sampled before the child exists, so this is somebody else.
+                # The application is about to fail to bind, and until it does
+                # the readiness probe cannot tell the squatter apart from a
+                # fast start.
+                warning(
+                    "Port already in use",
+                    [
+                        f"Something is already serving on port {plan.port}; "
+                        "the application may fail to start, and the status "
+                        "bar cannot tell it apart from the application."
+                    ],
+                )
             try:
                 child = subprocess.Popen(
                     list(plan.command),

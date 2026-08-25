@@ -19,6 +19,10 @@ uses [Semantic Versioning](https://semver.org/).
   `--no-status-bar` to disable it; it is skipped automatically when output is
   not a terminal, on `dumb` terminals, in windows under 40 columns, and for
   `--detach` and `--dry-run` runs.
+- `localghost run` now warns when something is already serving on the
+  application's port, sampled before the application is launched. It usually
+  means the application is about to fail to bind, which previously surfaced
+  only as the application's own error.
 
 ## [2.0.1] - 2026-08-24
 

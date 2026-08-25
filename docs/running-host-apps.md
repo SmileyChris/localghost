@@ -182,6 +182,11 @@ through the route itself — and the bar switches to a solid URL once the first
 probe succeeds, so the bar doubles as the readiness signal rather than
 inviting a click that would return a gateway error.
 
+If something is already serving on the application's port when the run
+starts, Localghost says so before launching it. That usually means the
+application is about to fail to bind, and until it does the readiness probe
+cannot tell the existing listener apart from a fast start.
+
 The bar is drawn with a terminal scrolling region that covers every row except
 the last, which leaves the terminal's own scrollback intact: scrolling up
 still reaches everything the application printed. This holds inside terminal
