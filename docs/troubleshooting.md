@@ -149,3 +149,26 @@ For `localghost run`, Django needs its generated `<name>.localhost` in
 `ALLOWED_HOSTS` and, when applicable, CSRF trusted origins. Vite HTTP, HMR, and
 WebSocket traffic use the same bridge; a failed upgrade usually means the host
 server was not listening on the selected Docker-reachable port.
+
+## Terminal only scrolls part of the screen
+
+After a `localghost run` was killed outright — `kill -9`, a crashed terminal
+emulator, an out-of-memory kill — the shell scrolls only its upper rows and a
+stale Localghost status bar sits frozen on the last line.
+
+The status bar reserves the bottom row by setting a terminal scrolling region
+over the rows above it, and releases that region when the run ends. The
+release cannot run when the process is killed without a chance to clean up:
+ordinary exits, `Ctrl+C`, `SIGTERM`, and errors all restore the terminal, but
+nothing survives `SIGKILL`. The terminal is not damaged; it is still holding
+the region.
+
+Release it:
+
+```sh
+printf '\033[r'
+```
+
+`reset` also clears it, at the cost of wiping the screen and its scrollback.
+To avoid the region entirely, run with `--no-status-bar` as described in
+[Running host applications](running-host-apps.md#the-status-bar).
