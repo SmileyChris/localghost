@@ -2002,3 +2002,46 @@ def test_run_honours_no_status_bar(monkeypatch) -> None:
 
     assert result.exit_code == 0
     assert recorded["status_bar"] is False
+
+
+def test_compose_run_pins_before_the_hub_is_reconciled(monkeypatch, tmp_path) -> None:
+    order = []
+
+    import contextlib as _contextlib
+
+    @_contextlib.contextmanager
+    def fake_pinned(url, *, stream=None, enabled=True, probe=None, message="starting"):
+        order.append(f"pin:{message}")
+
+        class Bar:
+            def status(self, text):
+                order.append(f"status:{text}")
+
+        try:
+            yield Bar()
+        finally:
+            order.append("release")
+
+    monkeypatch.setattr("localghost.cli.statusbar.pinned", fake_pinned)
+    monkeypatch.setattr(
+        "localghost.cli._run_proxy", lambda *args, **kwargs: order.append("proxy")
+    )
+    monkeypatch.setattr("localghost.cli._https_configured", lambda: False)
+    monkeypatch.setattr("localghost.cli._check_compose_routing", lambda *a: None)
+
+    def fake_subprocess_run(command, **kwargs):
+        order.append("compose-up")
+        return CompletedProcess(command, 0)
+
+    monkeypatch.setattr("localghost.cli.subprocess.run", fake_subprocess_run)
+    (tmp_path / "compose.yaml").write_text("services: {}\n")
+
+    result = CliRunner().invoke(
+        cli, ["run", "-C", str(tmp_path), "--type", "compose"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert order[0] == "pin:starting hub"
+    assert order.index("pin:starting hub") < order.index("proxy")
+    assert order.index("status:starting") < order.index("compose-up")
+    assert order.index("release") > order.index("compose-up")

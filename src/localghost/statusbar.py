@@ -61,7 +61,13 @@ def _terminal_size() -> tuple[int, int]:
     return size.columns, size.lines
 
 
-def _bar_line(url: str, width: int, *, spinner: str | None = None) -> str:
+def _bar_line(
+    url: str,
+    width: int,
+    *,
+    spinner: str | None = None,
+    message: str = "starting",
+) -> str:
     """Render the bar, budgeted to stay a cell short of the row's width.
 
     Writing the final column can trigger auto-wrap, and a wrap on the last
@@ -69,17 +75,18 @@ def _bar_line(url: str, width: int, *, spinner: str | None = None) -> str:
 
     A `spinner` frame marks the application as still starting: the URL is
     dimmed until it actually answers, so the bar doubles as the readiness
-    signal rather than inviting a click that would 502.
+    signal rather than inviting a click that would 502. `message` names the
+    step being waited on, and is shown only while the spinner is.
     """
     budget = width - 1
     wordmark = " localghost  "
-    status = f"{spinner} starting  " if spinner else ""
+    status = f"{spinner} {message}  " if spinner else ""
     room = budget - len(wordmark) - len(status)
     hint = f"  {_HINT} " if room >= len(url) + len(_HINT) + 3 else ""
     shown = url[: max(0, room - len(hint))] if len(url) + len(hint) > room else url
     padding = " " * max(0, room - len(shown) - len(hint))
     rendered_status = (
-        f"{_fg(MINT)}{spinner}{_RESET} {_DIM}starting{_RESET}  " if spinner else ""
+        f"{_fg(MINT)}{spinner}{_RESET} {_DIM}{message}{_RESET}  " if spinner else ""
     )
     rendered_hint = f"{_DIM}{hint}{_RESET}" if hint else ""
     url_style = _DIM if spinner else _fg(MINT)
@@ -155,10 +162,17 @@ def http_probe(url: str, timeout: float = 1.0) -> Callable[[], bool]:
 class _Bar:
     """Owns the reserved row for the lifetime of a foreground run."""
 
-    def __init__(self, url: str, stream, probe: Callable[[], bool] | None) -> None:
+    def __init__(
+        self,
+        url: str,
+        stream,
+        probe: Callable[[], bool] | None,
+        message: str = "starting",
+    ) -> None:
         self._url = url
         self._stream = stream
         self._probe = probe
+        self._message = message
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._previous_winch: object = None
@@ -187,13 +201,18 @@ class _Bar:
         )
         self._emit(
             f"{_SAVE_CURSOR}\x1b[{height};1H\x1b[2K"
-            f"{_bar_line(self._url, width, spinner=spinner)}"
+            f"{_bar_line(self._url, width, spinner=spinner, message=self._message)}"
             f"{_RESET}{_RESTORE_CURSOR}"
         )
 
     def ready(self) -> None:
         """Mark the application as answering and repaint without the spinner."""
         self.ready_event.set()
+        self.draw()
+
+    def status(self, message: str) -> None:
+        """Name the step now being waited on, without ending the wait."""
+        self._message = message
         self.draw()
 
     def resize(self) -> None:
@@ -259,6 +278,9 @@ class _Disabled:
     def ready(self) -> None:
         pass
 
+    def status(self, message: str) -> None:
+        pass
+
 
 def supported(stream, *, enabled: bool = True) -> bool:
     if not enabled or not getattr(stream, "isatty", lambda: False)():
@@ -276,6 +298,7 @@ def pinned(
     stream=None,
     enabled: bool = True,
     probe: Callable[[], bool] | None = None,
+    message: str = "starting",
 ) -> Iterator[object]:
     """Pin `url` to the last terminal row for the duration of the block.
 
@@ -289,7 +312,7 @@ def pinned(
     if not supported(stream, enabled=enabled):
         yield _Disabled()
         return
-    bar = _Bar(url, stream, probe)
+    bar = _Bar(url, stream, probe, message)
     bar.start()
     try:
         yield bar

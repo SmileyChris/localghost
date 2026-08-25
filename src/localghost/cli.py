@@ -592,11 +592,7 @@ def _run_compose(
     # project rather than building two stacks from one directory.
     project = name or _local_project_name(cwd)
     title()
-    # The hub has to be reconciled before the application comes up, otherwise
-    # a foreground `compose up` blocks before anything can route to it.
-    _run_proxy("up", https_enabled=_https_configured())
     public_origin = _proxy_origin(project)
-    info(f"Public URL: {public_origin}")
     command = ["docker", "compose", "--project-name", project, "up"]
     if detach:
         command.append("--detach")
@@ -608,7 +604,14 @@ def _run_compose(
         # Compose owns its own ports, so readiness has to be asked of the
         # route itself rather than of a port we chose.
         probe=statusbar.http_probe(public_origin),
-    ):
+        message="starting hub",
+    ) as bar:
+        # The hub has to be reconciled before the application comes up,
+        # otherwise a foreground `compose up` blocks before anything can
+        # route to it.
+        _run_proxy("up", https_enabled=_https_configured())
+        info(f"Public URL: {public_origin}")
+        bar.status("starting")
         result = subprocess.run(command, cwd=cwd, check=False)
     if result.returncode:
         raise click.exceptions.Exit(result.returncode)

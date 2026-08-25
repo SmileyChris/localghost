@@ -330,3 +330,45 @@ def test_http_probe_treats_a_refused_connection_as_not_ready():
     server.close()
 
     assert statusbar.http_probe(url)() is False
+
+
+def test_bar_renders_the_step_it_is_waiting_on():
+    drawn = visible(statusbar._bar_line(URL, 80, spinner="⠋", message="starting hub"))
+
+    assert "starting hub" in drawn
+
+
+def test_ready_bar_drops_the_step_message():
+    drawn = visible(statusbar._bar_line(URL, 80, message="starting hub"))
+
+    assert "starting hub" not in drawn
+
+
+def test_a_long_step_message_still_respects_the_width_budget():
+    drawn = statusbar._bar_line(
+        URL, 80, spinner="⠋", message="waiting for something with a very long name"
+    )
+
+    assert len(visible(drawn)) <= 79
+
+
+def test_status_updates_the_step_without_ending_the_loading_state():
+    stream = Stream()
+
+    with statusbar.pinned(
+        URL, stream=stream, probe=lambda: False, message="starting hub"
+    ) as bar:
+        bar.status("starting app")
+        latest = stream.chunks[-1]
+
+    assert "starting app" in visible(latest)
+    assert not bar.ready_event.is_set()
+
+
+def test_disabled_bar_accepts_status_updates():
+    stream = Stream(tty=False)
+
+    with statusbar.pinned(URL, stream=stream) as bar:
+        bar.status("starting app")
+
+    assert stream.text == ""

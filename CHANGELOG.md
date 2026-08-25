@@ -12,7 +12,9 @@ uses [Semantic Versioning](https://semver.org/).
   and letting the application's output scroll it away. The bar starts in a
   loading state and flips to a solid URL once the application answers — a host
   application is probed on its port and a Compose project through its route —
-  so it also reports when the URL is worth clicking. The scrolling region
+  so it also reports when the URL is worth clicking. It is drawn before the
+  hub is reconciled, so the URL is on screen for the slowest part of a cold
+  start, and it names the step being waited on. The scrolling region
   keeps its top margin at row 1, so terminal scrollback is unaffected. Pass
   `--no-status-bar` to disable it; it is skipped automatically when output is
   not a terminal, on `dumb` terminals, in windows under 40 columns, and for

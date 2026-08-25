@@ -695,16 +695,20 @@ def execute(
     cleanup_error: Exception | None = None
     old_handlers = _install_termination_handlers()
     try:
-        start_proxy()
-        bridge_attempted = True
-        start_bridge(plan)
-        # The bar covers the child's lifetime only, so hub and bridge
-        # progress above it and teardown below it scroll as normal output.
+        # Opened before the hub is reconciled: that is the slowest step of a
+        # cold start, and the URL is most wanted while waiting on it. Hub and
+        # bridge progress scroll above the bar; teardown runs after it is
+        # released, so those messages are plain output either way.
         with statusbar.pinned(
             public_origin or f"http://{plan.name}.localhost",
             enabled=status_bar and public_origin is not None,
             probe=statusbar.tcp_probe(plan.port),
-        ):
+            message="starting hub",
+        ) as bar:
+            start_proxy()
+            bridge_attempted = True
+            start_bridge(plan)
+            bar.status("starting")
             try:
                 child = subprocess.Popen(
                     list(plan.command),

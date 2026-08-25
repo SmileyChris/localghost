@@ -1322,13 +1322,19 @@ def _pin_recorder(monkeypatch):
     calls = {}
 
     @contextlib.contextmanager
-    def fake_pinned(url, *, stream=None, enabled=True, probe=None):
+    def fake_pinned(url, *, stream=None, enabled=True, probe=None, message="starting"):
         calls["url"] = url
         calls["enabled"] = enabled
         calls["probe"] = probe
+        calls["message"] = message
         calls["closed"] = False
+
+        class Bar:
+            def status(self, text):
+                calls.setdefault("statuses", []).append(text)
+
         try:
-            yield object()
+            yield Bar()
         finally:
             calls["closed"] = True
 
@@ -1424,3 +1430,47 @@ def test_execute_can_be_told_not_to_pin(monkeypatch):
     )
 
     assert calls["enabled"] is False
+
+
+def test_execute_pins_before_the_hub_is_reconciled(monkeypatch):
+    """The hub reconcile is the slow step, so the bar has to precede it."""
+    order = []
+
+    @contextlib.contextmanager
+    def fake_pinned(url, *, stream=None, enabled=True, probe=None, message="starting"):
+        order.append(f"pin:{message}")
+
+        class Bar:
+            def status(self, text):
+                order.append(f"status:{text}")
+
+        try:
+            yield Bar()
+        finally:
+            order.append("release")
+
+    monkeypatch.setattr(runner.statusbar, "pinned", fake_pinned)
+    monkeypatch.setattr(runner, "start_bridge", lambda plan: order.append("bridge"))
+    monkeypatch.setattr(runner, "stop_bridge", lambda plan: order.append("stop"))
+
+    class Child:
+        def wait(self):
+            order.append("child")
+            return 0
+
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *args, **kwargs: Child())
+    plan = runner.RunPlan("demo", "custom", ("x",), 4321, "p", "")
+
+    runner.execute(
+        plan,
+        lambda: order.append("proxy"),
+        public_origin="http://demo.localhost",
+    )
+
+    assert order[0] == "pin:starting hub"
+    assert order.index("pin:starting hub") < order.index("proxy")
+    # The bar names the hub step first, then switches to the application.
+    assert order.index("proxy") < order.index("status:starting")
+    assert order.index("status:starting") < order.index("child")
+    # Teardown output scrolls normally, after the region is released.
+    assert order.index("release") < order.index("stop")

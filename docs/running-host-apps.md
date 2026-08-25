@@ -169,8 +169,12 @@ terminal, so it stays visible while the application's own output scrolls
 above it:
 
 ```
- localghost  ⠹ starting  https://my-django-project.localhost   Ctrl+C to stop
+ localghost  ⠹ starting hub  https://my-django-project.localhost   Ctrl+C to stop
 ```
+
+The bar appears immediately, before the hub is reconciled, and names the step
+it is waiting on — `starting hub` while the hub comes up, then `starting` once
+the application's own process has been launched.
 
 The spinner and the dimmed URL mean the application is not answering yet.
 Localghost probes it — a host application on its port, a Compose project
