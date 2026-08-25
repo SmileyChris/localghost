@@ -19,6 +19,7 @@ from pathlib import Path
 import click
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
+from . import statusbar
 from .feedback import info, warning
 from .generator import (
     DNS_SAFE_PROJECT,
@@ -681,7 +682,12 @@ def _compose(plan: RunPlan, action: list[str]) -> None:
 
 
 def execute(
-    plan: RunPlan, start_proxy: Callable[[], None], *, cwd: Path | None = None
+    plan: RunPlan,
+    start_proxy: Callable[[], None],
+    *,
+    cwd: Path | None = None,
+    public_origin: str | None = None,
+    status_bar: bool = True,
 ) -> int:
     bridge_attempted = False
     child: subprocess.Popen[bytes] | None = None
@@ -689,20 +695,44 @@ def execute(
     cleanup_error: Exception | None = None
     old_handlers = _install_termination_handlers()
     try:
-        start_proxy()
-        bridge_attempted = True
-        start_bridge(plan)
-        try:
-            child = subprocess.Popen(
-                list(plan.command),
-                cwd=plan.working_directory or cwd or Path.cwd(),
-                start_new_session=True,
-            )
-        except OSError as exc:
-            raise click.ClickException(
-                f"could not start application command: {exc}"
-            ) from exc
-        status = child.wait()
+        # Opened before the hub is reconciled: that is the slowest step of a
+        # cold start, and the URL is most wanted while waiting on it. Hub and
+        # bridge progress scroll above the bar; teardown runs after it is
+        # released, so those messages are plain output either way.
+        with statusbar.pinned(
+            public_origin or f"http://{plan.name}.localhost",
+            enabled=status_bar and public_origin is not None,
+            probe=statusbar.tcp_probe(plan.port),
+            message="starting hub",
+        ) as bar:
+            start_proxy()
+            bridge_attempted = True
+            start_bridge(plan)
+            bar.status("starting")
+            if statusbar.tcp_probe(plan.port)():
+                # Sampled before the child exists, so this is somebody else.
+                # The application is about to fail to bind, and until it does
+                # the readiness probe cannot tell the squatter apart from a
+                # fast start.
+                warning(
+                    "Port already in use",
+                    [
+                        f"Something is already serving on port {plan.port}; "
+                        "the application may fail to start, and the status "
+                        "bar cannot tell it apart from the application."
+                    ],
+                )
+            try:
+                child = subprocess.Popen(
+                    list(plan.command),
+                    cwd=plan.working_directory or cwd or Path.cwd(),
+                    start_new_session=True,
+                )
+            except OSError as exc:
+                raise click.ClickException(
+                    f"could not start application command: {exc}"
+                ) from exc
+            status = child.wait()
     except (KeyboardInterrupt, _TerminationSignal) as interrupted:
         signum = (
             signal.SIGINT

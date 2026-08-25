@@ -3,6 +3,27 @@
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- A foreground `localghost run` now pins the public URL to the last row of the
+  terminal for as long as the application runs, instead of printing it once
+  and letting the application's output scroll it away. The bar starts in a
+  loading state and flips to a solid URL once the application answers — a host
+  application is probed on its port and a Compose project through its route —
+  so it also reports when the URL is worth clicking. It is drawn before the
+  hub is reconciled, so the URL is on screen for the slowest part of a cold
+  start, and it names the step being waited on. The scrolling region
+  keeps its top margin at row 1, so terminal scrollback is unaffected. Pass
+  `--no-status-bar` to disable it; it is skipped automatically when output is
+  not a terminal, on `dumb` terminals, in windows under 40 columns, and for
+  `--detach` and `--dry-run` runs.
+- `localghost run` now warns when something is already serving on the
+  application's port, sampled before the application is launched. It usually
+  means the application is about to fail to bind, which previously surfaced
+  only as the application's own error.
+
 ## [2.0.1] - 2026-08-24
 
 ### Fixed
