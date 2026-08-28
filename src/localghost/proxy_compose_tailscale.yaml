@@ -32,7 +32,7 @@ services:
       - --providers.plugin.localghostTailnetCA.renewbefore=6h
       - --experimental.abortonpluginfailure=true
       - --experimental.localplugins.localghostCA.modulename=github.com/SmileyChris/traefik-localghost-ca
-      - --experimental.localplugins.localghostTailnetCA.modulename=github.com/SmileyChris/traefik-localghost-ca
+      - --experimental.localplugins.localghostTailnetCA.modulename=github.com/SmileyChris/traefik-localghost-tailnet-ca
     volumes:
       - localghost-tailnet-ca-signer:/var/lib/localghost-tailnet-ca
 

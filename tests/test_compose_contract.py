@@ -170,7 +170,7 @@ def test_tailscale_overlay_adds_unpublished_gateway_and_suffix_provider() -> Non
     assert "--providers.plugin.localghostTailnetCA.domainsuffix=tail1234" in command
     assert (
         "--experimental.localplugins.localghostTailnetCA.modulename="
-        "github.com/SmileyChris/traefik-localghost-ca"
+        "github.com/SmileyChris/traefik-localghost-tailnet-ca"
     ) in command
 
 
