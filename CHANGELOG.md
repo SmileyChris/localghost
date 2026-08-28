@@ -46,6 +46,9 @@ uses [Semantic Versioning](https://semver.org/).
   trust stores before overwriting it on disk. A rotated hub authority — after
   a CA volume purge — no longer leaves an unremovable root trusted under the
   same subject name.
+- New tailnet roots are name-constrained to their own suffix, so the anchor a
+  client installs cannot vouch for any other name. Existing unconstrained
+  roots keep working and gain the constraint when the CA volumes are purged.
 - Trust setup now explains before installation that sudo may be requested for
   the system trust store.
 - Tailscale enable now offers automatic tailnet trust only when localhost trust

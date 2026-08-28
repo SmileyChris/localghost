@@ -83,6 +83,97 @@ func TestBootstrapForSuffixConstrainsAndIssuesOnlyThatSuffix(t *testing.T) {
 	}
 }
 
+func TestTailnetRootIsConstrainedToItsSuffix(t *testing.T) {
+	root, signer := t.TempDir(), t.TempDir()
+	ca, err := BootstrapCAForSuffix(root, signer, "tail1234")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Clients on the tailnet install this root, so the anchor itself must
+	// bound what it can ever vouch for, not only the online signer.
+	if !ca.rootCert.PermittedDNSDomainsCritical || len(ca.rootCert.PermittedDNSDomains) != 1 || ca.rootCert.PermittedDNSDomains[0] != "tail1234" {
+		t.Fatalf("tailnet root is not constrained: %#v", ca.rootCert.PermittedDNSDomains)
+	}
+	certPEM, _, err := ca.IssueLeaf([]string{"demo.tail1234", "*.demo.tail1234"}, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain, err := parseCertificateChainPEM(certPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots, intermediates := x509.NewCertPool(), x509.NewCertPool()
+	roots.AddCert(ca.rootCert)
+	intermediates.AddCert(ca.intermediateCert)
+	for _, name := range []string{"demo.tail1234", "mail.demo.tail1234"} {
+		if _, err := chain[0].Verify(x509.VerifyOptions{Roots: roots, Intermediates: intermediates, DNSName: name}); err != nil {
+			t.Fatalf("supported %s did not verify under a constrained root: %v", name, err)
+		}
+	}
+	bad := rawLeafForTest(t, ca, "example.com")
+	if _, err := bad.Verify(x509.VerifyOptions{Roots: roots, Intermediates: intermediates, DNSName: "example.com"}); err == nil || !strings.Contains(err.Error(), "not permitted") {
+		t.Fatalf("out-of-scope leaf did not fail name constraints: %v", err)
+	}
+}
+
+func TestLocalhostRootKeepsItsUnconstrainedIdentity(t *testing.T) {
+	ca, _, _ := bootstrapTestCA(t)
+	if len(ca.rootCert.PermittedDNSDomains) != 0 {
+		t.Fatalf(".localhost root identity changed: %#v", ca.rootCert.PermittedDNSDomains)
+	}
+}
+
+func TestRootValidationAcceptsAnUnconstrainedOrMatchingRoot(t *testing.T) {
+	for name, test := range map[string]struct {
+		permitted []string
+		excluded  []string
+		valid     bool
+	}{
+		"unconstrained root from before this change": {valid: true},
+		"root constrained to its own suffix":         {permitted: []string{"tail1234"}, valid: true},
+		"root constrained to another suffix":         {permitted: []string{"other"}, valid: false},
+		"root with two permitted suffixes":           {permitted: []string{"tail1234", "other"}, valid: false},
+		"root with an exclusion":                     {permitted: []string{"tail1234"}, excluded: []string{"bad.tail1234"}, valid: false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cert := rootCertificateForTest(t, test.permitted, test.excluded)
+			err := validateRootCertificate(cert, "tail1234")
+			if test.valid && err != nil {
+				t.Fatalf("valid root rejected: %v", err)
+			}
+			if !test.valid && err == nil {
+				t.Fatal("invalid root accepted")
+			}
+		})
+	}
+}
+
+func rootCertificateForTest(t *testing.T, permitted, excluded []string) *x509.Certificate {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(7), Subject: pkix.Name{CommonName: "Localghost Test Root CA"},
+		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true, IsCA: true,
+		PermittedDNSDomains: permitted, ExcludedDNSDomains: excluded,
+		PermittedDNSDomainsCritical: len(permitted) != 0,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cert
+}
+
 func TestLoadSignerFailsWithoutBootstrapAndNeverCreatesRoot(t *testing.T) {
 	signer := t.TempDir()
 	if _, err := LoadSignerCA(signer); err == nil {

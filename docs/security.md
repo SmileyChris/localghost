@@ -136,3 +136,18 @@ explicitly installs that public root with `localghost trust` while tailnet
 hosting is enabled.
 This grants the development hub authority for names under that suffix on the
 client; it should not be used as a general organizational DNS suffix.
+
+A tailnet root is itself name-constrained to its suffix, not only the online
+signer beneath it, so the anchor a colleague installs cannot vouch for any
+other name even if the offline root key is stolen. Roots created before this
+constraint existed keep working; they gain it only when the CA volumes are
+purged and the suffix is enabled again, which every client must then trust
+afresh. The `.localhost` root stays unconstrained, and is installed only on
+the machine that hosts it.
+
+Trusting a tailnet root replaces any earlier root for the same suffix: the
+superseded certificate is removed from this client's trust stores before the
+new one is written, because both mkcert and certutil identify an installed
+authority by the certificate they are handed. When a store refuses the
+removal, localghost reports which one, and the superseded root must be removed
+with that client's own trust-store tooling.

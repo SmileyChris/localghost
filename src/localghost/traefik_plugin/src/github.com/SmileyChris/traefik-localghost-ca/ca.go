@@ -82,12 +82,16 @@ func BootstrapCAForSuffix(rootPath, signerPath, suffix string) (*CertificateAuth
 		if err != nil {
 			return nil, err
 		}
-		rootPair, err = commitVersionedPair(rootBase, rootCertFile, rootKeyFile, certPEM, keyPEM, caPerm, caKeyPerm, validateRootPair, nil)
+		validateRoot := func(pair *pairData) error {
+			_, _, err := parseAndValidateRoot(pair, suffix)
+			return err
+		}
+		rootPair, err = commitVersionedPair(rootBase, rootCertFile, rootKeyFile, certPEM, keyPEM, caPerm, caKeyPerm, validateRoot, nil)
 		if err != nil {
 			return nil, fmt.Errorf("committing root: %w", err)
 		}
 	}
-	rootCert, rootKey, err := parseAndValidateRoot(rootPair)
+	rootCert, rootKey, err := parseAndValidateRoot(rootPair, suffix)
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +161,7 @@ func LoadSignerCAForSuffix(signerPath, suffix string) (*CertificateAuthority, er
 	if err != nil {
 		return nil, fmt.Errorf("parsing bootstrap public root: %w", err)
 	}
-	if err := validateRootCertificate(root); err != nil {
+	if err := validateRootCertificate(root, suffix); err != nil {
 		return nil, err
 	}
 	pair, err := readVersionedPair(filepath.Join(signerPath, intermediateStateDir), intermediateCertFile, intermediateKeyFile)
@@ -185,14 +189,18 @@ func generateRoot(suffix string) ([]byte, []byte, error) {
 	}
 	now := time.Now()
 	rootName := "Localghost Development Root CA"
-	if suffix != "localhost" {
-		rootName = fmt.Sprintf("Localghost .%s Development Root CA", suffix)
-	}
 	template := &x509.Certificate{
 		SerialNumber: serial, Subject: pkix.Name{CommonName: rootName},
 		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(10 * 365 * 24 * time.Hour),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
 		BasicConstraintsValid: true, IsCA: true, SignatureAlgorithm: x509.ECDSAWithSHA256,
+	}
+	if suffix != "localhost" {
+		// Tailnet roots are installed on other people's machines, so the
+		// anchor itself is bounded, not only the online signer beneath it.
+		template.Subject.CommonName = fmt.Sprintf("Localghost .%s Development Root CA", suffix)
+		template.PermittedDNSDomainsCritical = true
+		template.PermittedDNSDomains = []string{suffix}
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
 	if err != nil {
@@ -242,12 +250,7 @@ func marshalPair(certDER []byte, key *ecdsa.PrivateKey) ([]byte, []byte, error) 
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}), pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), nil
 }
 
-func validateRootPair(pair *pairData) error {
-	_, _, err := parseAndValidateRoot(pair)
-	return err
-}
-
-func parseAndValidateRoot(pair *pairData) (*x509.Certificate, *ecdsa.PrivateKey, error) {
+func parseAndValidateRoot(pair *pairData, suffix string) (*x509.Certificate, *ecdsa.PrivateKey, error) {
 	if err := validatePrivateKeyPermissions(pair.keyPath); err != nil {
 		return nil, nil, fmt.Errorf("invalid root private-key permissions: %w", err)
 	}
@@ -259,7 +262,7 @@ func parseAndValidateRoot(pair *pairData) (*x509.Certificate, *ecdsa.PrivateKey,
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := validateRootCertificate(cert); err != nil {
+	if err := validateRootCertificate(cert, suffix); err != nil {
 		return nil, nil, err
 	}
 	if err := keysMatch(cert.PublicKey, key); err != nil {
@@ -268,7 +271,11 @@ func parseAndValidateRoot(pair *pairData) (*x509.Certificate, *ecdsa.PrivateKey,
 	return cert, key, nil
 }
 
-func validateRootCertificate(cert *x509.Certificate) error {
+// validateRootCertificate accepts a root that is either unconstrained --
+// every root issued before tailnet hosting, and the .localhost root -- or
+// constrained to exactly the suffix it serves. Anything else is a foreign
+// authority.
+func validateRootCertificate(cert *x509.Certificate, suffix string) error {
 	now := time.Now()
 	if !cert.IsCA || cert.KeyUsage&x509.KeyUsageCertSign == 0 {
 		return fmt.Errorf("root is not a certificate authority")
@@ -276,8 +283,11 @@ func validateRootCertificate(cert *x509.Certificate) error {
 	if now.Before(cert.NotBefore) || !now.Before(cert.NotAfter) {
 		return fmt.Errorf("root is outside its validity period")
 	}
-	if len(cert.PermittedDNSDomains) != 0 || len(cert.ExcludedDNSDomains) != 0 {
-		return fmt.Errorf("root must be unconstrained")
+	if len(cert.ExcludedDNSDomains) != 0 {
+		return fmt.Errorf("root must not exclude DNS names")
+	}
+	if len(cert.PermittedDNSDomains) != 0 && !reflect.DeepEqual(cert.PermittedDNSDomains, []string{suffix}) {
+		return fmt.Errorf("root permits DNS names outside .%s", suffix)
 	}
 	if err := cert.CheckSignatureFrom(cert); err != nil {
 		return fmt.Errorf("root is not self-signed: %w", err)
