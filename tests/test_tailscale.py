@@ -2,10 +2,12 @@ import json
 import stat
 from io import BytesIO
 from subprocess import CompletedProcess
+from types import SimpleNamespace
 from urllib.error import HTTPError, URLError
 
 import pytest
 from click.testing import CliRunner
+from keyring.errors import KeyringError
 
 import localghost.cli as cli_module
 import localghost.tailscale as tailscale_module
@@ -158,14 +160,96 @@ def test_api_auth_key_and_dns_calls(monkeypatch) -> None:
 
 
 def test_api_reports_http_and_network_errors(monkeypatch) -> None:
+    error = HTTPError("url", 500, "Server Error", {}, BytesIO(b"broken"))
+    monkeypatch.setattr(
+        tailscale_module.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(error),
+    )
+    with pytest.raises(TailscaleError, match="HTTP 500: broken"):
+        API("token").split_dns("-")
+
+
+def test_auth_key_tag_rejection_points_at_the_policy_file(monkeypatch) -> None:
+    error = HTTPError(
+        "url",
+        400,
+        "Bad Request",
+        {},
+        BytesIO(b"requested tags [tag:localghost] are invalid or not permitted"),
+    )
+    monkeypatch.setattr(
+        tailscale_module.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(error),
+    )
+    with pytest.raises(TailscaleError, match="tagOwners") as excinfo:
+        API("token").create_auth_key("-", "tag:localghost")
+    assert "tag:localghost" in str(excinfo.value)
+    assert "admin/acls" in str(excinfo.value)
+
+
+def test_auth_key_forbidden_names_the_missing_scope(monkeypatch) -> None:
     error = HTTPError("url", 403, "Forbidden", {}, BytesIO(b"denied"))
     monkeypatch.setattr(
         tailscale_module.urllib.request,
         "urlopen",
         lambda *args, **kwargs: (_ for _ in ()).throw(error),
     )
-    with pytest.raises(TailscaleError, match="HTTP 403: denied"):
+    with pytest.raises(TailscaleError, match="auth_keys"):
+        API("token").create_auth_key("-", "tag:localghost")
+
+
+def test_dns_forbidden_names_the_missing_scope(monkeypatch) -> None:
+    error = HTTPError("url", 403, "Forbidden", {}, BytesIO(b"denied"))
+    monkeypatch.setattr(
+        tailscale_module.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(error),
+    )
+    with pytest.raises(TailscaleError, match="dns:write"):
         API("token").split_dns("-")
+    with pytest.raises(TailscaleError, match="dns:write"):
+        API("token").update_split_dns("-", {"tail1234": ["100.64.0.1"]})
+
+
+def _fake_keyring(stored: dict) -> SimpleNamespace:
+    return SimpleNamespace(
+        set_password=lambda service, name, value: stored.__setitem__(
+            (service, name), value
+        ),
+        get_password=lambda service, name: stored.get((service, name)),
+        delete_password=lambda service, name: stored.pop((service, name), None),
+    )
+
+
+def test_credential_round_trip_uses_the_system_keyring(monkeypatch) -> None:
+    stored: dict = {}
+    monkeypatch.setattr(tailscale_module, "keyring", _fake_keyring(stored))
+    assert tailscale_module.store_credential("id", "secret") is True
+    assert stored
+    assert all(service == "localghost-tailscale" for service, _ in stored)
+    credential = tailscale_module.load_credential()
+    assert credential == tailscale_module.Credential("id", "secret")
+    tailscale_module.delete_credential()
+    assert not stored
+    assert tailscale_module.load_credential() is None
+
+
+def test_credential_helpers_survive_a_missing_keyring_backend(monkeypatch) -> None:
+    def broken(*args, **kwargs):
+        raise KeyringError("no backend")
+
+    monkeypatch.setattr(
+        tailscale_module,
+        "keyring",
+        SimpleNamespace(
+            set_password=broken, get_password=broken, delete_password=broken
+        ),
+    )
+    assert tailscale_module.store_credential("id", "secret") is False
+    assert tailscale_module.load_credential() is None
+    tailscale_module.delete_credential()
 
 
 def test_api_rejects_missing_fields_and_unexpected_dns(monkeypatch) -> None:
@@ -249,9 +333,7 @@ def test_status_reports_enabled_state(monkeypatch) -> None:
     assert "Route suffix: .tail1234" in result.output
 
 
-def test_enable_uses_ephemeral_credentials_and_saves_public_state(monkeypatch) -> None:
-    events = []
-
+def _patch_enable(monkeypatch, events, saved):
     class FakeAPI:
         @classmethod
         def authenticate(cls, client_id, client_secret):
@@ -267,7 +349,8 @@ def test_enable_uses_ephemeral_credentials_and_saves_public_state(monkeypatch) -
         def update_split_dns(self, tailnet, value):
             events.append((tailnet, value))
 
-    saved = []
+    monkeypatch.delenv("TAILSCALE_CLIENT_ID", raising=False)
+    monkeypatch.delenv("TAILSCALE_CLIENT_SECRET", raising=False)
     monkeypatch.setattr(cli_module, "TailscaleAPI", FakeAPI)
     monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: None)
     monkeypatch.setattr(cli_module, "_https_configured", lambda: False)
@@ -280,26 +363,129 @@ def test_enable_uses_ephemeral_credentials_and_saves_public_state(monkeypatch) -
     monkeypatch.setattr(
         cli_module, "_run_proxy", lambda *args, **kwargs: events.append(kwargs)
     )
-
-    result = CliRunner().invoke(
-        cli,
-        [
-            "tailscale",
-            "enable",
-            "--tailnet",
-            "example.com",
-            "--suffix",
-            "tail1234",
-            "--client-id",
-            "id",
-            "--client-secret",
-            "secret",
-        ],
+    monkeypatch.setattr(
+        cli_module, "load_tailscale_credential", lambda: None
     )
+    monkeypatch.setattr(
+        cli_module, "store_tailscale_credential", lambda *args: True
+    )
+
+
+ENABLE_ARGS = ["tailscale", "enable", "--tailnet", "example.com", "--suffix", "tail1234"]
+CREDENTIAL_ARGS = ["--client-id", "id", "--client-secret", "secret"]
+
+
+def test_enable_uses_ephemeral_credentials_and_saves_public_state(monkeypatch) -> None:
+    events: list = []
+    saved: list = []
+    _patch_enable(monkeypatch, events, saved)
+
+    result = CliRunner().invoke(cli, ENABLE_ARGS + CREDENTIAL_ARGS)
     assert result.exit_code == 0, result.output
     assert saved[0].suffix == "tail1234"
     assert not hasattr(saved[0], "client_secret")
     assert events[-1] == {"https_enabled": True, "force_recreate": True}
+
+
+def test_enable_stores_the_credential_in_the_keyring(monkeypatch) -> None:
+    events: list = []
+    saved: list = []
+    stored: list = []
+    _patch_enable(monkeypatch, events, saved)
+    monkeypatch.setattr(
+        cli_module,
+        "store_tailscale_credential",
+        lambda client_id, client_secret: stored.append((client_id, client_secret))
+        or True,
+    )
+
+    result = CliRunner().invoke(cli, ENABLE_ARGS + CREDENTIAL_ARGS)
+    assert result.exit_code == 0, result.output
+    assert stored == [("id", "secret")]
+
+
+def test_enable_warns_when_keyring_storage_fails(monkeypatch) -> None:
+    events: list = []
+    saved: list = []
+    _patch_enable(monkeypatch, events, saved)
+    monkeypatch.setattr(
+        cli_module, "store_tailscale_credential", lambda *args: False
+    )
+
+    result = CliRunner().invoke(cli, ENABLE_ARGS + CREDENTIAL_ARGS)
+    assert result.exit_code == 0, result.output
+    assert "keyring" in result.output
+
+
+def test_enable_uses_the_stored_credential(monkeypatch) -> None:
+    events: list = []
+    saved: list = []
+    _patch_enable(monkeypatch, events, saved)
+    monkeypatch.setattr(
+        cli_module,
+        "load_tailscale_credential",
+        lambda: tailscale_module.Credential("kid", "ksecret"),
+    )
+
+    result = CliRunner().invoke(cli, ENABLE_ARGS)
+    assert result.exit_code == 0, result.output
+    assert ("kid", "ksecret") in events
+    assert "keyring" in result.output
+
+
+def test_enable_without_credential_guides_setup_then_prompts(monkeypatch) -> None:
+    events: list = []
+    saved: list = []
+    _patch_enable(monkeypatch, events, saved)
+
+    result = CliRunner().invoke(cli, ENABLE_ARGS, input="typed-id\ntyped-secret\n")
+    assert result.exit_code == 0, result.output
+    assert ("typed-id", "typed-secret") in events
+    assert "tagOwners" in result.output
+    assert "tag:localghost" in result.output
+    assert "admin/acls" in result.output
+    assert "admin/settings/oauth" in result.output
+    assert "auth_keys" in result.output
+    assert "dns:write" in result.output
+
+
+def test_disable_uses_the_stored_credential_and_deletes_it(monkeypatch) -> None:
+    events: list = []
+    state = TailscaleState(
+        "example.com", "tail1234", ("100.64.0.1",), {"corp": ["100.1.1.1"]}
+    )
+
+    class FakeAPI:
+        @classmethod
+        def authenticate(cls, client_id, client_secret):
+            events.append((client_id, client_secret))
+            return cls()
+
+        def update_split_dns(self, tailnet, value):
+            events.append((tailnet, value))
+
+    monkeypatch.delenv("TAILSCALE_CLIENT_ID", raising=False)
+    monkeypatch.delenv("TAILSCALE_CLIENT_SECRET", raising=False)
+    monkeypatch.setattr(cli_module, "TailscaleAPI", FakeAPI)
+    monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: state)
+    monkeypatch.setattr(
+        cli_module, "remove_tailscale_state", lambda: events.append("removed")
+    )
+    monkeypatch.setattr(cli_module, "proxy_is_running", lambda: False)
+    monkeypatch.setattr(
+        cli_module,
+        "load_tailscale_credential",
+        lambda: tailscale_module.Credential("kid", "ksecret"),
+    )
+    monkeypatch.setattr(
+        cli_module, "delete_tailscale_credential", lambda: events.append("deleted")
+    )
+
+    result = CliRunner().invoke(cli, ["tailscale", "disable"])
+    assert result.exit_code == 0, result.output
+    assert events[0] == ("kid", "ksecret")
+    assert "deleted" in events
+    assert events.index("deleted") > events.index("removed")
 
 
 def test_run_proxy_adds_tailnet_overlay(monkeypatch) -> None:
@@ -397,6 +583,7 @@ def test_disable_restores_exact_dns_then_reconciles(monkeypatch) -> None:
     monkeypatch.setattr(
         cli_module, "_run_proxy", lambda *args, **kwargs: events.append((args, kwargs))
     )
+    monkeypatch.setattr(cli_module, "delete_tailscale_credential", lambda: None)
     result = CliRunner().invoke(
         cli,
         [

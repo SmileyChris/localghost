@@ -11,16 +11,31 @@ remain loopback-only and keep working when Tailscale hosting is disabled.
 
 ## Enable it
 
-Create a scoped [OAuth client](https://tailscale.com/docs/features/oauth-clients)
-in the Tailscale admin console with the `auth_keys` and `dns:write` scopes. Its
-auth-key permission must allow the tag you
-choose; the default is `tag:localghost`. Then run:
-
 ```sh
-export TAILSCALE_CLIENT_ID=...
-export TAILSCALE_CLIENT_SECRET=...
 localghost tailscale enable
 ```
+
+Without a credential, enable walks through the one-time admin-console setup
+before prompting: allow the device tag (default `tag:localghost`) in the
+tailnet [policy file](https://login.tailscale.com/admin/acls/file), for
+example
+
+```json
+"tagOwners": {"tag:localghost": ["autogroup:admin"]}
+```
+
+and create a scoped
+[OAuth client](https://tailscale.com/docs/features/oauth-clients) with the
+`auth_keys` scope (with that tag allowed) and the `dns:write` scope. Paste the
+client id and secret at the prompts, or provide them with
+`TAILSCALE_CLIENT_ID`/`TAILSCALE_CLIENT_SECRET` or
+`--client-id`/`--client-secret`. When a step was missed, the API errors are
+translated into the exact console fix instead of raw HTTP responses.
+
+After a successful enable, the credential is saved in the system keyring
+(service `localghost-tailscale`), so `disable` and a later re-enable need no
+re-entry; `disable` removes it again. Without a usable keyring, localghost
+warns and stores nothing.
 
 The OAuth client's own tailnet is the default. Localghost asks the installed
 `tailscale` CLI for a one-label search domain or derives one from the current
@@ -36,10 +51,11 @@ Enable performs four bounded operations:
    `tail1234`, preserving the previous suffix mapping; and
 4. starts the gateway and suffix-specific HTTPS provider with the hub.
 
-The OAuth access token, client secret, and auth key are never saved. Localghost
-stores the tailnet name, suffix, gateway addresses, device tag, and previous
-split-DNS map in its state directory so it can remove its split-DNS entry on disable
-without discarding unrelated changes made later.
+The OAuth access token and auth key are never saved, and the client secret is
+kept only in the system keyring. Localghost stores the tailnet name, suffix,
+gateway addresses, device tag, and previous split-DNS map in its state
+directory so it can remove its split-DNS entry on disable without discarding
+unrelated changes made later.
 
 Every client must trust this hub's development roots once:
 

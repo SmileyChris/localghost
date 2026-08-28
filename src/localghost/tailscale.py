@@ -16,15 +16,29 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+import keyring
+from keyring.errors import KeyringError
+
 from .paths import state_directory
 
 API_ROOT = "https://api.tailscale.com/api/v2"
 TOKEN_URL = f"{API_ROOT}/oauth/token"
+OAUTH_CONSOLE_URL = "https://login.tailscale.com/admin/settings/oauth"
+POLICY_CONSOLE_URL = "https://login.tailscale.com/admin/acls/file"
+KEYRING_SERVICE = "localghost-tailscale"
 _SUFFIX = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 
 class TailscaleError(RuntimeError):
     """An actionable Tailscale configuration failure."""
+
+
+class APIError(TailscaleError):
+    """A Tailscale API rejection carrying its HTTP status code."""
+
+    def __init__(self, code: int, message: str):
+        super().__init__(message)
+        self.code = code
 
 
 @dataclass(frozen=True)
@@ -76,6 +90,41 @@ def save_state(state: TailscaleState) -> None:
 
 def remove_state() -> None:
     state_path().unlink(missing_ok=True)
+
+
+@dataclass(frozen=True)
+class Credential:
+    client_id: str
+    client_secret: str
+
+
+def store_credential(client_id: str, client_secret: str) -> bool:
+    """Save the OAuth credential in the system keyring; report success."""
+    try:
+        keyring.set_password(KEYRING_SERVICE, "client-id", client_id)
+        keyring.set_password(KEYRING_SERVICE, "client-secret", client_secret)
+    except KeyringError:
+        return False
+    return True
+
+
+def load_credential() -> Credential | None:
+    try:
+        client_id = keyring.get_password(KEYRING_SERVICE, "client-id")
+        client_secret = keyring.get_password(KEYRING_SERVICE, "client-secret")
+    except KeyringError:
+        return None
+    if not client_id or not client_secret:
+        return None
+    return Credential(client_id, client_secret)
+
+
+def delete_credential() -> None:
+    for name in ("client-id", "client-secret"):
+        try:
+            keyring.delete_password(KEYRING_SERVICE, name)
+        except KeyringError:
+            return
 
 
 def validate_suffix(value: str) -> str:
@@ -164,31 +213,57 @@ class API:
 
     def create_auth_key(self, tailnet: str, tag: str) -> str:
         tailnet = urllib.parse.quote(tailnet, safe="")
-        value = self._call(
-            f"/tailnet/{tailnet}/keys",
-            method="POST",
-            body={
-                "capabilities": {
-                    "devices": {
-                        "create": {
-                            "reusable": False,
-                            "ephemeral": False,
-                            "preauthorized": True,
-                            "tags": [tag],
+        try:
+            value = self._call(
+                f"/tailnet/{tailnet}/keys",
+                method="POST",
+                body={
+                    "capabilities": {
+                        "devices": {
+                            "create": {
+                                "reusable": False,
+                                "ephemeral": False,
+                                "preauthorized": True,
+                                "tags": [tag],
+                            }
                         }
-                    }
+                    },
+                    "expirySeconds": 600,
                 },
-                "expirySeconds": 600,
-            },
-        )
+            )
+        except APIError as exc:
+            if exc.code == 400 and "tag" in str(exc):
+                raise TailscaleError(
+                    f"Tailscale rejected the device tag: add {tag} to tagOwners "
+                    f"in the policy file ({POLICY_CONSOLE_URL}), for example: "
+                    f'"tagOwners": {{"{tag}": ["autogroup:admin"]}}'
+                ) from exc
+            if exc.code == 403:
+                raise TailscaleError(
+                    f"the OAuth client may not create auth keys: it needs the "
+                    f"auth_keys scope with {tag} allowed ({OAUTH_CONSOLE_URL})"
+                ) from exc
+            raise
         try:
             return value["key"]
         except (KeyError, TypeError) as exc:
             raise TailscaleError("Tailscale did not return an auth key") from exc
 
+    @staticmethod
+    def _dns_scope_guidance(exc: APIError) -> TailscaleError:
+        if exc.code == 403:
+            return TailscaleError(
+                "the OAuth client lacks the dns:write scope; recreate it at "
+                f"{OAUTH_CONSOLE_URL}"
+            )
+        return exc
+
     def split_dns(self, tailnet: str) -> dict[str, list[str]]:
         tailnet = urllib.parse.quote(tailnet, safe="")
-        value = self._call(f"/tailnet/{tailnet}/dns/split-dns")
+        try:
+            value = self._call(f"/tailnet/{tailnet}/dns/split-dns")
+        except APIError as exc:
+            raise self._dns_scope_guidance(exc) from exc
         if not isinstance(value, dict) or any(
             not isinstance(domain, str)
             or not isinstance(addresses, list)
@@ -202,9 +277,12 @@ class API:
         self, tailnet: str, value: dict[str, list[str] | None]
     ) -> None:
         tailnet = urllib.parse.quote(tailnet, safe="")
-        self._call(
-            f"/tailnet/{tailnet}/dns/split-dns", method="PATCH", body=value
-        )
+        try:
+            self._call(
+                f"/tailnet/{tailnet}/dns/split-dns", method="PATCH", body=value
+            )
+        except APIError as exc:
+            raise self._dns_scope_guidance(exc) from exc
 
 
 def fetch_public_root(suffix: str, gateway_ips: tuple[str, ...] = ()) -> bytes:
@@ -240,8 +318,8 @@ def _request(
             raw = response.read()
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode(errors="replace").strip()
-        raise TailscaleError(
-            f"Tailscale API returned HTTP {exc.code}: {detail or exc.reason}"
+        raise APIError(
+            exc.code, f"Tailscale API returned HTTP {exc.code}: {detail or exc.reason}"
         ) from exc
     except urllib.error.URLError as exc:
         raise TailscaleError(

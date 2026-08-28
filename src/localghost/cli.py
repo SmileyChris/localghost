@@ -82,14 +82,22 @@ from .tailscale import (
     API as TailscaleAPI,
 )
 from .tailscale import (
+    OAUTH_CONSOLE_URL,
+    POLICY_CONSOLE_URL,
     TailscaleError,
     TailscaleState,
+)
+from .tailscale import (
+    delete_credential as delete_tailscale_credential,
 )
 from .tailscale import (
     detect_suffix as detect_tailscale_suffix,
 )
 from .tailscale import (
     fetch_public_root as fetch_tailscale_root,
+)
+from .tailscale import (
+    load_credential as load_tailscale_credential,
 )
 from .tailscale import (
     load_state as load_tailscale_state,
@@ -99,6 +107,9 @@ from .tailscale import (
 )
 from .tailscale import (
     save_state as save_tailscale_state,
+)
+from .tailscale import (
+    store_credential as store_tailscale_credential,
 )
 from .tailscale import (
     validate_suffix as validate_tailscale_suffix,
@@ -442,16 +453,18 @@ def _tailscale_status() -> None:
 )
 @click.option("suffix", "--suffix", help="One-label route suffix, such as tail1234.")
 @click.option("tag", "--tag", default="tag:localghost", show_default=True)
-@click.option("client_id", "--client-id", envvar="TAILSCALE_CLIENT_ID", prompt=True)
+@click.option("client_id", "--client-id", envvar="TAILSCALE_CLIENT_ID")
 @click.option(
     "client_secret",
     "--client-secret",
     envvar="TAILSCALE_CLIENT_SECRET",
-    prompt=True,
-    hide_input=True,
 )
 def tailscale_enable(
-    tailnet: str, suffix: str | None, tag: str, client_id: str, client_secret: str
+    tailnet: str,
+    suffix: str | None,
+    tag: str,
+    client_id: str | None,
+    client_secret: str | None,
 ) -> None:
     """Enroll a tagged gateway and add split DNS for the chosen suffix."""
     title()
@@ -460,6 +473,9 @@ def tailscale_enable(
     localhost_trusted = _https_configured()
     if not tag.startswith("tag:"):
         raise click.UsageError("--tag must start with 'tag:'")
+    client_id, client_secret = _resolve_tailscale_credential(
+        client_id, client_secret, tag=tag
+    )
     try:
         chosen_suffix = validate_tailscale_suffix(
             suffix or detect_tailscale_suffix()
@@ -501,6 +517,11 @@ def tailscale_enable(
         _run_proxy("up", https_enabled=True, force_recreate=True)
     except (TailscaleError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
+    if not store_tailscale_credential(client_id, client_secret):
+        warning(
+            "The OAuth credential was not stored",
+            ["no usable system keyring; disable will ask for the credential again"],
+        )
     success(f"Tailnet routes are enabled at https://<project>.{chosen_suffix}.")
     if localhost_trusted:
         info("Installing the tailnet HTTPS root (sudo may be requested)…")
@@ -515,25 +536,60 @@ def tailscale_enable(
         action("Trust localhost and tailnet HTTPS", "localghost trust")
 
 
+def _resolve_tailscale_credential(
+    client_id: str | None, client_secret: str | None, *, tag: str | None = None
+) -> tuple[str, str]:
+    """Find the OAuth credential: options, then keyring, then a guided prompt."""
+    if not client_id and not client_secret:
+        stored = load_tailscale_credential()
+        if stored is not None:
+            info("Using the OAuth credential stored in the system keyring.")
+            return stored.client_id, stored.client_secret
+        if tag is not None:
+            details(
+                [
+                    ("1. Allow the device tag", POLICY_CONSOLE_URL),
+                    (
+                        "   Add to the policy file",
+                        f'"tagOwners": {{"{tag}": ["autogroup:admin"]}}',
+                    ),
+                    ("2. Create an OAuth client", OAUTH_CONSOLE_URL),
+                    (
+                        "   Scopes",
+                        f"auth_keys (with {tag} allowed) and dns:write",
+                    ),
+                ],
+                title="One-time Tailscale admin-console setup",
+            )
+    if not client_id:
+        client_id = click.prompt("Client id")
+    if not client_secret:
+        client_secret = click.prompt("Client secret", hide_input=True)
+    return client_id, client_secret
+
+
 @tailscale.command("disable")
-@click.option("client_id", "--client-id", envvar="TAILSCALE_CLIENT_ID", prompt=True)
+@click.option("client_id", "--client-id", envvar="TAILSCALE_CLIENT_ID")
 @click.option(
     "client_secret",
     "--client-secret",
     envvar="TAILSCALE_CLIENT_SECRET",
-    prompt=True,
-    hide_input=True,
 )
-def tailscale_disable(client_id: str, client_secret: str) -> None:
+def tailscale_disable(client_id: str | None, client_secret: str | None) -> None:
     """Restore the prior tailnet DNS configuration and stop the gateway."""
     try:
         state = load_tailscale_state()
-        if state is None:
-            raise TailscaleError("Tailscale hosting is not enabled")
+    except TailscaleError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if state is None:
+        raise click.ClickException("Tailscale hosting is not enabled")
+    client_id, client_secret = _resolve_tailscale_credential(client_id, client_secret)
+    try:
         api = TailscaleAPI.authenticate(client_id, client_secret)
         previous = state.previous_split_dns.get(state.suffix)
         api.update_split_dns(state.tailnet, {state.suffix: previous})
         remove_tailscale_state()
+        delete_tailscale_credential()
         if proxy_is_running():
             _run_proxy("up", https_enabled=_https_configured(), force_recreate=True)
     except TailscaleError as exc:

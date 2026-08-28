@@ -123,8 +123,10 @@ whole tailnet should not reach development applications.
 
 The enable command exchanges a scoped OAuth client credential for a temporary
 access token, creates a single-use short-lived device auth key, and updates
-split DNS. Those credentials and keys are held only in process memory and are
-not written to localghost state. The prior split-DNS map is saved because
+split DNS. The access token and auth key are held only in process memory. The
+client id and secret are saved in the operating system keyring — never in
+localghost state files — so disable can restore DNS without re-entry, and
+disable deletes them again. The prior split-DNS map is saved because
 disable can restore the suffix's prior value. The API update is a domain-scoped
 PATCH, so unrelated DNS mappings are untouched. Treat the saved map as
 administrative metadata, even though it contains no secret.

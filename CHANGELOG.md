@@ -18,6 +18,11 @@ uses [Semantic Versioning](https://semver.org/).
 - `localghost tailscale enable` defaults to the OAuth credential's own tailnet
   and infers its short suffix from the connected Tailscale client; both remain
   available as explicit overrides.
+- `localghost tailscale enable` now guides the one-time admin-console setup
+  when no credential is present — the device-tag policy entry and the scoped
+  OAuth client — and translates tag and scope rejections from the Tailscale
+  API into the exact console fix. A working credential is stored in the system
+  keyring so `disable` and re-enable need no re-entry; `disable` deletes it.
 
 ### Changed
 
