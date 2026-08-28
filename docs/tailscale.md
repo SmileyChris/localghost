@@ -7,7 +7,38 @@ tailnet. If the local route is `https://shop.localhost`, enabling the suffix
 the bare `tail1234` name.
 
 This is an opt-in extension of the local hub. The normal `.localhost` routes
-remain loopback-only and keep working when Tailscale hosting is disabled.
+remain loopback-only and keep working when tailnet hosting is disabled.
+
+## How the pieces fit
+
+Four pieces cooperate, and each has exactly one job:
+
+- **The hub** is the `localghost` Docker Compose project: Traefik plus its
+  certificate providers. Docker labels on your containers are the single
+  routing source of truth — applications never acquire tailnet-specific
+  labels, so localhost and tailnet routing cannot drift apart.
+- **The gateway** is one extra container in that same hub. It appears three
+  ways that all name the same thing: Compose service `tailscale-gateway`,
+  tailnet device `localghost-<suffix>` (what the admin console shows), and
+  "the gateway" in this documentation. It joins the tailnet as a userspace
+  node and only transports: it answers DNS for the suffix with its own
+  tailnet addresses, forwards HTTP to Traefik with the original Host header,
+  and passes HTTPS through as raw TCP. It terminates no TLS, holds no offline
+  CA material, and has no Docker socket.
+- **Two certificate authorities** live in Docker volumes, one for
+  `.localhost` and one per tailnet suffix, each split into an offline root
+  and a constrained online signer. Traefik's provider plugin — one instance
+  per suffix — watches the same Docker labels and issues leaf certificates
+  from the matching signer. Because the authorities are separate, trusting a
+  tailnet root never widens what the `.localhost` root may sign, and vice
+  versa.
+- **Split DNS** is the only piece outside your machine: a per-suffix entry in
+  the tailnet's DNS configuration that sends `*.<suffix>` lookups to the
+  gateway. Enable adds it, disable restores exactly what was there before.
+
+A request from another device therefore flows: tailnet DNS → gateway →
+Traefik (certificate chosen by SNI from the suffix authority) → the same
+container or host bridge that serves the `.localhost` route.
 
 ## Enable it
 
@@ -63,7 +94,7 @@ Every client must trust this hub's development roots once:
 localghost trust
 ```
 
-When Tailscale hosting is enabled, the standard trust command installs both the
+When tailnet hosting is enabled, the standard trust command installs both the
 `.localhost` root and the active tailnet root. It downloads the latter from
 `http://trust.tail1234` over the tailnet. Private CA keys never leave Docker volumes.
 
@@ -80,6 +111,11 @@ localghost down            # stops both
 A foreground `localghost run` pins both URLs to the bottom of the terminal —
 `https://shop.localhost · https://shop.tail1234` — so the tailnet address stays
 visible for other devices while the application runs.
+
+The gateway carries a Docker healthcheck that reports healthy only once its
+tailnet node is enrolled and every listener is up. `localghost tailscale
+status` includes that observed state as `Gateway health`, so a gateway that
+died after enable shows up there rather than as a timeout on another device.
 
 To restore the DNS configuration that existed at enable time and remove the
 gateway from the running hub:

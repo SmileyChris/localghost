@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"testing"
 
@@ -50,5 +52,44 @@ func TestDNSListenAddressIncludesAnExplicitIP(t *testing.T) {
 	ip := netip.MustParseAddr("100.64.0.10")
 	if got := dnsListenAddress(ip); got != "100.64.0.10:53" {
 		t.Fatalf("dnsListenAddress() = %q", got)
+	}
+}
+
+func TestHealthHandlerAnswersOnlyHealthz(t *testing.T) {
+	server := httptest.NewServer(healthHandler())
+	defer server.Close()
+	response, err := http.Get(server.URL + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("healthz status = %d", response.StatusCode)
+	}
+	response, err = http.Get(server.URL + "/other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("other status = %d", response.StatusCode)
+	}
+}
+
+func TestProbeHealthReportsListenerState(t *testing.T) {
+	server := httptest.NewServer(healthHandler())
+	if err := probeHealth(server.URL); err != nil {
+		t.Fatalf("healthy probe failed: %v", err)
+	}
+	server.Close()
+	if err := probeHealth(server.URL); err == nil {
+		t.Fatal("expected probe of a closed listener to fail")
+	}
+	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer failing.Close()
+	if err := probeHealth(failing.URL); err == nil {
+		t.Fatal("expected probe of an unhealthy listener to fail")
 	}
 }

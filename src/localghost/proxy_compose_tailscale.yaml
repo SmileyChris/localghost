@@ -54,6 +54,16 @@ services:
       - --root-ca=/var/lib/localghost-root/rootCA.pem
       - --http-target=traefik:80
       - --https-target=traefik:443
+    healthcheck:
+      # The health listener starts only after the tsnet node is enrolled and
+      # every tailnet listener is up, so healthy means reachable, not merely
+      # running. The probe is the gateway binary itself: the image is FROM
+      # scratch and ships no shell or curl.
+      test: [CMD, /localghost-tailscale-gateway, --health-probe]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 90s
     volumes:
       - localghost-tailscale-state:/var/lib/localghost-tailscale
       # The signer volume contains only the exported public root plus the

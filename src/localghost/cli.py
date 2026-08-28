@@ -429,18 +429,49 @@ def _tailscale_status() -> None:
     except TailscaleError as exc:
         raise click.ClickException(str(exc)) from exc
     if state is None:
-        details([("Tailscale hosting", "disabled")], title="Tailscale status")
+        details([("Tailnet hosting", "disabled")], title="Tailscale status")
         return
     details(
         [
-            ("Tailscale hosting", "enabled"),
+            ("Tailnet hosting", "enabled"),
             ("Tailnet", state.tailnet),
             ("Route suffix", f".{state.suffix}"),
             ("Gateway", ", ".join(state.gateway_ips)),
+            ("Gateway health", _tailscale_gateway_health()),
             ("Device tag", state.tag),
         ],
         title="Tailscale status",
     )
+
+
+def _tailscale_gateway_health() -> str:
+    """The gateway container's observed state, from its Docker healthcheck."""
+    command = [
+        "docker",
+        "ps",
+        "--filter",
+        "label=com.docker.compose.project=localghost",
+        "--filter",
+        "label=com.docker.compose.service=tailscale-gateway",
+        "--format",
+        "{{.Status}}",
+    ]
+    try:
+        result = subprocess.run(command, check=False, capture_output=True, text=True)
+    except FileNotFoundError:
+        return "unknown"
+    if result.returncode:
+        return "unknown"
+    status = result.stdout.strip()
+    if not status:
+        return "not running"
+    if "(health: starting)" in status:
+        return "starting"
+    if "(unhealthy)" in status:
+        return "unhealthy"
+    if "(healthy)" in status:
+        return "healthy"
+    return "running"
 
 
 @tailscale.command("enable")
@@ -469,7 +500,7 @@ def tailscale_enable(
     """Enroll a tagged gateway and add split DNS for the chosen suffix."""
     title()
     if load_tailscale_state() is not None:
-        raise click.ClickException("Tailscale hosting is already enabled")
+        raise click.ClickException("tailnet hosting is already enabled")
     localhost_trusted = _https_configured()
     if not tag.startswith("tag:"):
         raise click.UsageError("--tag must start with 'tag:'")
@@ -487,7 +518,7 @@ def tailscale_enable(
                 ("Gateway", f"localghost-{chosen_suffix}"),
                 ("Device tag", tag),
             ],
-            title="Tailscale hosting",
+            title="Tailnet hosting",
         )
         info("Authenticating with the Tailscale API…")
         api = TailscaleAPI.authenticate(client_id, client_secret)
@@ -582,7 +613,7 @@ def tailscale_disable(client_id: str | None, client_secret: str | None) -> None:
     except TailscaleError as exc:
         raise click.ClickException(str(exc)) from exc
     if state is None:
-        raise click.ClickException("Tailscale hosting is not enabled")
+        raise click.ClickException("tailnet hosting is not enabled")
     client_id, client_secret = _resolve_tailscale_credential(client_id, client_secret)
     try:
         api = TailscaleAPI.authenticate(client_id, client_secret)
@@ -605,7 +636,7 @@ def tailscale_trust(suffix: str | None) -> None:
     if suffix is None:
         state = load_tailscale_state()
         if state is None:
-            raise click.ClickException("Tailscale hosting is not enabled")
+            raise click.ClickException("tailnet hosting is not enabled")
         suffix = state.suffix
     _install_tailnet_trust(suffix)
 

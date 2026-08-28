@@ -7,7 +7,7 @@ uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- Added opt-in Tailscale hosting with `localghost tailscale enable`, `status`,
+- Added opt-in tailnet hosting with `localghost tailscale enable`, `status`,
   `trust`, and `disable`. A dedicated tagged userspace gateway, split DNS, and
   suffix-specific CA mirror every supported `.localhost` project, secondary,
   and dashboard route without publishing the hub to the LAN or internet.
@@ -23,10 +23,14 @@ uses [Semantic Versioning](https://semver.org/).
   OAuth client — and translates tag and scope rejections from the Tailscale
   API into the exact console fix. A working credential is stored in the system
   keyring so `disable` and re-enable need no re-entry; `disable` deletes it.
-- While Tailscale hosting is enabled, the pinned status bar of a foreground
+- While tailnet hosting is enabled, the pinned status bar of a foreground
   run shows the mirrored tailnet URL beside the `.localhost` URL. On narrow
   windows the hint is dropped first, then the tailnet URL, so the primary URL
   always survives.
+- The tailnet gateway now carries a Docker healthcheck — the gateway binary
+  probing its own health listener, which starts only once the node is
+  enrolled and every tailnet listener is up — and `localghost tailscale
+  status` reports that observed state as `Gateway health`.
 
 ### Changed
 

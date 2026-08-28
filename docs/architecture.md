@@ -130,3 +130,16 @@ from the `.localhost` model, while explicitly referring back to Docker-owned
 services and middleware. This keeps one routing source of truth: applications
 do not acquire Tailscale labels and cannot drift between the two hostname
 systems.
+
+The gateway is a separate container from Traefik on purpose. Traefik mounts
+the Docker socket and must never be tailnet-reachable code; the gateway is
+tailnet-reachable and therefore runs from a scratch image with a read-only
+filesystem, no capabilities, no socket, and only the suffix authority's
+public material mounted. Both belong to the one `localghost` Compose project,
+so `localghost`, `localghost down`, and reconciliation own them together.
+
+Because the image ships no shell, the gateway's Docker healthcheck is the
+gateway binary probing its own loopback health listener, which starts only
+after the tsnet node is enrolled and every tailnet listener is up.
+`localghost tailscale status` reports that observed container state alongside
+the saved configuration.

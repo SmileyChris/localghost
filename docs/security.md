@@ -113,7 +113,7 @@ can read that label; do not use a sensitive checkout path.
 Broader features require separate designs and threat analysis rather than ad
 hoc production adaptation of this local configuration.
 
-## Tailscale hosting
+## Tailnet hosting
 
 Tailnet hosting intentionally expands exposure from one machine to authorized
 tailnet devices. The gateway runs Tailscale's userspace networking stack and
@@ -132,7 +132,7 @@ PATCH, so unrelated DNS mappings are untouched. Treat the saved map as
 administrative metadata, even though it contains no secret.
 
 The tailnet suffix has its own CA and signer volumes. Each participating client
-explicitly installs that public root with `localghost trust` while Tailscale
+explicitly installs that public root with `localghost trust` while tailnet
 hosting is enabled.
 This grants the development hub authority for names under that suffix on the
 client; it should not be used as a general organizational DNS suffix.

@@ -29,6 +29,11 @@ import (
 
 var dnsLabel = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
+// The health listener binds container loopback, not the tailnet: it exists
+// only for Docker's healthcheck, which runs this same binary with
+// --health-probe inside the container.
+const healthAddress = "127.0.0.1:41823"
+
 type configuration struct {
 	suffix      string
 	hostname    string
@@ -48,7 +53,14 @@ func main() {
 	flag.StringVar(&cfg.httpTarget, "http-target", "traefik:80", "HTTP proxy target")
 	flag.StringVar(&cfg.httpsTarget, "https-target", "traefik:443", "HTTPS TCP target")
 	flag.BoolVar(&cfg.bootstrap, "bootstrap", false, "enroll from an auth key on stdin, then exit")
+	healthProbe := flag.Bool("health-probe", false, "check the running gateway's health listener, then exit")
 	flag.Parse()
+	if *healthProbe {
+		if err := probeHealth("http://" + healthAddress); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if err := validateConfiguration(cfg); err != nil {
 		log.Fatal(err)
 	}
@@ -135,10 +147,11 @@ func run(ctx context.Context, cfg configuration) error {
 	}
 	log.Printf("tailnet gateway ready hostname=%s IPv4=%s IPv6=%s suffix=%s", cfg.hostname, ip4, ip6, cfg.suffix)
 
-	errCh := make(chan error, 5)
+	errCh := make(chan error, 6)
 	startDNS(ctx, server, cfg.suffix, ip4, ip6, errCh)
 	startHTTP(ctx, server, cfg, errCh)
 	startTCPProxy(ctx, server, ":443", cfg.httpsTarget, errCh)
+	startHealth(ctx, errCh)
 
 	select {
 	case <-ctx.Done():
@@ -234,6 +247,49 @@ func validTailnetName(prefix string) bool {
 		}
 	}
 	return true
+}
+
+func healthHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok\n"))
+	})
+	return mux
+}
+
+func probeHealth(baseURL string) error {
+	client := &http.Client{Timeout: 2 * time.Second}
+	response, err := client.Get(baseURL + "/healthz")
+	if err != nil {
+		return fmt.Errorf("health listener unreachable: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("health listener answered %d", response.StatusCode)
+	}
+	return nil
+}
+
+func startHealth(ctx context.Context, errCh chan<- error) {
+	// Reached only after tsnet is up, so answering at all means the node is
+	// enrolled and the tailnet listeners were started; any listener failure
+	// exits the process, which Docker also observes.
+	listener, err := net.Listen("tcp", healthAddress)
+	if err != nil {
+		errCh <- fmt.Errorf("listening for health checks: %w", err)
+		return
+	}
+	healthServer := &http.Server{Handler: healthHandler(), ReadHeaderTimeout: 5 * time.Second}
+	go func() {
+		if err := healthServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- fmt.Errorf("serving health checks: %w", err)
+		}
+	}()
+	go func() {
+		<-ctx.Done()
+		_ = healthServer.Close()
+	}()
 }
 
 func startHTTP(ctx context.Context, server *tsnet.Server, cfg configuration, errCh chan<- error) {

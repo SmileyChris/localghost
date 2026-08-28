@@ -371,7 +371,9 @@ def _patch_enable(monkeypatch, events, saved):
     )
 
 
-ENABLE_ARGS = ["tailscale", "enable", "--tailnet", "example.com", "--suffix", "tail1234"]
+ENABLE_ARGS = [
+    "tailscale", "enable", "--tailnet", "example.com", "--suffix", "tail1234"
+]
 CREDENTIAL_ARGS = ["--client-id", "id", "--client-secret", "secret"]
 
 
@@ -691,3 +693,48 @@ def test_host_run_passes_the_tailnet_origin_to_execute(monkeypatch) -> None:
     result = CliRunner().invoke(cli, ["run", "--port", "3000", "--", "echo"])
     assert result.exit_code == 0, result.output
     assert executed["secondary_origin"] == "https://demo.tail1234"
+
+
+def test_status_reports_gateway_health(monkeypatch) -> None:
+    monkeypatch.setattr(
+        cli_module,
+        "load_tailscale_state",
+        lambda: TailscaleState("example.com", "tail1234", ("100.64.0.1",), {}),
+    )
+    monkeypatch.setattr(
+        cli_module.subprocess,
+        "run",
+        lambda *args, **kwargs: CompletedProcess(
+            args[0], 0, "Up 5 minutes (healthy)\n", ""
+        ),
+    )
+    result = CliRunner().invoke(cli, ["tailscale", "status"])
+    assert result.exit_code == 0, result.output
+    assert "Gateway health: healthy" in result.output
+
+
+@pytest.mark.parametrize(
+    "stdout, expected",
+    [
+        ("", "not running"),
+        ("Up 2 seconds (health: starting)\n", "starting"),
+        ("Up 10 minutes (unhealthy)\n", "unhealthy"),
+        ("Up 10 minutes\n", "running"),
+    ],
+)
+def test_gateway_health_reads_container_state(monkeypatch, stdout, expected) -> None:
+    monkeypatch.setattr(
+        cli_module.subprocess,
+        "run",
+        lambda *args, **kwargs: CompletedProcess(args[0], 0, stdout, ""),
+    )
+    assert cli_module._tailscale_gateway_health() == expected
+
+
+def test_gateway_health_survives_a_missing_docker(monkeypatch) -> None:
+    monkeypatch.setattr(
+        cli_module.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError()),
+    )
+    assert cli_module._tailscale_gateway_health() == "unknown"
