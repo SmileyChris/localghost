@@ -150,6 +150,22 @@ For `localghost run`, Django needs its generated `<name>.localhost` in
 WebSocket traffic use the same bridge; a failed upgrade usually means the host
 server was not listening on the selected Docker-reachable port.
 
+## The OAuth credential was not stored
+
+`localghost tailscale enable` warns when it cannot save the credential in the
+operating system keyring. Everything else still works; the cost is that
+`tailscale disable` (and a later re-enable) will prompt for the client id and
+secret again, or read them from `TAILSCALE_CLIENT_ID` and
+`TAILSCALE_CLIENT_SECRET`.
+
+The usual cause is a headless or minimal Linux session with no Secret Service
+provider on D-Bus. Install and unlock one — `gnome-keyring` or KWallet on a
+desktop, or `keyring` alternatives such as `keyrings.alt` where a desktop
+service is not an option — and re-run enable, or simply keep supplying the
+environment variables. A stored credential lives under the keyring service
+name `localghost-tailscale` and can be inspected or removed with the system's
+own keyring tools; `localghost tailscale disable` also deletes it.
+
 ## Terminal only scrolls part of the screen
 
 After a `localghost run` was killed outright — `kill -9`, a crashed terminal
