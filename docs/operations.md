@@ -24,6 +24,9 @@ uvx localghost --status
 ## Optional trusted HTTPS
 
 The hub begins HTTP-only. Trusted HTTPS requires `mkcert` on the host. In an
+interactive terminal, `localghost trust` explains that a sudo password may be
+requested because the public development root is being added to the system
+trust store. In an
 interactive terminal with `mkcert` installed, the first start offers to enable
 HTTPS and names the public root fingerprint before any privilege prompt
 appears. Otherwise, the successful HTTP startup ends by showing the command to

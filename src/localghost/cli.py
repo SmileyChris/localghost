@@ -942,7 +942,10 @@ def _enable_https() -> None:
     certificate_path = _public_root_path()
     details(
         [
-            ("Authorization", "system authorization is required now"),
+            (
+                "Authorization",
+                "sudo password may be requested for system trust",
+            ),
             ("Installer", "mkcert, limited to the hub's public root"),
             ("Trust stores", "system,nss"),
             ("public-root fingerprint", certificate.fingerprint),
