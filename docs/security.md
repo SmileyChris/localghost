@@ -112,3 +112,24 @@ can read that label; do not use a sensitive checkout path.
 
 Broader features require separate designs and threat analysis rather than ad
 hoc production adaptation of this local configuration.
+
+## Tailscale hosting
+
+Tailnet hosting intentionally expands exposure from one machine to authorized
+tailnet devices. The gateway runs Tailscale's userspace networking stack and
+does not publish a LAN or public host port. It does not use Tailscale Funnel or
+Serve. Tailnet policy must restrict access to the gateway's device tag when the
+whole tailnet should not reach development applications.
+
+The enable command exchanges a scoped OAuth client credential for a temporary
+access token, creates a single-use short-lived device auth key, and updates
+split DNS. Those credentials and keys are held only in process memory and are
+not written to localghost state. The prior split-DNS map is saved because
+disable can restore the suffix's prior value. The API update is a domain-scoped
+PATCH, so unrelated DNS mappings are untouched. Treat the saved map as
+administrative metadata, even though it contains no secret.
+
+The tailnet suffix has its own CA and signer volumes. Each participating client
+explicitly installs that public root with `localghost tailscale trust SUFFIX`.
+This grants the development hub authority for names under that suffix on the
+client; it should not be used as a general organizational DNS suffix.

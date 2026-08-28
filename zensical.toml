@@ -12,6 +12,7 @@ nav = [
     {"Integrate applications" = "integrating-applications.md"},
     {"Save project setup" = "saving-setup.md"},
     {"Run host applications" = "running-host-apps.md"},
+    {"Host on a tailnet" = "tailscale.md"},
   ]},
   {"Operate localghost" = [
     {"Operations" = "operations.md"},

@@ -35,6 +35,7 @@ type ContainerInfo struct {
 	ProjectName     string
 	MetadataDomains []string
 	Networks        []string
+	Labels          map[string]string
 }
 
 type dockerContainer struct {
@@ -141,7 +142,7 @@ func (d *DockerClient) ListOptedInContainers(ctx context.Context) ([]ContainerIn
 		}
 		result = append(result, ContainerInfo{
 			ID: c.ID, Name: name, ProjectName: project,
-			MetadataDomains: domains, Networks: containerNetworks(c),
+			MetadataDomains: domains, Networks: containerNetworks(c), Labels: c.Labels,
 		})
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
@@ -208,6 +209,10 @@ func ParseMetadataDomains(raw string) ([]string, error) {
 // ValidateMetadataDomain enforces the documented project.localhost,
 // service.project.localhost, and *.project.localhost conventions.
 func ValidateMetadataDomain(domain string) error {
+	return ValidateMetadataDomainForSuffix(domain, "localhost")
+}
+
+func ValidateMetadataDomainForSuffix(domain, suffix string) error {
 	if domain == "" {
 		return fmt.Errorf("empty metadata domain")
 	}
@@ -218,8 +223,8 @@ func ValidateMetadataDomain(domain string) error {
 		return fmt.Errorf("domain %q must be lowercase", domain)
 	}
 	labels := strings.Split(domain, ".")
-	if len(labels) < 2 || labels[len(labels)-1] != "localhost" {
-		return fmt.Errorf("domain %q must end in .localhost", domain)
+	if len(labels) < 2 || labels[len(labels)-1] != suffix {
+		return fmt.Errorf("domain %q must end in .%s", domain, suffix)
 	}
 	if len(labels) != 2 && len(labels) != 3 {
 		return fmt.Errorf("domain %q is outside supported hostname depth", domain)
@@ -254,8 +259,12 @@ func urlQueryEscape(s string) string {
 func ValidateProjectName(name string) bool { return projectNameRE.MatchString(name) }
 
 func ProjectDomains(project string) []string {
+	return ProjectDomainsForSuffix(project, "localhost")
+}
+
+func ProjectDomainsForSuffix(project, suffix string) []string {
 	if !ValidateProjectName(project) {
 		return nil
 	}
-	return []string{project + ".localhost", "*." + project + ".localhost"}
+	return []string{project + "." + suffix, "*." + project + "." + suffix}
 }

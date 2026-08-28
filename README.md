@@ -89,6 +89,10 @@ uvx localghost manage stop SESSION_ID
 See [Saving project setup](docs/saving-setup.md) for `.localghost.toml`, Compose
 overrides, custom commands, explicit type selection, and safe updates.
 
+To make the same project and secondary-service hostnames available inside a
+Tailscale tailnet, see [Tailnet hosting](docs/tailscale.md). It uses an opt-in
+tagged gateway and split DNS; the ordinary `.localhost` routes stay local.
+
 ## Documentation
 
 The [localghost documentation](docs/index.md) covers application integration,

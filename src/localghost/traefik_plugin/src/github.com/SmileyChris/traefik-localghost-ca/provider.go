@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -76,7 +78,7 @@ type Provider struct {
 	baseline       *projectCert
 	storedCerts    map[string]*projectCert
 	activeCerts    map[string]*projectCert
-	lastSnapshot   []flatCert
+	lastSnapshot   []byte
 	dockerLost     bool
 
 	mu     sync.Mutex
@@ -118,8 +120,8 @@ func (p *Provider) Init() error {
 	if p.renewBefore <= 0 || p.renewBefore >= p.leafLifetime {
 		return fmt.Errorf("renewBefore must be greater than zero and less than leafLifetime")
 	}
-	if p.domainSuffix != "localhost" {
-		return fmt.Errorf("domainSuffix must be \"localhost\", got %q", p.domainSuffix)
+	if !ValidateProjectName(p.domainSuffix) {
+		return fmt.Errorf("domainSuffix must be one lowercase DNS label, got %q", p.domainSuffix)
 	}
 	if p.storagePath == "" {
 		return fmt.Errorf("storagePath must not be empty")
@@ -142,7 +144,7 @@ func (p *Provider) Init() error {
 	if err := validateStorageDirectory(p.storagePath); err != nil {
 		return err
 	}
-	ca, err := LoadSignerCA(p.storagePath)
+	ca, err := LoadSignerCAForSuffix(p.storagePath, p.domainSuffix)
 	if err != nil {
 		return fmt.Errorf("loading bootstrapped signer: %w", err)
 	}
@@ -245,22 +247,28 @@ func (p *Provider) publish(ctx context.Context, cfgChan chan<- json.Marshaler) {
 		}
 	}
 	p.activeCerts = newActive
-	snapshot := p.buildSnapshot()
-	if snapshotsEqual(snapshot, p.lastSnapshot) {
+	payload := &tlsPayload{certs: p.buildSnapshot(), routers: p.mirroredRouters(containers)}
+	snapshot, err := payload.MarshalJSON()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "localghostCA[%s]: snapshot encoding failed: %v; retaining last snapshot\n", p.name, err)
+		p.mu.Unlock()
+		return
+	}
+	if string(snapshot) == string(p.lastSnapshot) {
 		p.mu.Unlock()
 		return
 	}
 	p.lastSnapshot = snapshot
 	p.mu.Unlock()
 
-	fmt.Fprintf(os.Stderr, "localghostCA[%s]: publishing complete TLS snapshot (%d certificates)\n", p.name, len(snapshot))
+	fmt.Fprintf(os.Stderr, "localghostCA[%s]: publishing complete snapshot (%d certificates, %d routers)\n", p.name, len(payload.certs), len(payload.routers))
 	if ctx.Err() != nil {
 		return
 	}
 	// A select between this interpreted json.Marshaler value and ctx.Done()
 	// panics in Yaegi v0.16.1. Keep the send outside p.mu and check
 	// cancellation immediately before it.
-	cfgChan <- &tlsPayload{certs: snapshot}
+	cfgChan <- payload
 }
 
 func (p *Provider) desiredSpecs(containers []ContainerInfo) ([]certSpec, error) {
@@ -273,6 +281,9 @@ func (p *Provider) desiredSpecs(containers []ContainerInfo) ([]certSpec, error) 
 			projects[c.ProjectName] = struct{}{}
 		}
 		for _, domain := range c.MetadataDomains {
+			if p.domainSuffix != "localhost" {
+				domain = strings.TrimSuffix(domain, ".localhost") + "." + p.domainSuffix
+			}
 			metadata[domain] = struct{}{}
 		}
 	}
@@ -321,7 +332,7 @@ func sortedSetKeys(values map[string]struct{}) []string {
 
 func (p *Provider) projectSpec(project string) certSpec {
 	return certSpec{key: "project:" + project, kind: "project", name: project,
-		domains: ProjectDomains(project), dir: filepath.Join(p.storagePath, "projects", project)}
+		domains: ProjectDomainsForSuffix(project, p.domainSuffix), dir: filepath.Join(p.storagePath, "projects", project)}
 }
 
 func (p *Provider) metadataSpec(domain string) certSpec {
@@ -333,7 +344,7 @@ func (p *Provider) metadataSpec(domain string) certSpec {
 
 func (p *Provider) ensureBaseline(runtime bool) error {
 	spec := certSpec{key: baselineKey, kind: "baseline", name: "baseline",
-		domains: []string{"localhost", "traefik.localhost"}, dir: filepath.Join(p.storagePath, "baseline")}
+		domains: []string{p.domainSuffix, "traefik." + p.domainSuffix}, dir: filepath.Join(p.storagePath, "baseline")}
 	cert, err := p.ensureSpec(spec, runtime)
 	if err == nil {
 		p.baseline = cert
@@ -401,7 +412,7 @@ func (p *Provider) issueAndPersist(spec certSpec) (*projectCert, error) {
 
 func (p *Provider) loadStoredCertificates() error {
 	baseline := certSpec{key: baselineKey, kind: "baseline", name: "baseline",
-		domains: []string{"localhost", "traefik.localhost"}, dir: filepath.Join(p.storagePath, "baseline")}
+		domains: []string{p.domainSuffix, "traefik." + p.domainSuffix}, dir: filepath.Join(p.storagePath, "baseline")}
 	if err := p.loadOptionalSpec(baseline); err != nil {
 		return err
 	}
@@ -490,7 +501,7 @@ func (p *Provider) loadMetadataCertificates() error {
 			return fmt.Errorf("reading metadata identity %q: %w", entry.Name(), err)
 		}
 		domain := strings.TrimSuffix(string(domainBytes), "\n")
-		if err := ValidateMetadataDomain(domain); err != nil {
+		if err := ValidateMetadataDomainForSuffix(domain, p.domainSuffix); err != nil {
 			return fmt.Errorf("invalid stored metadata domain: %w", err)
 		}
 		spec := p.metadataSpec(domain)
@@ -526,10 +537,91 @@ type flatCert struct {
 	Stores   []string `json:"stores,omitempty"`
 }
 
-type tlsPayload struct{ certs []flatCert }
+type flatTLS struct{}
+
+type flatRouter struct {
+	EntryPoints []string `json:"entryPoints,omitempty"`
+	Middlewares []string `json:"middlewares,omitempty"`
+	Service     string   `json:"service,omitempty"`
+	Rule        string   `json:"rule,omitempty"`
+	Priority    int      `json:"priority,omitempty"`
+	TLS         *flatTLS `json:"tls,omitempty"`
+}
+
+type tlsPayload struct {
+	certs   []flatCert
+	routers map[string]flatRouter
+}
 
 func (p *tlsPayload) MarshalJSON() ([]byte, error) {
-	return json.Marshal(map[string]interface{}{"tls": map[string]interface{}{"certificates": p.certs}})
+	result := map[string]interface{}{"tls": map[string]interface{}{"certificates": p.certs}}
+	if len(p.routers) != 0 {
+		result["http"] = map[string]interface{}{"routers": p.routers}
+	}
+	return json.Marshal(result)
+}
+
+var localhostHostRule = regexp.MustCompile("Host\\(`([a-z0-9.-]+)\\.localhost`\\)")
+
+func (p *Provider) mirroredRouters(containers []ContainerInfo) map[string]flatRouter {
+	if p.domainSuffix == "localhost" {
+		return nil
+	}
+	result := make(map[string]flatRouter)
+	for _, container := range containers {
+		for key, rule := range container.Labels {
+			const prefix = "traefik.http.routers."
+			const suffix = ".rule"
+			if !strings.HasPrefix(key, prefix) || !strings.HasSuffix(key, suffix) {
+				continue
+			}
+			name := strings.TrimSuffix(strings.TrimPrefix(key, prefix), suffix)
+			mirrored := localhostHostRule.ReplaceAllString(rule, "Host(`${1}."+p.domainSuffix+"`)")
+			if mirrored == rule {
+				continue
+			}
+			base := prefix + name + "."
+			service := container.Labels[base+"service"]
+			entryPoints := splitLabel(container.Labels[base+"entrypoints"])
+			if service == "" || len(entryPoints) == 0 {
+				fmt.Fprintf(os.Stderr, "localghostCA[%s]: router %s cannot be mirrored without explicit service and entrypoints\n", p.name, name)
+				continue
+			}
+			service = qualifyReference(service)
+			middlewares := splitLabel(container.Labels[base+"middlewares"])
+			for index := range middlewares {
+				middlewares[index] = qualifyReference(middlewares[index])
+			}
+			priority, _ := strconv.Atoi(container.Labels[base+"priority"])
+			router := flatRouter{EntryPoints: entryPoints, Middlewares: middlewares, Service: service, Rule: mirrored, Priority: priority}
+			if strings.EqualFold(container.Labels[base+"tls"], "true") {
+				router.TLS = &flatTLS{}
+			}
+			result[name] = router
+		}
+	}
+	return result
+}
+
+func splitLabel(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+func qualifyReference(value string) string {
+	if strings.Contains(value, "@") {
+		return value
+	}
+	return value + "@docker"
 }
 
 // buildSnapshot creates one complete deterministic provider snapshot. Traefik
@@ -551,21 +643,4 @@ func (p *Provider) buildSnapshot() []flatCert {
 		certs = append(certs, flatCert{CertFile: string(cert.certPEM), KeyFile: string(cert.keyPEM)})
 	}
 	return certs
-}
-
-func snapshotsEqual(left, right []flatCert) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for index := range left {
-		if left[index].CertFile != right[index].CertFile || left[index].KeyFile != right[index].KeyFile || len(left[index].Stores) != len(right[index].Stores) {
-			return false
-		}
-		for storeIndex := range left[index].Stores {
-			if left[index].Stores[storeIndex] != right[index].Stores[storeIndex] {
-				return false
-			}
-		}
-	}
-	return true
 }

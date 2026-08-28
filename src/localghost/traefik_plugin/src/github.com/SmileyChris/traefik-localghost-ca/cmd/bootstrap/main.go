@@ -11,10 +11,11 @@ import (
 func main() {
 	rootPath := flag.String("root-path", "/var/lib/localghost-root", "root-only volume path")
 	signerPath := flag.String("signer-path", "/var/lib/localghost-ca", "online signer volume path")
+	suffix := flag.String("suffix", "localhost", "DNS suffix for the constrained signer")
 	printRoot := flag.Bool("print-root", false, "write only the public root certificate to stdout")
 	flag.Parse()
 
-	ca, err := localghostca.BootstrapCA(*rootPath, *signerPath)
+	ca, err := localghostca.BootstrapCAForSuffix(*rootPath, *signerPath, *suffix)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bootstrap failed: %v\n", err)
 		os.Exit(1)

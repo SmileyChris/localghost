@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import importlib.resources as resources
+import ipaddress
 import json
 import os
 import re
@@ -77,6 +78,31 @@ from .sessions import clean as clean_sessions
 from .sessions import create as create_session
 from .sessions import find_matching, sessions
 from .sessions import stop as stop_session
+from .tailscale import (
+    API as TailscaleAPI,
+)
+from .tailscale import (
+    TailscaleError,
+    TailscaleState,
+)
+from .tailscale import (
+    detect_suffix as detect_tailscale_suffix,
+)
+from .tailscale import (
+    fetch_public_root as fetch_tailscale_root,
+)
+from .tailscale import (
+    load_state as load_tailscale_state,
+)
+from .tailscale import (
+    remove_state as remove_tailscale_state,
+)
+from .tailscale import (
+    save_state as save_tailscale_state,
+)
+from .tailscale import (
+    validate_suffix as validate_tailscale_suffix,
+)
 from .trust import MkcertInstaller, PublicCertificate, TrustError, ZenNssInstaller
 
 LOCALGHOST_VERSION = importlib.metadata.version("localghost")
@@ -132,6 +158,7 @@ def cli(ctx: click.Context, show_status: bool) -> None:
             success(f"Hub is already ready at {scheme}://traefik.localhost{suffix}")
         else:
             success(f"Hub is ready at {scheme}://traefik.localhost{suffix}")
+        _report_tailnet_origin("traefik")
         try:
             routes((route.hostname, route.location) for route in active_routes())
         except click.ClickException as exc:
@@ -348,6 +375,144 @@ def _trust_status() -> None:
         ],
         title="Trust status",
     )
+
+
+@cli.group(invoke_without_command=True)
+@click.pass_context
+def tailscale(ctx: click.Context) -> None:
+    """Expose the same localghost routes inside a Tailscale tailnet."""
+    if ctx.invoked_subcommand is None:
+        _tailscale_status()
+
+
+@tailscale.command("status")
+def tailscale_status() -> None:
+    """Show saved tailnet hosting state without changing it."""
+    _tailscale_status()
+
+
+def _tailscale_status() -> None:
+    try:
+        state = load_tailscale_state()
+    except TailscaleError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if state is None:
+        details([("Tailscale hosting", "disabled")], title="Tailscale status")
+        return
+    details(
+        [
+            ("Tailscale hosting", "enabled"),
+            ("Tailnet", state.tailnet),
+            ("Route suffix", f".{state.suffix}"),
+            ("Gateway", ", ".join(state.gateway_ips)),
+            ("Device tag", state.tag),
+        ],
+        title="Tailscale status",
+    )
+
+
+@tailscale.command("enable")
+@click.option("tailnet", "--tailnet", required=True, help="Tailnet name or '-' alias.")
+@click.option("suffix", "--suffix", help="One-label route suffix, such as tail1234.")
+@click.option("tag", "--tag", default="tag:localghost", show_default=True)
+@click.option("client_id", "--client-id", envvar="TAILSCALE_CLIENT_ID", prompt=True)
+@click.option(
+    "client_secret",
+    "--client-secret",
+    envvar="TAILSCALE_CLIENT_SECRET",
+    prompt=True,
+    hide_input=True,
+)
+def tailscale_enable(
+    tailnet: str, suffix: str | None, tag: str, client_id: str, client_secret: str
+) -> None:
+    """Enroll a tagged gateway and add split DNS for the chosen suffix."""
+    if load_tailscale_state() is not None:
+        raise click.ClickException("Tailscale hosting is already enabled")
+    if not tag.startswith("tag:"):
+        raise click.UsageError("--tag must start with 'tag:'")
+    try:
+        chosen_suffix = validate_tailscale_suffix(
+            suffix or detect_tailscale_suffix()
+        )
+        api = TailscaleAPI.authenticate(client_id, client_secret)
+        auth_key = api.create_auth_key(tailnet, tag)
+        previous = api.split_dns(tailnet)
+        # Tailnet TLS terminates on Traefik's websecure entrypoint. Bootstrap
+        # its localhost signer as well, but do not install localhost trust as
+        # an implicit side effect of enabling a remote route.
+        _bootstrap_public_root()
+        _bootstrap_tailnet_root(chosen_suffix)
+        gateway_ips = _bootstrap_tailscale_gateway(chosen_suffix, auth_key)
+        state = TailscaleState(
+            tailnet=tailnet,
+            suffix=chosen_suffix,
+            gateway_ips=gateway_ips,
+            previous_split_dns=previous,
+            tag=tag,
+        )
+        save_tailscale_state(state)
+        api.update_split_dns(tailnet, {chosen_suffix: list(gateway_ips)})
+        _run_proxy("up", https_enabled=True, force_recreate=True)
+    except (TailscaleError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    success(f"Tailnet routes are enabled at https://<project>.{chosen_suffix}.")
+    action("Trust this client", f"localghost tailscale trust {chosen_suffix}")
+
+
+@tailscale.command("disable")
+@click.option("client_id", "--client-id", envvar="TAILSCALE_CLIENT_ID", prompt=True)
+@click.option(
+    "client_secret",
+    "--client-secret",
+    envvar="TAILSCALE_CLIENT_SECRET",
+    prompt=True,
+    hide_input=True,
+)
+def tailscale_disable(client_id: str, client_secret: str) -> None:
+    """Restore the prior tailnet DNS configuration and stop the gateway."""
+    try:
+        state = load_tailscale_state()
+        if state is None:
+            raise TailscaleError("Tailscale hosting is not enabled")
+        api = TailscaleAPI.authenticate(client_id, client_secret)
+        previous = state.previous_split_dns.get(state.suffix)
+        api.update_split_dns(state.tailnet, {state.suffix: previous})
+        remove_tailscale_state()
+        if proxy_is_running():
+            _run_proxy("up", https_enabled=_https_configured(), force_recreate=True)
+    except TailscaleError as exc:
+        raise click.ClickException(str(exc)) from exc
+    success("Tailnet DNS was restored and the local gateway was removed.")
+    info("Remove the offline tagged localghost device in the Tailscale admin console.")
+
+
+@tailscale.command("trust")
+@click.argument("suffix")
+def tailscale_trust(suffix: str) -> None:
+    """Trust a tailnet localghost root on this client."""
+    try:
+        suffix = validate_tailscale_suffix(suffix)
+        certificate = PublicCertificate.parse(fetch_tailscale_root(suffix))
+    except (TailscaleError, TrustError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    path = _state_directory() / f"tailscale-{suffix}-rootCA.pem"
+    _write_public_root(path, certificate.pem)
+    details(
+        [
+            ("Authorization", "system authorization is required now"),
+            ("Scope", f"development names under .{suffix}"),
+            ("Public-root fingerprint", certificate.fingerprint),
+            ("Private keys", "remain on the hosting machine"),
+        ],
+        title="Tailnet HTTPS setup",
+    )
+    try:
+        MkcertInstaller(path).install()
+        ZenNssInstaller(path).install()
+    except TrustError as exc:
+        raise click.ClickException(str(exc)) from exc
+    success(f"Trusted localghost HTTPS for *.{suffix} on this client.")
 
 
 @cli.command()
@@ -717,6 +882,7 @@ def _run_compose(
         # route to it.
         _run_proxy("up", https_enabled=_https_configured())
         info(f"Public URL: {public_origin}")
+        _report_tailnet_origin(project)
         bar.status("starting")
         result = subprocess.run(command, cwd=cwd, check=False)
     if result.returncode:
@@ -759,6 +925,7 @@ def _print_run_plan(plan: RunPlan, dry_run: bool, detach: bool = False) -> None:
         project_root=plan.project_root,
         working_directory=plan.working_directory,
     )
+    _report_tailnet_origin(plan.name)
     if dry_run:
         click.echo(plan.bridge_yaml, nl=False)
     elif detach:
@@ -826,6 +993,16 @@ def _proxy_origin(hostname: str) -> str:
     return f"{scheme}://{hostname}.localhost{suffix}"
 
 
+def _report_tailnet_origin(hostname: str) -> None:
+    try:
+        state = load_tailscale_state()
+    except TailscaleError as exc:
+        warning("Tailnet URL unavailable", [str(exc)])
+        return
+    if state is not None:
+        info(f"Tailnet URL: https://{hostname}.{state.suffix}")
+
+
 def _run_proxy(
     action: str,
     *,
@@ -833,6 +1010,12 @@ def _run_proxy(
     https_enabled: bool = False,
     force_recreate: bool = False,
 ) -> None:
+    try:
+        tailscale_state = load_tailscale_state()
+    except TailscaleError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if tailscale_state is not None:
+        https_enabled = True
     with _proxy_resource_directory() as resource_root:
         compose_file = resource_root / "proxy_compose.yaml"
         command = [
@@ -846,13 +1029,21 @@ def _run_proxy(
         ]
         if https_enabled:
             command[6:6] = ["--file", str(resource_root / "proxy_compose_https.yaml")]
+        if tailscale_state is not None:
+            insertion = [
+                "--file",
+                str(resource_root / "proxy_compose_tailscale.yaml"),
+            ]
+            command[8:8] = insertion
         if action == "down":
             # `bootstrap` sits behind a profile, so a plain `down` leaves its
             # exited container behind and Docker still reports the project as
             # existing.
             command[-1:-1] = ["--profile", "bootstrap"]
         if action == "up":
-            command.extend(["--detach", "--wait", "--wait-timeout", "60"])
+            command.extend(
+                ["--detach", "--wait", "--wait-timeout", "60", "--remove-orphans"]
+            )
             if force_recreate:
                 command.append("--force-recreate")
 
@@ -863,6 +1054,8 @@ def _run_proxy(
         try:
             environment = os.environ.copy()
             environment["LOCALGHOST_IMAGE_TAG"] = f"v{LOCALGHOST_VERSION}"
+            if tailscale_state is not None:
+                environment["LOCALGHOST_TAILSCALE_SUFFIX"] = tailscale_state.suffix
             result = subprocess.run(
                 command, check=False, capture_output=True, text=True, env=environment
             )
@@ -874,6 +1067,98 @@ def _run_proxy(
         if detail:
             warning("Hub command failed", [detail])
         raise click.exceptions.Exit(result.returncode)
+
+
+def _bootstrap_tailnet_root(suffix: str) -> PublicCertificate:
+    with _proxy_resource_directory() as resource_root:
+        files = [
+            resource_root / "proxy_compose.yaml",
+            resource_root / "proxy_compose_https.yaml",
+            resource_root / "proxy_compose_tailscale.yaml",
+        ]
+        command = ["docker", "compose", "--project-name", "localghost"]
+        for compose_file in files:
+            command.extend(["--file", str(compose_file)])
+        command.extend(
+            [
+                "run",
+                "--rm",
+                "bootstrap",
+                "--root-path=/var/lib/localghost-tailnet-root",
+                "--signer-path=/var/lib/localghost-tailnet-ca",
+                f"--suffix={suffix}",
+                "--print-root",
+            ]
+        )
+        environment = os.environ.copy()
+        environment["LOCALGHOST_IMAGE_TAG"] = f"v{LOCALGHOST_VERSION}"
+        environment["LOCALGHOST_TAILSCALE_SUFFIX"] = suffix
+        try:
+            result = subprocess.run(
+                command, check=False, capture_output=True, env=environment
+            )
+        except FileNotFoundError as exc:
+            raise TailscaleError("docker is required") from exc
+    if result.returncode:
+        detail = (result.stderr or result.stdout).decode(errors="replace").strip()
+        raise TailscaleError(detail or "could not bootstrap the tailnet CA")
+    try:
+        return PublicCertificate.parse(result.stdout)
+    except TrustError as exc:
+        raise TailscaleError(
+            f"tailnet CA bootstrap returned invalid data: {exc}"
+        ) from exc
+
+
+def _bootstrap_tailscale_gateway(suffix: str, auth_key: str) -> tuple[str, ...]:
+    with _proxy_resource_directory() as resource_root:
+        command = [
+            "docker",
+            "compose",
+            "--project-name",
+            "localghost",
+            "--file",
+            str(resource_root / "proxy_compose.yaml"),
+            "--file",
+            str(resource_root / "proxy_compose_https.yaml"),
+            "--file",
+            str(resource_root / "proxy_compose_tailscale.yaml"),
+            "run",
+            "--rm",
+            "--no-deps",
+            "-T",
+            "tailscale-gateway",
+            f"--suffix={suffix}",
+            f"--hostname=localghost-{suffix}",
+            "--state-dir=/var/lib/localghost-tailscale",
+            "--bootstrap",
+        ]
+        environment = os.environ.copy()
+        environment["LOCALGHOST_IMAGE_TAG"] = f"v{LOCALGHOST_VERSION}"
+        environment["LOCALGHOST_TAILSCALE_SUFFIX"] = suffix
+        try:
+            result = subprocess.run(
+                command,
+                input=auth_key.encode(),
+                check=False,
+                capture_output=True,
+                env=environment,
+            )
+        except FileNotFoundError as exc:
+            raise TailscaleError("docker is required") from exc
+    if result.returncode:
+        detail = (result.stderr or result.stdout).decode(errors="replace").strip()
+        raise TailscaleError(detail or "could not enroll the Tailscale gateway")
+    addresses = []
+    for value in result.stdout.decode(errors="replace").split():
+        value = value.rsplit("=", 1)[-1]
+        try:
+            addresses.append(str(ipaddress.ip_address(value)))
+        except ValueError:
+            continue
+    if not addresses:
+        raise TailscaleError("gateway enrollment returned no Tailscale address")
+    return tuple(addresses)
 
 
 def _state_directory() -> Path:

@@ -52,7 +52,14 @@ def test_default_command_starts_the_bundled_proxy(monkeypatch) -> None:
     bundled = Path(command[5]).read_text(encoding="utf-8")
     assert "context: ." in bundled
     assert "image: localghost-traefik:${LOCALGHOST_IMAGE_TAG}" in bundled
-    assert command[6:] == ["up", "--detach", "--wait", "--wait-timeout", "60"]
+    assert command[6:] == [
+        "up",
+        "--detach",
+        "--wait",
+        "--wait-timeout",
+        "60",
+        "--remove-orphans",
+    ]
     assert kwargs["check"] is False
     assert kwargs["capture_output"] is True
     assert kwargs["text"] is True

@@ -114,3 +114,19 @@ hub is retained. `save` records repeatable host run settings in
 
 The hub is always started as the fixed `localghost` Compose project, even
 when a host application sets `COMPOSE_PROJECT_NAME` for its own route.
+
+## Optional tailnet path
+
+Tailnet hosting adds a dedicated userspace Tailscale gateway to the hub. It
+owns no host ports: tsnet supplies its tailnet listeners for DNS, HTTP, and
+HTTPS. Split DNS sends only the configured one-label suffix to the gateway.
+The gateway answers supported route depths with its own Tailscale addresses,
+forwards HTTP to Traefik with the original Host header, and passes TLS through
+unchanged so Traefik still selects the certificate and router by SNI.
+
+A second instance of the local certificate provider watches the same opted-in
+Docker labels. It derives suffix-specific certificates and provider routers
+from the `.localhost` model, while explicitly referring back to Docker-owned
+services and middleware. This keeps one routing source of truth: applications
+do not acquire Tailscale labels and cannot drift between the two hostname
+systems.

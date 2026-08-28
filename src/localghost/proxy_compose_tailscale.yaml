@@ -1,0 +1,65 @@
+services:
+  bootstrap:
+    volumes:
+      - localghost-tailnet-ca-root:/var/lib/localghost-tailnet-root
+      - localghost-tailnet-ca-signer:/var/lib/localghost-tailnet-ca
+
+  traefik:
+    command:
+      - --api.dashboard=true
+      - --api.insecure=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --global.checknewversion=false
+      - --global.sendanonymoususage=false
+      - --ping=true
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=localghost
+      - --providers.plugin.localghostCA.dockerendpoint=unix:///var/run/docker.sock
+      - --providers.plugin.localghostCA.network=localghost
+      - --providers.plugin.localghostCA.storagepath=/var/lib/localghost-ca
+      - --providers.plugin.localghostCA.pollinterval=250ms
+      - --providers.plugin.localghostCA.domainsuffix=localhost
+      - --providers.plugin.localghostCA.leaflifetime=24h
+      - --providers.plugin.localghostCA.renewbefore=6h
+      - --providers.plugin.localghostTailnetCA.dockerendpoint=unix:///var/run/docker.sock
+      - --providers.plugin.localghostTailnetCA.network=localghost
+      - --providers.plugin.localghostTailnetCA.storagepath=/var/lib/localghost-tailnet-ca
+      - --providers.plugin.localghostTailnetCA.pollinterval=250ms
+      - --providers.plugin.localghostTailnetCA.domainsuffix=${LOCALGHOST_TAILSCALE_SUFFIX:?set LOCALGHOST_TAILSCALE_SUFFIX}
+      - --providers.plugin.localghostTailnetCA.leaflifetime=24h
+      - --providers.plugin.localghostTailnetCA.renewbefore=6h
+      - --experimental.abortonpluginfailure=true
+      - --experimental.localplugins.localghostCA.modulename=github.com/SmileyChris/traefik-localghost-ca
+      - --experimental.localplugins.localghostTailnetCA.modulename=github.com/SmileyChris/traefik-localghost-ca
+    volumes:
+      - localghost-tailnet-ca-signer:/var/lib/localghost-tailnet-ca
+
+  tailscale-gateway:
+    build:
+      context: ./tailscale_gateway
+      dockerfile: Dockerfile
+    image: localghost-tailscale-gateway:${LOCALGHOST_IMAGE_TAG}
+    restart: unless-stopped
+    command:
+      - --suffix=${LOCALGHOST_TAILSCALE_SUFFIX:?LOCALGHOST_TAILSCALE_SUFFIX is required}
+      - --hostname=localghost-${LOCALGHOST_TAILSCALE_SUFFIX}
+      - --state-dir=/var/lib/localghost-tailscale
+      - --root-ca=/var/lib/localghost-root/rootCA.pem
+      - --http-target=traefik:80
+      - --https-target=traefik:443
+    volumes:
+      - localghost-tailscale-state:/var/lib/localghost-tailscale
+      - localghost-tailnet-ca-root:/var/lib/localghost-root:ro
+    networks:
+      - localghost
+    depends_on:
+      traefik:
+        condition: service_healthy
+
+volumes:
+  localghost-tailscale-state:
+    name: localghost-tailscale-state
+  localghost-tailnet-ca-root:
+  localghost-tailnet-ca-signer:

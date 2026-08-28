@@ -134,6 +134,39 @@ def test_https_proxy_adds_loopback_dashboard_with_secure_redirect() -> None:
     assert profiled_model["services"]["bootstrap"]["profiles"] == ["bootstrap"]
 
 
+def test_tailscale_overlay_adds_unpublished_gateway_and_suffix_provider() -> None:
+    model = compose_model(
+        ROOT / "src" / "localghost" / "proxy_compose.yaml",
+        ROOT / "src" / "localghost" / "proxy_compose_https.yaml",
+        ROOT / "src" / "localghost" / "proxy_compose_tailscale.yaml",
+        LOCALGHOST_IMAGE_TAG="test",
+        LOCALGHOST_TAILSCALE_SUFFIX="tail1234",
+    )
+
+    gateway = model["services"]["tailscale-gateway"]
+    assert "ports" not in gateway
+    assert set(gateway["networks"]) == {"localghost"}
+    assert gateway["command"] == [
+        "--suffix=tail1234",
+        "--hostname=localghost-tail1234",
+        "--state-dir=/var/lib/localghost-tailscale",
+        "--root-ca=/var/lib/localghost-root/rootCA.pem",
+        "--http-target=traefik:80",
+        "--https-target=traefik:443",
+    ]
+    assert model["volumes"]["localghost-tailscale-state"]["name"] == (
+        "localghost-tailscale-state"
+    )
+
+    command = set(model["services"]["traefik"]["command"])
+    assert "--providers.plugin.localghostCA.domainsuffix=localhost" in command
+    assert "--providers.plugin.localghostTailnetCA.domainsuffix=tail1234" in command
+    assert (
+        "--experimental.localplugins.localghostTailnetCA.modulename="
+        "github.com/SmileyChris/traefik-localghost-ca"
+    ) in command
+
+
 def test_example_compose_exercises_consumer_contract() -> None:
     model = compose_model(
         ROOT / "examples" / "compose.yaml",

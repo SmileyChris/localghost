@@ -38,12 +38,22 @@ type CertificateAuthority struct {
 	intermediateCert *x509.Certificate
 	intermediateKey  *ecdsa.PrivateKey
 	storagePath      string
+	domainSuffix     string
 }
 
 // BootstrapCA creates or validates the offline root and constrained online
 // signer. It is idempotent. Intermediate rotation requires purging both
 // volumes rather than silently changing an existing identity.
 func BootstrapCA(rootPath, signerPath string) (*CertificateAuthority, error) {
+	return BootstrapCAForSuffix(rootPath, signerPath, "localhost")
+}
+
+// BootstrapCAForSuffix shares the offline root while creating an online
+// intermediate constrained to exactly one private DNS suffix.
+func BootstrapCAForSuffix(rootPath, signerPath, suffix string) (*CertificateAuthority, error) {
+	if !ValidateProjectName(suffix) {
+		return nil, fmt.Errorf("invalid DNS suffix %q", suffix)
+	}
 	if err := ensureSecureDir(rootPath, 0700); err != nil {
 		return nil, fmt.Errorf("preparing root-only storage: %w", err)
 	}
@@ -106,12 +116,12 @@ func BootstrapCA(rootPath, signerPath string) (*CertificateAuthority, error) {
 		return nil, fmt.Errorf("loading intermediate: %w", err)
 	}
 	if intermediatePair == nil {
-		certPEM, keyPEM, err := generateIntermediate(rootCert, rootKey)
+		certPEM, keyPEM, err := generateIntermediate(rootCert, rootKey, suffix)
 		if err != nil {
 			return nil, err
 		}
 		validate := func(pair *pairData) error {
-			_, _, err := parseAndValidateIntermediate(pair, rootCert)
+			_, _, err := parseAndValidateIntermediate(pair, rootCert, suffix)
 			return err
 		}
 		intermediatePair, err = commitVersionedPair(intermediateBase, intermediateCertFile, intermediateKeyFile, certPEM, keyPEM, caPerm, caKeyPerm, validate, nil)
@@ -119,16 +129,23 @@ func BootstrapCA(rootPath, signerPath string) (*CertificateAuthority, error) {
 			return nil, fmt.Errorf("committing intermediate: %w", err)
 		}
 	}
-	intermediateCert, intermediateKey, err := parseAndValidateIntermediate(intermediatePair, rootCert)
+	intermediateCert, intermediateKey, err := parseAndValidateIntermediate(intermediatePair, rootCert, suffix)
 	if err != nil {
 		return nil, err
 	}
-	return &CertificateAuthority{rootCert: rootCert, intermediateCert: intermediateCert, intermediateKey: intermediateKey, storagePath: signerPath}, nil
+	return &CertificateAuthority{rootCert: rootCert, intermediateCert: intermediateCert, intermediateKey: intermediateKey, storagePath: signerPath, domainSuffix: suffix}, nil
 }
 
 // LoadSignerCA loads bootstrap state from the signer volume. It never creates
 // root or intermediate state.
 func LoadSignerCA(signerPath string) (*CertificateAuthority, error) {
+	return LoadSignerCAForSuffix(signerPath, "localhost")
+}
+
+func LoadSignerCAForSuffix(signerPath, suffix string) (*CertificateAuthority, error) {
+	if !ValidateProjectName(suffix) {
+		return nil, fmt.Errorf("invalid DNS suffix %q", suffix)
+	}
 	if err := validateManagedDir(signerPath); err != nil {
 		return nil, fmt.Errorf("invalid signer storage: %w", err)
 	}
@@ -150,11 +167,11 @@ func LoadSignerCA(signerPath string) (*CertificateAuthority, error) {
 	if pair == nil {
 		return nil, fmt.Errorf("bootstrap intermediate is absent")
 	}
-	intermediate, key, err := parseAndValidateIntermediate(pair, root)
+	intermediate, key, err := parseAndValidateIntermediate(pair, root, suffix)
 	if err != nil {
 		return nil, err
 	}
-	return &CertificateAuthority{rootCert: root, intermediateCert: intermediate, intermediateKey: key, storagePath: signerPath}, nil
+	return &CertificateAuthority{rootCert: root, intermediateCert: intermediate, intermediateKey: key, storagePath: signerPath, domainSuffix: suffix}, nil
 }
 
 func generateRoot() ([]byte, []byte, error) {
@@ -180,7 +197,7 @@ func generateRoot() ([]byte, []byte, error) {
 	return marshalPair(der, key)
 }
 
-func generateIntermediate(root *x509.Certificate, rootKey *ecdsa.PrivateKey) ([]byte, []byte, error) {
+func generateIntermediate(root *x509.Certificate, rootKey *ecdsa.PrivateKey, suffix string) ([]byte, []byte, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, nil, fmt.Errorf("generating intermediate key: %w", err)
@@ -199,7 +216,7 @@ func generateIntermediate(root *x509.Certificate, rootKey *ecdsa.PrivateKey) ([]
 		NotBefore: now.Add(-time.Hour), NotAfter: notAfter,
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
 		BasicConstraintsValid: true, IsCA: true, MaxPathLen: 0, MaxPathLenZero: true,
-		PermittedDNSDomainsCritical: true, PermittedDNSDomains: []string{"localhost"},
+		PermittedDNSDomainsCritical: true, PermittedDNSDomains: []string{suffix},
 		SignatureAlgorithm: x509.ECDSAWithSHA256,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, root, &key.PublicKey, rootKey)
@@ -260,7 +277,7 @@ func validateRootCertificate(cert *x509.Certificate) error {
 	return nil
 }
 
-func parseAndValidateIntermediate(pair *pairData, root *x509.Certificate) (*x509.Certificate, *ecdsa.PrivateKey, error) {
+func parseAndValidateIntermediate(pair *pairData, root *x509.Certificate, suffix string) (*x509.Certificate, *ecdsa.PrivateKey, error) {
 	if err := validatePrivateKeyPermissions(pair.keyPath); err != nil {
 		return nil, nil, fmt.Errorf("invalid intermediate private-key permissions: %w", err)
 	}
@@ -279,7 +296,7 @@ func parseAndValidateIntermediate(pair *pairData, root *x509.Certificate) (*x509
 	if now.Before(cert.NotBefore) || !now.Before(cert.NotAfter) || cert.NotAfter.After(root.NotAfter) {
 		return nil, nil, fmt.Errorf("intermediate is outside its permitted validity period")
 	}
-	if !cert.PermittedDNSDomainsCritical || !reflect.DeepEqual(cert.PermittedDNSDomains, []string{"localhost"}) || len(cert.ExcludedDNSDomains) != 0 {
+	if !cert.PermittedDNSDomainsCritical || !reflect.DeepEqual(cert.PermittedDNSDomains, []string{suffix}) || len(cert.ExcludedDNSDomains) != 0 {
 		return nil, nil, fmt.Errorf("intermediate has invalid DNS name constraints")
 	}
 	if err := cert.CheckSignatureFrom(root); err != nil {
@@ -293,27 +310,31 @@ func parseAndValidateIntermediate(pair *pairData, root *x509.Certificate) (*x509
 
 // ValidateIssueDomains centrally enforces every supported issuance contract.
 func ValidateIssueDomains(domains []string) error {
-	if reflect.DeepEqual(domains, []string{"localhost", "traefik.localhost"}) {
+	return ValidateIssueDomainsForSuffix(domains, "localhost")
+}
+
+func ValidateIssueDomainsForSuffix(domains []string, suffix string) error {
+	if reflect.DeepEqual(domains, []string{suffix, "traefik." + suffix}) {
 		return nil
 	}
-	if len(domains) == 2 && strings.HasSuffix(domains[0], ".localhost") {
-		project := strings.TrimSuffix(domains[0], ".localhost")
-		if ValidateProjectName(project) && reflect.DeepEqual(domains, ProjectDomains(project)) {
+	if len(domains) == 2 && strings.HasSuffix(domains[0], "."+suffix) {
+		project := strings.TrimSuffix(domains[0], "."+suffix)
+		if ValidateProjectName(project) && reflect.DeepEqual(domains, ProjectDomainsForSuffix(project, suffix)) {
 			return nil
 		}
 	}
 	if len(domains) == 1 {
-		if err := ValidateMetadataDomain(domains[0]); err == nil {
+		if err := ValidateMetadataDomainForSuffix(domains[0], suffix); err == nil {
 			return nil
 		}
 	}
-	return fmt.Errorf("SANs %v are outside the supported localhost issuance contracts", domains)
+	return fmt.Errorf("SANs %v are outside the supported %s issuance contracts", domains, suffix)
 }
 
 // IssueLeaf signs only with the constrained intermediate and returns the leaf
 // followed by the intermediate. The root is never served.
 func (ca *CertificateAuthority) IssueLeaf(domains []string, lifetime time.Duration) ([]byte, []byte, error) {
-	if err := ValidateIssueDomains(domains); err != nil {
+	if err := ValidateIssueDomainsForSuffix(domains, ca.domainSuffix); err != nil {
 		return nil, nil, err
 	}
 	if lifetime <= 0 {
@@ -366,7 +387,7 @@ func (ca *CertificateAuthority) ValidateLeafPair(certPEM, keyPEM []byte, expecte
 	if err := keysMatch(cert.PublicKey, key); err != nil {
 		return nil, fmt.Errorf("certificate/key mismatch: %w", err)
 	}
-	if err := ValidateIssueDomains(expectedDomains); err != nil {
+	if err := ValidateIssueDomainsForSuffix(expectedDomains, ca.domainSuffix); err != nil {
 		return nil, fmt.Errorf("invalid expected issuance contract: %w", err)
 	}
 	if !reflect.DeepEqual(cert.DNSNames, expectedDomains) {

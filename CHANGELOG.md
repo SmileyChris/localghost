@@ -5,6 +5,17 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Added
+
+- Added opt-in Tailscale hosting with `localghost tailscale enable`, `status`,
+  `trust`, and `disable`. A dedicated tagged userspace gateway, split DNS, and
+  suffix-specific CA mirror every supported `.localhost` project, secondary,
+  and dashboard route without publishing the hub to the LAN or internet.
+- Added a generic suffix mode to the local CA provider. The tailnet provider
+  derives routes from the same Docker labels as localhost and references the
+  original Docker services and middleware, avoiding a second application
+  configuration path.
+
 ### Changed
 
 - Foreground runs now leave a persistent exit-status diagnosis after the

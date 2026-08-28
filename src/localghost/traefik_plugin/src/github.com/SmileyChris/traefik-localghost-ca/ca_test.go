@@ -54,6 +54,26 @@ func TestBootstrapCreatesSplitPersistentConstrainedCA(t *testing.T) {
 	}
 }
 
+func TestBootstrapForSuffixConstrainsAndIssuesOnlyThatSuffix(t *testing.T) {
+	root, signer := t.TempDir(), t.TempDir()
+	ca, err := BootstrapCAForSuffix(root, signer, "tail1234")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ca.intermediateCert.PermittedDNSDomains; len(got) != 1 || got[0] != "tail1234" {
+		t.Fatalf("unexpected constraints: %#v", got)
+	}
+	if _, _, err := ca.IssueLeaf([]string{"demo.tail1234", "*.demo.tail1234"}, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ca.IssueLeaf([]string{"demo.localhost"}, time.Hour); err == nil {
+		t.Fatal("tailnet CA issued an out-of-suffix leaf")
+	}
+	if _, err := LoadSignerCAForSuffix(signer, "tail1234"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLoadSignerFailsWithoutBootstrapAndNeverCreatesRoot(t *testing.T) {
 	signer := t.TempDir()
 	if _, err := LoadSignerCA(signer); err == nil {

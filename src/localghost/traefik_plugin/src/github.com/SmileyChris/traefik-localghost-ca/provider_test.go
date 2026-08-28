@@ -110,12 +110,14 @@ func TestPublishPreservesSnapshotOnDockerFailureAndRecovers(t *testing.T) {
 	ch := make(chan json.Marshaler, 3)
 	p.publish(context.Background(), ch)
 	first := <-ch
-	if _, err := first.MarshalJSON(); err != nil {
+	firstJSON, err := first.MarshalJSON()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if len(p.lastSnapshot) != 2 {
-		t.Fatalf("first snapshot has %d certificates, want baseline plus project", len(p.lastSnapshot))
+	if got := snapshotCertificateCount(t, firstJSON); got != 2 {
+		t.Fatalf("first snapshot has %d certificates, want baseline plus project", got)
 	}
+	firstSnapshot := append([]byte(nil), p.lastSnapshot...)
 
 	fake.err = errors.New("daemon unavailable")
 	p.publish(context.Background(), ch)
@@ -123,7 +125,7 @@ func TestPublishPreservesSnapshotOnDockerFailureAndRecovers(t *testing.T) {
 	if len(ch) != 0 {
 		t.Fatal("Docker failure should retain the existing snapshot without publishing an empty replacement")
 	}
-	if !p.dockerLost || len(p.lastSnapshot) != 2 {
+	if !p.dockerLost || string(p.lastSnapshot) != string(firstSnapshot) {
 		t.Fatal("provider did not retain failure state and complete snapshot")
 	}
 
@@ -134,11 +136,65 @@ func TestPublishPreservesSnapshotOnDockerFailureAndRecovers(t *testing.T) {
 	if _, err := recovered.MarshalJSON(); err != nil {
 		t.Fatal(err)
 	}
-	if len(p.lastSnapshot) != 1 {
-		t.Fatal("inactive project remained in recovered snapshot")
+	recoveredJSON, err := recovered.MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := snapshotCertificateCount(t, recoveredJSON); got != 1 {
+		t.Fatalf("inactive project remained in recovered snapshot: got %d certificates", got)
 	}
 	if p.dockerLost {
 		t.Fatal("Docker recovery state was not cleared")
+	}
+}
+
+func snapshotCertificateCount(t *testing.T, payload []byte) int {
+	t.Helper()
+	var decoded struct {
+		TLS struct {
+			Certificates []flatCert `json:"certificates"`
+		} `json:"tls"`
+	}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	return len(decoded.TLS.Certificates)
+}
+
+func TestTailnetProviderMirrorsRouterAndMetadata(t *testing.T) {
+	p := &Provider{domainSuffix: "tail1234"}
+	containers := []ContainerInfo{{
+		ProjectName:     "demo",
+		MetadataDomains: []string{"api.demo.localhost"},
+		Labels: map[string]string{
+			"traefik.http.routers.demo.rule":        "Host(`demo.localhost`) || Host(`api.demo.localhost`)",
+			"traefik.http.routers.demo.service":     "demo",
+			"traefik.http.routers.demo.entrypoints": "web, websecure",
+			"traefik.http.routers.demo.middlewares": "headers",
+			"traefik.http.routers.demo.priority":    "42",
+			"traefik.http.routers.demo.tls":         "true",
+		},
+	}}
+
+	specs, err := p.desiredSpecs(containers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundMetadata := false
+	for _, spec := range specs {
+		if spec.kind == "metadata" && len(spec.domains) == 1 && spec.domains[0] == "api.demo.tail1234" {
+			foundMetadata = true
+		}
+	}
+	if !foundMetadata {
+		t.Fatalf("tailnet metadata domain was not translated: %#v", specs)
+	}
+	router := p.mirroredRouters(containers)["demo"]
+	if router.Rule != "Host(`demo.tail1234`) || Host(`api.demo.tail1234`)" {
+		t.Fatalf("unexpected mirrored rule %q", router.Rule)
+	}
+	if router.Service != "demo@docker" || len(router.Middlewares) != 1 || router.Middlewares[0] != "headers@docker" || router.TLS == nil || router.Priority != 42 {
+		t.Fatalf("router references were not preserved: %#v", router)
 	}
 }
 
