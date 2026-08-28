@@ -158,11 +158,23 @@ def test_tailscale_overlay_adds_unpublished_gateway_and_suffix_provider() -> Non
         "--http-target=traefik:80",
         "--https-target=traefik:443",
     ]
+    root_mount = next(
+        mount
+        for mount in gateway["volumes"]
+        if mount["target"] == "/var/lib/localghost-root"
+    )
+    assert root_mount == {
+        "type": "volume",
+        "source": "localghost-tailnet-ca-signer",
+        "target": "/var/lib/localghost-root",
+        "read_only": True,
+        "volume": {},
+    }
     assert model["volumes"]["localghost-tailscale-state"]["name"] == (
         "localghost-tailscale-state-tail1234"
     )
-    assert model["volumes"]["localghost-tailnet-ca-root"]["name"] == (
-        "localghost-tailnet-ca-root-tail1234"
+    assert model["volumes"]["localghost-tailnet-ca-signer"]["name"] == (
+        "localghost-tailnet-ca-signer-tail1234"
     )
 
     command = set(model["services"]["traefik"]["command"])

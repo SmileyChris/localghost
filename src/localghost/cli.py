@@ -550,7 +550,11 @@ def _tailnet_root_path(suffix: str) -> Path:
 def _install_tailnet_trust(suffix: str, *, show_details: bool = True) -> None:
     try:
         suffix = validate_tailscale_suffix(suffix)
-        certificate = PublicCertificate.parse(fetch_tailscale_root(suffix))
+        state = load_tailscale_state()
+        gateway_ips = state.gateway_ips if state and state.suffix == suffix else ()
+        certificate = PublicCertificate.parse(
+            fetch_tailscale_root(suffix, gateway_ips)
+        )
     except (TailscaleError, TrustError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     path = _tailnet_root_path(suffix)

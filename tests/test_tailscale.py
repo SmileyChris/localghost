@@ -185,12 +185,22 @@ def test_api_rejects_missing_fields_and_unexpected_dns(monkeypatch) -> None:
 
 
 def test_fetch_public_root_success_and_failure(monkeypatch) -> None:
+    requests = []
+
+    def open_root(request, **kwargs):
+        requests.append(request)
+        return Response(CERTIFICATE_PEM)
+
     monkeypatch.setattr(
         tailscale_module.urllib.request,
         "urlopen",
-        lambda *args, **kwargs: Response(CERTIFICATE_PEM),
+        open_root,
     )
-    assert tailscale_module.fetch_public_root("tail1234") == CERTIFICATE_PEM
+    assert tailscale_module.fetch_public_root(
+        "tail1234", ("100.64.0.10",)
+    ) == CERTIFICATE_PEM
+    assert requests[0].full_url.startswith("http://100.64.0.10/")
+    assert requests[0].get_header("Host") == "trust.tail1234"
     monkeypatch.setattr(
         tailscale_module.urllib.request,
         "urlopen",
@@ -419,7 +429,7 @@ def test_tailnet_trust_downloads_and_installs_both_stores(
             installed.append(self.path)
 
     monkeypatch.setattr(
-        cli_module, "fetch_tailscale_root", lambda suffix: CERTIFICATE_PEM
+        cli_module, "fetch_tailscale_root", lambda suffix, gateway_ips: CERTIFICATE_PEM
     )
     monkeypatch.setattr(cli_module, "MkcertInstaller", Installer)
     monkeypatch.setattr(cli_module, "ZenNssInstaller", Installer)

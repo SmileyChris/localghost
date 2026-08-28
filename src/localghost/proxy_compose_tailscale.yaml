@@ -56,7 +56,10 @@ services:
       - --https-target=traefik:443
     volumes:
       - localghost-tailscale-state:/var/lib/localghost-tailscale
-      - localghost-tailnet-ca-root:/var/lib/localghost-root:ro
+      # The signer volume contains only the exported public root plus the
+      # constrained online signer. The offline root volume must never be
+      # mounted into this network-facing service.
+      - localghost-tailnet-ca-signer:/var/lib/localghost-root:ro
     networks:
       - localghost
     depends_on:

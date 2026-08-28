@@ -158,7 +158,7 @@ def test_trust_installs_active_tailnet_root(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(cli_module, "proxy_is_running", lambda: False)
     monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: state)
     monkeypatch.setattr(
-        cli_module, "fetch_tailscale_root", lambda suffix: CERTIFICATE_PEM
+        cli_module, "fetch_tailscale_root", lambda suffix, gateway_ips: CERTIFICATE_PEM
     )
     monkeypatch.setattr(cli_module, "MkcertInstaller", Installer)
     monkeypatch.setattr(cli_module, "ZenNssInstaller", Installer)

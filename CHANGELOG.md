@@ -28,6 +28,8 @@ uses [Semantic Versioning](https://semver.org/).
 - `localghost trust`, `trust --status`, and `trust --remove` now manage the
   active tailnet authority alongside `.localhost`; `tailscale trust` remains a
   compatibility alias.
+- Tailnet trust downloads use the enrolled gateway address directly, avoiding
+  stale public-DNS cache entries for private suffixes such as `.work`.
 - Replaced `localghost generate` with the project-oriented `localghost save`.
   Saving now has one contract across project types: host and custom runs are
   recorded in `.localghost.toml`, Compose integration is written to

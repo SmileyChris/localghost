@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import ipaddress
 import json
 import os
 import re
@@ -206,16 +207,28 @@ class API:
         )
 
 
-def fetch_public_root(suffix: str) -> bytes:
+def fetch_public_root(suffix: str, gateway_ips: tuple[str, ...] = ()) -> bytes:
     suffix = validate_suffix(suffix)
-    url = f"http://trust.{suffix}/.well-known/localghost/root.pem"
-    try:
-        with urllib.request.urlopen(url, timeout=15) as response:
-            return response.read()
-    except urllib.error.URLError as exc:
-        raise TailscaleError(
-            f"could not download the localghost root from {url}"
-        ) from exc
+    host = f"trust.{suffix}"
+    candidates = gateway_ips or (host,)
+    last_error: urllib.error.URLError | None = None
+    for candidate in candidates:
+        try:
+            address = str(ipaddress.ip_address(candidate))
+            if ":" in address:
+                address = f"[{address}]"
+        except ValueError:
+            address = candidate
+        url = f"http://{address}/.well-known/localghost/root.pem"
+        request = urllib.request.Request(url, headers={"Host": host})
+        try:
+            with urllib.request.urlopen(request, timeout=15) as response:
+                return response.read()
+        except urllib.error.URLError as exc:
+            last_error = exc
+    raise TailscaleError(
+        f"could not download the localghost root from the .{suffix} gateway"
+    ) from last_error
 
 
 def _request(
