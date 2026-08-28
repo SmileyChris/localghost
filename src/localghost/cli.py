@@ -288,6 +288,7 @@ def trust(remove: bool, show_status: bool) -> None:
         return
     was_configured = _https_configured()
     was_running = proxy_is_running()
+    info("Preparing HTTPS trust…")
     _enable_https()
     if was_running and not was_configured:
         _run_proxy("up", already_running=True, https_enabled=True)
