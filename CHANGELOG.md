@@ -49,6 +49,10 @@ uses [Semantic Versioning](https://semver.org/).
 - New tailnet roots are name-constrained to their own suffix, so the anchor a
   client installs cannot vouch for any other name. Existing unconstrained
   roots keep working and gain the constraint when the CA volumes are purged.
+- `localghost tailscale trust` accepts an optional `--fingerprint`, verified
+  against the downloaded root before anything is installed, so a client can
+  pin the value shown by `localghost trust --status` on the hosting machine
+  instead of trusting the tailnet path alone.
 - Trust setup now explains before installation that sudo may be requested for
   the system trust store.
 - Tailscale enable now offers automatic tailnet trust only when localhost trust

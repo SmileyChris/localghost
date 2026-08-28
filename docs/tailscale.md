@@ -98,6 +98,28 @@ When tailnet hosting is enabled, the standard trust command installs both the
 `.localhost` root and the active tailnet root. It downloads the latter from
 `http://trust.tail1234` over the tailnet. Private CA keys never leave Docker volumes.
 
+On another device, name the suffix instead:
+
+```sh
+localghost tailscale trust tail1234
+```
+
+That download is plain HTTP, and the tailnet is what secures it: split DNS
+resolves the name to the tagged gateway, and the connection to it is
+WireGuard-encrypted and gated by tailnet policy. Whoever can rewrite the
+tailnet's DNS configuration can therefore answer for `trust.tail1234`. To close
+that gap, read `Tailnet .tail1234` from `localghost trust --status` on the
+hosting machine, pass it to the other device, and the download is installed
+only if it matches:
+
+```sh
+localghost tailscale trust tail1234 --fingerprint SHA256:1A2B…
+```
+
+Trusting a root again replaces the one this client had for that suffix; the
+superseded certificate leaves the trust stores first, and the `.localhost`
+root is never disturbed.
+
 ## Operate and disable it
 
 Normal commands continue to own the hub:

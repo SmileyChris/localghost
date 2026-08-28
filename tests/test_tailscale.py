@@ -21,7 +21,7 @@ from localghost.tailscale import (
     save_state,
     validate_suffix,
 )
-from localghost.trust import TrustError
+from localghost.trust import PublicCertificate, TrustError
 
 CERTIFICATE_PEM = b"""-----BEGIN CERTIFICATE-----
 MAA=
@@ -628,6 +628,85 @@ def test_tailnet_trust_downloads_and_installs_both_stores(
     assert result.exit_code == 0, result.output
     assert len(installed) == 2
     assert (tmp_path / "tailscale-tail1234-rootCA.pem").read_bytes() == CERTIFICATE_PEM
+
+
+def test_tailnet_trust_accepts_a_matching_pinned_fingerprint(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    installed = []
+    fingerprint = PublicCertificate.parse(CERTIFICATE_PEM).fingerprint
+
+    class Installer:
+        def __init__(self, path, **kwargs):
+            self.path = path
+
+        def install(self, **kwargs):
+            installed.append(self.path)
+
+    monkeypatch.setattr(
+        cli_module, "fetch_tailscale_root", lambda suffix, gateway_ips: CERTIFICATE_PEM
+    )
+    monkeypatch.setattr(cli_module, "MkcertInstaller", Installer)
+    monkeypatch.setattr(cli_module, "ZenNssInstaller", Installer)
+
+    # The hub prints SHA256:ABCD…; a pasted fingerprint may be lower case or
+    # colon-separated.
+    spelled = ":".join(
+        fingerprint.removeprefix("SHA256:").lower()[index : index + 2]
+        for index in range(0, 64, 2)
+    )
+    result = CliRunner().invoke(
+        cli, ["tailscale", "trust", "tail1234", "--fingerprint", spelled]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert len(installed) == 2
+
+
+def test_tailnet_trust_refuses_a_root_with_another_fingerprint(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+
+    class Installer:
+        def __init__(self, path, **kwargs):
+            self.path = path
+
+        def install(self, **kwargs):
+            pytest.fail("an unverified root was installed")
+
+    monkeypatch.setattr(
+        cli_module, "fetch_tailscale_root", lambda suffix, gateway_ips: CERTIFICATE_PEM
+    )
+    monkeypatch.setattr(cli_module, "MkcertInstaller", Installer)
+    monkeypatch.setattr(cli_module, "ZenNssInstaller", Installer)
+
+    expected = "SHA256:" + "B" * 64
+    result = CliRunner().invoke(
+        cli, ["tailscale", "trust", "tail1234", "--fingerprint", expected]
+    )
+
+    assert result.exit_code != 0
+    assert "does not match" in result.output
+    assert PublicCertificate.parse(CERTIFICATE_PEM).fingerprint in result.output
+    assert not (tmp_path / "tailscale-tail1234-rootCA.pem").exists()
+
+
+def test_tailnet_trust_rejects_an_unreadable_fingerprint(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        cli_module,
+        "fetch_tailscale_root",
+        lambda suffix, gateway_ips: pytest.fail("downloaded before validation"),
+    )
+
+    result = CliRunner().invoke(
+        cli, ["tailscale", "trust", "tail1234", "--fingerprint", "nonsense"]
+    )
+
+    assert result.exit_code != 0
+    assert "64 hexadecimal characters" in result.output
 
 
 def test_tailnet_trust_removes_a_superseded_root_before_installing(

@@ -633,14 +633,22 @@ def tailscale_disable(client_id: str | None, client_secret: str | None) -> None:
 
 @tailscale.command("trust")
 @click.argument("suffix", required=False)
-def tailscale_trust(suffix: str | None) -> None:
+@click.option(
+    "fingerprint",
+    "--fingerprint",
+    help=(
+        "Install the root only when it has this SHA-256 fingerprint, as shown "
+        "by `localghost trust --status` on the hosting machine."
+    ),
+)
+def tailscale_trust(suffix: str | None, fingerprint: str | None) -> None:
     """Compatibility alias for trusting the active tailnet root."""
     if suffix is None:
         state = load_tailscale_state()
         if state is None:
             raise click.ClickException("tailnet hosting is not enabled")
         suffix = state.suffix
-    _install_tailnet_trust(suffix)
+    _install_tailnet_trust(suffix, expected_fingerprint=fingerprint)
 
 
 def _tailnet_root_path(suffix: str) -> Path:
@@ -652,7 +660,13 @@ def _tailnet_root_scope(path: Path) -> str:
     return path.name.removeprefix("tailscale-").removesuffix("-rootCA.pem")
 
 
-def _install_tailnet_trust(suffix: str, *, show_details: bool = True) -> None:
+def _install_tailnet_trust(
+    suffix: str,
+    *,
+    show_details: bool = True,
+    expected_fingerprint: str | None = None,
+) -> None:
+    expected = _normalize_fingerprint(expected_fingerprint)
     try:
         suffix = validate_tailscale_suffix(suffix)
         state = load_tailscale_state()
@@ -662,6 +676,13 @@ def _install_tailnet_trust(suffix: str, *, show_details: bool = True) -> None:
         )
     except (TailscaleError, TrustError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
+    if expected is not None and expected != certificate.fingerprint:
+        raise click.ClickException(
+            f"the downloaded .{suffix} root does not match the expected "
+            f"fingerprint; it was not installed.\n"
+            f"  expected: {expected}\n"
+            f"  received: {certificate.fingerprint}"
+        )
     path = _tailnet_root_path(suffix)
     replaced = _remove_superseded_root(path, certificate, scope=suffix)
     _write_public_root(path, certificate.pem)
@@ -687,6 +708,19 @@ def _install_tailnet_trust(suffix: str, *, show_details: bool = True) -> None:
         )
     else:
         success(f"Trusted localghost HTTPS for *.{suffix} on this client.")
+
+
+def _normalize_fingerprint(value: str | None) -> str | None:
+    """Accept the spellings a fingerprint survives being pasted in."""
+    if value is None:
+        return None
+    digest = value.strip().upper().removeprefix("SHA256:").replace(":", "")
+    if not re.fullmatch(r"[0-9A-F]{64}", digest):
+        raise click.UsageError(
+            "--fingerprint must be 64 hexadecimal characters, optionally "
+            "prefixed with SHA256: or separated by colons"
+        )
+    return f"SHA256:{digest}"
 
 
 def _remove_superseded_root(
