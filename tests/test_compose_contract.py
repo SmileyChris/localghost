@@ -159,7 +159,10 @@ def test_tailscale_overlay_adds_unpublished_gateway_and_suffix_provider() -> Non
         "--https-target=traefik:443",
     ]
     assert model["volumes"]["localghost-tailscale-state"]["name"] == (
-        "localghost-tailscale-state"
+        "localghost-tailscale-state-tail1234"
+    )
+    assert model["volumes"]["localghost-tailnet-ca-root"]["name"] == (
+        "localghost-tailnet-ca-root-tail1234"
     )
 
     command = set(model["services"]["traefik"]["command"])

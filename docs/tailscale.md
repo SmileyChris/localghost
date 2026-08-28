@@ -23,8 +23,9 @@ localghost tailscale enable
 ```
 
 The OAuth client's own tailnet is the default. Localghost asks the installed
-`tailscale` CLI for a one-label search domain or derives one from its MagicDNS
-suffix. Pass `--tailnet` or `--suffix` explicitly when those defaults are not
+`tailscale` CLI for a one-label search domain or derives one from the current
+machine's MagicDNS name (`work.example.ts.net` becomes `work`). Pass
+`--tailnet` or `--suffix` explicitly when those defaults are not
 the desired values.
 
 Enable performs four bounded operations:

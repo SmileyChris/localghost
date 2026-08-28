@@ -433,6 +433,7 @@ def tailscale_enable(
     tailnet: str, suffix: str | None, tag: str, client_id: str, client_secret: str
 ) -> None:
     """Enroll a tagged gateway and add split DNS for the chosen suffix."""
+    title()
     if load_tailscale_state() is not None:
         raise click.ClickException("Tailscale hosting is already enabled")
     if not tag.startswith("tag:"):
@@ -441,14 +442,28 @@ def tailscale_enable(
         chosen_suffix = validate_tailscale_suffix(
             suffix or detect_tailscale_suffix()
         )
+        details(
+            [
+                ("Tailnet", "credential's own tailnet" if tailnet == "-" else tailnet),
+                ("Route suffix", f".{chosen_suffix}"),
+                ("Gateway", f"localghost-{chosen_suffix}"),
+                ("Device tag", tag),
+            ],
+            title="Tailscale hosting",
+        )
+        info("Authenticating with the Tailscale API…")
         api = TailscaleAPI.authenticate(client_id, client_secret)
+        info("Creating a single-use gateway auth key…")
         auth_key = api.create_auth_key(tailnet, tag)
+        info("Reading the existing split-DNS configuration…")
         previous = api.split_dns(tailnet)
         # Tailnet TLS terminates on Traefik's websecure entrypoint. Bootstrap
         # its localhost signer as well, but do not install localhost trust as
         # an implicit side effect of enabling a remote route.
+        info("Preparing the localhost and tailnet HTTPS authorities…")
         _bootstrap_public_root()
         _bootstrap_tailnet_root(chosen_suffix)
+        info(f"Enrolling localghost-{chosen_suffix} in the tailnet…")
         gateway_ips = _bootstrap_tailscale_gateway(chosen_suffix, auth_key)
         state = TailscaleState(
             tailnet=tailnet,
@@ -458,7 +473,9 @@ def tailscale_enable(
             tag=tag,
         )
         save_tailscale_state(state)
+        info(f"Routing *.{chosen_suffix} DNS to the gateway…")
         api.update_split_dns(tailnet, {chosen_suffix: list(gateway_ips)})
+        info("Starting the mirrored localhost and tailnet routes…")
         _run_proxy("up", https_enabled=True, force_recreate=True)
     except (TailscaleError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc

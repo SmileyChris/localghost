@@ -110,12 +110,12 @@ def detect_suffix() -> str:
                     return validate_suffix(candidate)
                 except ValueError:
                     pass
-        magic_suffix = (payload.get("CurrentTailnet") or {}).get(
-            "MagicDNSSuffix", ""
+        self_dns_name = (payload.get("CurrentTailnet") or {}).get(
+            "SelfDNSName", ""
         )
-        if magic_suffix:
+        if self_dns_name:
             try:
-                return validate_suffix(str(magic_suffix).split(".", 1)[0])
+                return validate_suffix(str(self_dns_name).split(".", 1)[0])
             except ValueError:
                 pass
     raise TailscaleError("could not detect a short tailnet suffix; pass --suffix")
