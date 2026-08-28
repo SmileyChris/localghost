@@ -1,0 +1,12 @@
+displayName: Localghost Tailnet CA Provider
+type: provider
+import: github.com/SmileyChris/traefik-localghost-tailnet-ca
+summary: Tailnet adapter for the shared Localghost CA provider
+
+testData:
+  dockerEndpoint: unix:///var/run/docker.sock
+  network: localghost
+  storagePath: /var/lib/localghost-tailnet-ca
+  pollInterval: 500ms
+  domainSuffix: work
+  leafLifetime: 24h
