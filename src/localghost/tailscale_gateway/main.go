@@ -153,7 +153,7 @@ func startDNS(ctx context.Context, server *tsnet.Server, suffix string, ip4, ip6
 		response := dnsResponse(request, suffix, ip4, ip6)
 		_ = w.WriteMsg(response)
 	})
-	udp, err := server.ListenPacket("udp", ":53")
+	udp, err := server.ListenPacket("udp", dnsListenAddress(ip4))
 	if err != nil {
 		errCh <- fmt.Errorf("listening for UDP DNS: %w", err)
 		return
@@ -181,6 +181,10 @@ func startDNS(ctx context.Context, server *tsnet.Server, suffix string, ip4, ip6
 		_ = udpServer.Shutdown()
 		_ = tcpServer.Shutdown()
 	}()
+}
+
+func dnsListenAddress(ip netip.Addr) string {
+	return net.JoinHostPort(ip.String(), "53")
 }
 
 func dnsResponse(request *dns.Msg, suffix string, ip4, ip6 netip.Addr) *dns.Msg {

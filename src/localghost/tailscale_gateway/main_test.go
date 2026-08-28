@@ -45,3 +45,10 @@ func TestValidateConfiguration(t *testing.T) {
 		t.Fatal("expected invalid suffix")
 	}
 }
+
+func TestDNSListenAddressIncludesAnExplicitIP(t *testing.T) {
+	ip := netip.MustParseAddr("100.64.0.10")
+	if got := dnsListenAddress(ip); got != "100.64.0.10:53" {
+		t.Fatalf("dnsListenAddress() = %q", got)
+	}
+}
