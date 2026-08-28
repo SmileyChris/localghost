@@ -124,8 +124,10 @@ func run(ctx context.Context, cfg configuration) error {
 		Logf:     log.Printf,
 	}
 	defer server.Close()
-	if err := server.Start(); err != nil {
-		return fmt.Errorf("starting tsnet: %w", err)
+	upContext, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	if _, err := server.Up(upContext); err != nil {
+		return fmt.Errorf("connecting persisted tsnet node: %w", err)
 	}
 	ip4, ip6 := server.TailscaleIPs()
 	if !ip4.IsValid() {
