@@ -70,6 +70,22 @@ def test_detect_suffix_uses_short_search_domain(monkeypatch) -> None:
     assert detect_suffix() == "tail1234"
 
 
+def test_detect_suffix_falls_back_to_magicdns_tailnet_name(monkeypatch) -> None:
+    monkeypatch.setattr(
+        tailscale_module.subprocess,
+        "run",
+        lambda *args, **kwargs: CompletedProcess(
+            args[0],
+            0,
+            json.dumps(
+                {"CurrentTailnet": {"MagicDNSSuffix": "tail1234.example.ts.net"}}
+            ),
+            "",
+        ),
+    )
+    assert detect_suffix() == "tail1234"
+
+
 def test_detect_suffix_requests_explicit_value_without_cli(monkeypatch) -> None:
     monkeypatch.setattr(
         tailscale_module.subprocess,

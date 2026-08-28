@@ -41,7 +41,12 @@ services:
       context: ./tailscale_gateway
       dockerfile: Dockerfile
     image: localghost-tailscale-gateway:${LOCALGHOST_IMAGE_TAG}
+    pull_policy: build
     restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
     command:
       - --suffix=${LOCALGHOST_TAILSCALE_SUFFIX:?LOCALGHOST_TAILSCALE_SUFFIX is required}
       - --hostname=localghost-${LOCALGHOST_TAILSCALE_SUFFIX}

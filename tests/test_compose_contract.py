@@ -145,6 +145,10 @@ def test_tailscale_overlay_adds_unpublished_gateway_and_suffix_provider() -> Non
 
     gateway = model["services"]["tailscale-gateway"]
     assert "ports" not in gateway
+    assert gateway["pull_policy"] == "build"
+    assert gateway["read_only"] is True
+    assert gateway["cap_drop"] == ["ALL"]
+    assert gateway["security_opt"] == ["no-new-privileges:true"]
     assert set(gateway["networks"]) == {"localghost"}
     assert gateway["command"] == [
         "--suffix=tail1234",

@@ -15,6 +15,9 @@ uses [Semantic Versioning](https://semver.org/).
   derives routes from the same Docker labels as localhost and references the
   original Docker services and middleware, avoiding a second application
   configuration path.
+- `localghost tailscale enable` defaults to the OAuth credential's own tailnet
+  and infers its short suffix from the connected Tailscale client; both remain
+  available as explicit overrides.
 
 ### Changed
 

@@ -19,12 +19,13 @@ choose; the default is `tag:localghost`. Then run:
 ```sh
 export TAILSCALE_CLIENT_ID=...
 export TAILSCALE_CLIENT_SECRET=...
-localghost tailscale enable --tailnet example.com --suffix tail1234
+localghost tailscale enable
 ```
 
-`--tailnet -` uses Tailscale's API alias for the OAuth client's own tailnet.
-When `--suffix` is omitted, localghost asks the installed `tailscale` CLI for a
-one-label search domain. Pass it explicitly when detection is ambiguous.
+The OAuth client's own tailnet is the default. Localghost asks the installed
+`tailscale` CLI for a one-label search domain or derives one from its MagicDNS
+suffix. Pass `--tailnet` or `--suffix` explicitly when those defaults are not
+the desired values.
 
 Enable performs four bounded operations:
 

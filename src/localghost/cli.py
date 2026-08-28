@@ -412,7 +412,13 @@ def _tailscale_status() -> None:
 
 
 @tailscale.command("enable")
-@click.option("tailnet", "--tailnet", required=True, help="Tailnet name or '-' alias.")
+@click.option(
+    "tailnet",
+    "--tailnet",
+    default="-",
+    show_default=True,
+    help="Tailnet name; '-' selects the credential's own tailnet.",
+)
 @click.option("suffix", "--suffix", help="One-label route suffix, such as tail1234.")
 @click.option("tag", "--tag", default="tag:localghost", show_default=True)
 @click.option("client_id", "--client-id", envvar="TAILSCALE_CLIENT_ID", prompt=True)

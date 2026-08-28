@@ -8,5 +8,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /localghost-tailscale-g
 
 FROM scratch
 COPY --from=build /localghost-tailscale-gateway /localghost-tailscale-gateway
-USER 65532:65532
+# Docker initializes named-volume roots as UID 0. The gateway needs to create
+# tsnet's encrypted node state there, but receives no host mounts or Linux
+# capabilities and runs with a read-only root filesystem.
 ENTRYPOINT ["/localghost-tailscale-gateway"]
