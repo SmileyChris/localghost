@@ -91,7 +91,8 @@ def test_mkcert_installs_and_uninstalls_only_the_selected_stores(tmp_path) -> No
     calls = []
 
     def run(command, **kwargs):
-        calls.append((command, kwargs))
+        staged_root = Path(kwargs["env"]["CAROOT"]) / "rootCA.pem"
+        calls.append((command, kwargs, staged_root.read_bytes()))
         return CompletedProcess(command, 0, "", "")
 
     installer = MkcertInstaller(
@@ -104,7 +105,10 @@ def test_mkcert_installs_and_uninstalls_only_the_selected_stores(tmp_path) -> No
         ["/usr/bin/mkcert", "-install"],
         ["/usr/bin/mkcert", "-uninstall"],
     ]
-    assert calls[0][1]["env"]["CAROOT"] == str(tmp_path)
+    assert Path(calls[0][1]["env"]["CAROOT"]).name.startswith(
+        "localghost-mkcert-"
+    )
+    assert calls[0][2] == CERTIFICATE_PEM
     assert calls[0][1]["env"]["TRUST_STORES"] == "system,nss"
     assert calls[0][1]["check"] is False
 

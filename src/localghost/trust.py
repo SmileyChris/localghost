@@ -7,6 +7,7 @@ import os
 import shutil
 import ssl
 import subprocess
+import tempfile
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
@@ -92,17 +93,24 @@ class MkcertInstaller:
                 "mkcert is unavailable; HTTPS remains disabled. Install mkcert, "
                 "then run `localghost trust`."
             )
-        result = self.runner(
-            [executable, action],
-            check=False,
-            capture_output=True,
-            text=True,
-            env={
-                **os.environ,
-                "CAROOT": str(self.certificate_path.parent),
-                "TRUST_STORES": "system,nss",
-            },
-        )
+        # mkcert does not accept a certificate path: it always reads the exact
+        # filename CAROOT/rootCA.pem. Stage only the selected public root so
+        # another managed authority in the same state directory cannot be
+        # installed or removed by mistake.
+        with tempfile.TemporaryDirectory(prefix="localghost-mkcert-") as directory:
+            staged_root = Path(directory) / "rootCA.pem"
+            staged_root.write_bytes(self.certificate_path.read_bytes())
+            result = self.runner(
+                [executable, action],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "CAROOT": directory,
+                    "TRUST_STORES": "system,nss",
+                },
+            )
         if result.returncode:
             detail = (
                 result.stderr or result.stdout or "mkcert returned a non-zero status"
