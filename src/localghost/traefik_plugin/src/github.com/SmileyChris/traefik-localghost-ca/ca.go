@@ -78,7 +78,7 @@ func BootstrapCAForSuffix(rootPath, signerPath, suffix string) (*CertificateAuth
 		} else if !os.IsNotExist(err) {
 			return nil, err
 		}
-		certPEM, keyPEM, err := generateRoot()
+		certPEM, keyPEM, err := generateRoot(suffix)
 		if err != nil {
 			return nil, err
 		}
@@ -174,7 +174,7 @@ func LoadSignerCAForSuffix(signerPath, suffix string) (*CertificateAuthority, er
 	return &CertificateAuthority{rootCert: root, intermediateCert: intermediate, intermediateKey: key, storagePath: signerPath, domainSuffix: suffix}, nil
 }
 
-func generateRoot() ([]byte, []byte, error) {
+func generateRoot(suffix string) ([]byte, []byte, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, nil, fmt.Errorf("generating root key: %w", err)
@@ -184,8 +184,12 @@ func generateRoot() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 	now := time.Now()
+	rootName := "Localghost Development Root CA"
+	if suffix != "localhost" {
+		rootName = fmt.Sprintf("Localghost .%s Development Root CA", suffix)
+	}
 	template := &x509.Certificate{
-		SerialNumber: serial, Subject: pkix.Name{CommonName: "Localghost Development Root CA"},
+		SerialNumber: serial, Subject: pkix.Name{CommonName: rootName},
 		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(10 * 365 * 24 * time.Hour),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
 		BasicConstraintsValid: true, IsCA: true, SignatureAlgorithm: x509.ECDSAWithSHA256,
@@ -211,8 +215,12 @@ func generateIntermediate(root *x509.Certificate, rootKey *ecdsa.PrivateKey, suf
 	if !notAfter.Before(root.NotAfter) {
 		notAfter = root.NotAfter.Add(-time.Hour)
 	}
+	intermediateName := "Localghost Constrained Signing CA"
+	if suffix != "localhost" {
+		intermediateName = fmt.Sprintf("Localghost .%s Constrained Signing CA", suffix)
+	}
 	template := &x509.Certificate{
-		SerialNumber: serial, Subject: pkix.Name{CommonName: "Localghost Constrained Signing CA"},
+		SerialNumber: serial, Subject: pkix.Name{CommonName: intermediateName},
 		NotBefore: now.Add(-time.Hour), NotAfter: notAfter,
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
 		BasicConstraintsValid: true, IsCA: true, MaxPathLen: 0, MaxPathLenZero: true,

@@ -29,6 +29,9 @@ func bootstrapTestCA(t *testing.T) (*CertificateAuthority, string, string) {
 
 func TestBootstrapCreatesSplitPersistentConstrainedCA(t *testing.T) {
 	ca, root, signer := bootstrapTestCA(t)
+	if got := ca.rootCert.Subject.CommonName; got != "Localghost Development Root CA" {
+		t.Fatalf("unexpected localhost root name: %q", got)
+	}
 	rootFP, intermediateFP := ca.Fingerprint(), ca.IntermediateFingerprint()
 	loaded, err := BootstrapCA(root, signer)
 	if err != nil {
@@ -59,6 +62,12 @@ func TestBootstrapForSuffixConstrainsAndIssuesOnlyThatSuffix(t *testing.T) {
 	ca, err := BootstrapCAForSuffix(root, signer, "tail1234")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if got := ca.rootCert.Subject.CommonName; got != "Localghost .tail1234 Development Root CA" {
+		t.Fatalf("unexpected tailnet root name: %q", got)
+	}
+	if got := ca.intermediateCert.Subject.CommonName; got != "Localghost .tail1234 Constrained Signing CA" {
+		t.Fatalf("unexpected tailnet intermediate name: %q", got)
 	}
 	if got := ca.intermediateCert.PermittedDNSDomains; len(got) != 1 || got[0] != "tail1234" {
 		t.Fatalf("unexpected constraints: %#v", got)

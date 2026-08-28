@@ -70,6 +70,6 @@ volumes:
   localghost-tailscale-state:
     name: localghost-tailscale-state-${LOCALGHOST_TAILSCALE_SUFFIX}
   localghost-tailnet-ca-root:
-    name: localghost-tailnet-ca-root-${LOCALGHOST_TAILSCALE_SUFFIX}
+    name: localghost-tailnet-ca-root-v2-${LOCALGHOST_TAILSCALE_SUFFIX}
   localghost-tailnet-ca-signer:
-    name: localghost-tailnet-ca-signer-${LOCALGHOST_TAILSCALE_SUFFIX}
+    name: localghost-tailnet-ca-signer-v2-${LOCALGHOST_TAILSCALE_SUFFIX}

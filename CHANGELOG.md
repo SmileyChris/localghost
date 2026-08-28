@@ -30,6 +30,8 @@ uses [Semantic Versioning](https://semver.org/).
   compatibility alias.
 - Tailnet trust downloads use the enrolled gateway address directly, avoiding
   stale public-DNS cache entries for private suffixes such as `.work`.
+- Tailnet authorities use suffix-specific certificate subjects and versioned
+  CA volumes, preventing trust-store collisions with the `.localhost` root.
 - Replaced `localghost generate` with the project-oriented `localghost save`.
   Saving now has one contract across project types: host and custom runs are
   recorded in `.localghost.toml`, Compose integration is written to

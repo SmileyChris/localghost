@@ -174,7 +174,7 @@ def test_tailscale_overlay_adds_unpublished_gateway_and_suffix_provider() -> Non
         "localghost-tailscale-state-tail1234"
     )
     assert model["volumes"]["localghost-tailnet-ca-signer"]["name"] == (
-        "localghost-tailnet-ca-signer-tail1234"
+        "localghost-tailnet-ca-signer-v2-tail1234"
     )
 
     command = set(model["services"]["traefik"]["command"])
