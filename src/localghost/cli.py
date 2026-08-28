@@ -303,7 +303,7 @@ def manage_clean() -> None:
     help="Show the managed public-root state without changing it.",
 )
 def trust(remove: bool, show_status: bool) -> None:
-    """Install, remove, or inspect the hub's public development root."""
+    """Install, remove, or inspect enabled development roots."""
     if remove and show_status:
         raise click.UsageError("--remove and --status cannot be used together")
     title()
@@ -317,6 +317,9 @@ def trust(remove: bool, show_status: bool) -> None:
     was_running = proxy_is_running()
     info("Preparing HTTPS trust…")
     _enable_https()
+    tailnet = load_tailscale_state()
+    if tailnet is not None:
+        _install_tailnet_trust(tailnet.suffix, show_details=False)
     if was_running and not was_configured:
         _run_proxy("up", already_running=True, https_enabled=True)
         success("Trusted HTTPS is enabled for the running hub.")
@@ -328,7 +331,7 @@ def trust(remove: bool, show_status: bool) -> None:
 
 
 def _remove_trust() -> None:
-    """Disable HTTPS before removing only the managed public root."""
+    """Disable HTTPS before removing the managed development roots."""
     was_configured = _https_configured()
     was_running = proxy_is_running()
     if was_running and was_configured:
@@ -346,6 +349,13 @@ def _remove_trust() -> None:
             MkcertInstaller(certificate_path).uninstall()
         except TrustError as exc:
             raise click.ClickException(str(exc)) from exc
+    for tailnet_path in _state_directory().glob("tailscale-*-rootCA.pem"):
+        try:
+            ZenNssInstaller(tailnet_path).uninstall()
+            MkcertInstaller(tailnet_path).uninstall()
+        except TrustError as exc:
+            raise click.ClickException(str(exc)) from exc
+        tailnet_path.unlink(missing_ok=True)
     if was_running and was_configured:
         success("HTTPS is disabled and the local root was removed from managed stores.")
     else:
@@ -366,15 +376,26 @@ def _trust_status() -> None:
     except TrustError as exc:
         raise click.ClickException(f"invalid local public root: {exc}") from exc
     state = "enabled" if _https_configured() else "disabled"
-    details(
-        [
+    rows = [
             ("HTTPS", state),
             ("Public root", str(certificate_path)),
             ("Fingerprint", certificate.fingerprint),
             ("Managed stores", "system,nss; Zen profiles when present"),
-        ],
-        title="Trust status",
-    )
+        ]
+    tailnet = load_tailscale_state()
+    if tailnet is not None:
+        tailnet_path = _tailnet_root_path(tailnet.suffix)
+        tailnet_state = "not installed"
+        if tailnet_path.exists():
+            try:
+                tailnet_certificate = PublicCertificate.parse(tailnet_path.read_bytes())
+            except TrustError as exc:
+                raise click.ClickException(
+                    f"invalid .{tailnet.suffix} public root: {exc}"
+                ) from exc
+            tailnet_state = tailnet_certificate.fingerprint
+        rows.append((f"Tailnet .{tailnet.suffix}", tailnet_state))
+    details(rows, title="Trust status")
 
 
 @cli.group(invoke_without_command=True)
@@ -480,7 +501,7 @@ def tailscale_enable(
     except (TailscaleError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     success(f"Tailnet routes are enabled at https://<project>.{chosen_suffix}.")
-    action("Trust this client", f"localghost tailscale trust {chosen_suffix}")
+    action("Trust this client", "localghost trust")
 
 
 @tailscale.command("disable")
@@ -511,25 +532,39 @@ def tailscale_disable(client_id: str, client_secret: str) -> None:
 
 
 @tailscale.command("trust")
-@click.argument("suffix")
-def tailscale_trust(suffix: str) -> None:
-    """Trust a tailnet localghost root on this client."""
+@click.argument("suffix", required=False)
+def tailscale_trust(suffix: str | None) -> None:
+    """Compatibility alias for trusting the active tailnet root."""
+    if suffix is None:
+        state = load_tailscale_state()
+        if state is None:
+            raise click.ClickException("Tailscale hosting is not enabled")
+        suffix = state.suffix
+    _install_tailnet_trust(suffix)
+
+
+def _tailnet_root_path(suffix: str) -> Path:
+    return _state_directory() / f"tailscale-{suffix}-rootCA.pem"
+
+
+def _install_tailnet_trust(suffix: str, *, show_details: bool = True) -> None:
     try:
         suffix = validate_tailscale_suffix(suffix)
         certificate = PublicCertificate.parse(fetch_tailscale_root(suffix))
     except (TailscaleError, TrustError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
-    path = _state_directory() / f"tailscale-{suffix}-rootCA.pem"
+    path = _tailnet_root_path(suffix)
     _write_public_root(path, certificate.pem)
-    details(
-        [
-            ("Authorization", "system authorization is required now"),
-            ("Scope", f"development names under .{suffix}"),
-            ("Public-root fingerprint", certificate.fingerprint),
-            ("Private keys", "remain on the hosting machine"),
-        ],
-        title="Tailnet HTTPS setup",
-    )
+    if show_details:
+        details(
+            [
+                ("Authorization", "system authorization is required now"),
+                ("Scope", f"development names under .{suffix}"),
+                ("Public-root fingerprint", certificate.fingerprint),
+                ("Private keys", "remain on the hosting machine"),
+            ],
+            title="Tailnet HTTPS setup",
+        )
     try:
         MkcertInstaller(path).install()
         ZenNssInstaller(path).install()

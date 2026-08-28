@@ -130,6 +130,7 @@ PATCH, so unrelated DNS mappings are untouched. Treat the saved map as
 administrative metadata, even though it contains no secret.
 
 The tailnet suffix has its own CA and signer volumes. Each participating client
-explicitly installs that public root with `localghost tailscale trust SUFFIX`.
+explicitly installs that public root with `localghost trust` while Tailscale
+hosting is enabled.
 This grants the development hub authority for names under that suffix on the
 client; it should not be used as a general organizational DNS suffix.

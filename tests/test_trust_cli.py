@@ -9,6 +9,7 @@ from click.testing import CliRunner
 
 import localghost.cli as cli_module
 from localghost.cli import cli
+from localghost.tailscale import TailscaleState
 from localghost.trust import PublicCertificate, TrustError
 
 CERTIFICATE_PEM = b"""-----BEGIN CERTIFICATE-----
@@ -134,6 +135,42 @@ def test_trust_reports_existing_https_on_a_running_proxy(monkeypatch, tmp_path) 
 
     assert result.exit_code == 0, result.output
     assert "already configured for HTTPS" in result.output
+
+
+def test_trust_installs_active_tailnet_root(monkeypatch, tmp_path) -> None:
+    state = TailscaleState(
+        tailnet="example.com",
+        suffix="work",
+        gateway_ips=("100.64.0.10",),
+        previous_split_dns={},
+    )
+    installed = []
+
+    class Installer:
+        def __init__(self, path):
+            self.path = path
+
+        def install(self, **kwargs):
+            installed.append(self.path)
+
+    monkeypatch.setattr(cli_module, "_enable_https", lambda: None)
+    monkeypatch.setattr(cli_module, "_https_configured", lambda: True)
+    monkeypatch.setattr(cli_module, "proxy_is_running", lambda: False)
+    monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: state)
+    monkeypatch.setattr(
+        cli_module, "fetch_tailscale_root", lambda suffix: CERTIFICATE_PEM
+    )
+    monkeypatch.setattr(cli_module, "MkcertInstaller", Installer)
+    monkeypatch.setattr(cli_module, "ZenNssInstaller", Installer)
+
+    result = CliRunner().invoke(
+        cli, ["trust"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+    )
+
+    assert result.exit_code == 0, result.output
+    tailnet_root = tmp_path / "tailscale-work-rootCA.pem"
+    assert installed == [tailnet_root, tailnet_root]
+    assert tailnet_root.read_bytes() == CERTIFICATE_PEM
 
 
 def test_trust_remove_reconciles_running_proxy_before_uninstall(

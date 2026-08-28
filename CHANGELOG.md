@@ -25,6 +25,9 @@ uses [Semantic Versioning](https://semver.org/).
   transient URL display is removed, with a plain-output fallback hint.
 - Trust-store operations stage each selected public root in an isolated mkcert
   `CAROOT`, so managing a tailnet root cannot silently target `.localhost`.
+- `localghost trust`, `trust --status`, and `trust --remove` now manage the
+  active tailnet authority alongside `.localhost`; `tailscale trust` remains a
+  compatibility alias.
 - Replaced `localghost generate` with the project-oriented `localghost save`.
   Saving now has one contract across project types: host and custom runs are
   recorded in `.localghost.toml`, Compose integration is written to

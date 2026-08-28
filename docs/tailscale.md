@@ -41,15 +41,15 @@ stores the tailnet name, suffix, gateway addresses, device tag, and previous
 split-DNS map in its state directory so it can remove its split-DNS entry on disable
 without discarding unrelated changes made later.
 
-Every client must trust this hub's tailnet development root once:
+Every client must trust this hub's development roots once:
 
 ```sh
-localghost tailscale trust tail1234
+localghost trust
 ```
 
-That command downloads the public root from `http://trust.tail1234` over the
-tailnet and installs it into the same system and NSS trust stores used by
-`localghost trust`. Private CA keys never leave Docker volumes.
+When Tailscale hosting is enabled, the standard trust command installs both the
+`.localhost` root and the active tailnet root. It downloads the latter from
+`http://trust.tail1234` over the tailnet. Private CA keys never leave Docker volumes.
 
 ## Operate and disable it
 
