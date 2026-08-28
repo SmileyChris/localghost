@@ -2154,7 +2154,15 @@ def test_compose_run_pins_before_the_hub_is_reconciled(monkeypatch, tmp_path) ->
     import contextlib as _contextlib
 
     @_contextlib.contextmanager
-    def fake_pinned(url, *, stream=None, enabled=True, probe=None, message="starting"):
+    def fake_pinned(
+        url,
+        *,
+        secondary_url=None,
+        stream=None,
+        enabled=True,
+        probe=None,
+        message="starting",
+    ):
         order.append(f"pin:{message}")
 
         class Bar:

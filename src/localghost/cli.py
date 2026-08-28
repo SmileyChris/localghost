@@ -821,6 +821,7 @@ def run(
         lambda: _run_proxy("up", https_enabled=_https_configured()),
         cwd=plan.working_directory or resolved.cwd,
         public_origin=_proxy_origin(plan.name),
+        secondary_origin=_tailnet_origin(plan.name),
         status_bar=not no_status_bar,
     )
     if status:
@@ -998,6 +999,7 @@ def _run_compose(
         command.append("--detach")
     with statusbar.pinned(
         public_origin,
+        secondary_url=_tailnet_origin(project),
         # A detached `up` returns immediately, so there is no foreground
         # lifetime for a bar to span.
         enabled=status_bar and not detach,
@@ -1130,6 +1132,15 @@ def _report_tailnet_origin(hostname: str) -> None:
         return
     if state is not None:
         info(f"Tailnet URL: https://{hostname}.{state.suffix}")
+
+
+def _tailnet_origin(hostname: str) -> str | None:
+    """The mirrored tailnet URL, or None when hosting is off or unreadable."""
+    with suppress(TailscaleError):
+        state = load_tailscale_state()
+        if state is not None:
+            return f"https://{hostname}.{state.suffix}"
+    return None
 
 
 def _run_proxy(

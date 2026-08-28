@@ -61,10 +61,14 @@ def _terminal_size() -> tuple[int, int]:
     return size.columns, size.lines
 
 
+_SEPARATOR = "  ·  "
+
+
 def _bar_line(
     url: str,
     width: int,
     *,
+    secondary: str | None = None,
     spinner: str | None = None,
     message: str = "starting",
 ) -> str:
@@ -77,23 +81,36 @@ def _bar_line(
     dimmed until it actually answers, so the bar doubles as the readiness
     signal rather than inviting a click that would 502. `message` names the
     step being waited on, and is shown only while the spinner is.
+
+    A `secondary` URL (the mirrored tailnet route) rides beside the primary
+    when the row has room. As the window narrows, the hint goes first, then
+    the secondary, and only then is the primary truncated.
     """
     budget = width - 1
     wordmark = " localghost  "
     status = f"{spinner} {message}  " if spinner else ""
     room = budget - len(wordmark) - len(status)
-    hint = f"  {_HINT} " if room >= len(url) + len(_HINT) + 3 else ""
-    shown = url[: max(0, room - len(hint))] if len(url) + len(hint) > room else url
-    padding = " " * max(0, room - len(shown) - len(hint))
+    if secondary is not None and room < len(url) + len(_SEPARATOR) + len(secondary):
+        secondary = None
+    base = f"{url}{_SEPARATOR}{secondary}" if secondary else url
+    hint = f"  {_HINT} " if room >= len(base) + len(_HINT) + 3 else ""
+    shown = url[: max(0, room - len(hint))] if len(base) + len(hint) > room else url
+    padding = " " * max(0, room - len(shown) - len(hint) - (len(base) - len(url)))
     rendered_status = (
         f"{_fg(MINT)}{spinner}{_RESET} {_DIM}{message}{_RESET}  " if spinner else ""
     )
     rendered_hint = f"{_DIM}{hint}{_RESET}" if hint else ""
     url_style = _DIM if spinner else _fg(MINT)
+    rendered_secondary = (
+        f"{_DIM}{_SEPARATOR}{_RESET}{url_style}{secondary}{_RESET}"
+        if secondary
+        else ""
+    )
     return (
         f"{_BOLD} local{_fg(LIME)}ghost{_RESET}  "
         f"{rendered_status}"
         f"{url_style}{shown}{_RESET}"
+        f"{rendered_secondary}"
         f"{padding}"
         f"{rendered_hint}"
     )
@@ -168,8 +185,10 @@ class _Bar:
         stream,
         probe: Callable[[], bool] | None,
         message: str = "starting",
+        secondary_url: str | None = None,
     ) -> None:
         self._url = url
+        self._secondary_url = secondary_url
         self._stream = stream
         self._probe = probe
         self._message = message
@@ -199,10 +218,15 @@ class _Bar:
             if self.ready_event.is_set()
             else _SPINNER_FRAMES[self._frame % len(_SPINNER_FRAMES)]
         )
+        line = _bar_line(
+            self._url,
+            width,
+            secondary=self._secondary_url,
+            spinner=spinner,
+            message=self._message,
+        )
         self._emit(
-            f"{_SAVE_CURSOR}\x1b[{height};1H\x1b[2K"
-            f"{_bar_line(self._url, width, spinner=spinner, message=self._message)}"
-            f"{_RESET}{_RESTORE_CURSOR}"
+            f"{_SAVE_CURSOR}\x1b[{height};1H\x1b[2K{line}{_RESET}{_RESTORE_CURSOR}"
         )
 
     def ready(self) -> None:
@@ -295,6 +319,7 @@ def supported(stream, *, enabled: bool = True) -> bool:
 def pinned(
     url: str,
     *,
+    secondary_url: str | None = None,
     stream=None,
     enabled: bool = True,
     probe: Callable[[], bool] | None = None,
@@ -303,7 +328,8 @@ def pinned(
     """Pin `url` to the last terminal row for the duration of the block.
 
     With a `probe`, the bar opens in a loading state and flips to ready once
-    the probe first succeeds.
+    the probe first succeeds. A `secondary_url` (the mirrored tailnet route)
+    is shown beside the primary while the window is wide enough.
     """
     if stream is None:
         import sys
@@ -312,7 +338,7 @@ def pinned(
     if not supported(stream, enabled=enabled):
         yield _Disabled()
         return
-    bar = _Bar(url, stream, probe, message)
+    bar = _Bar(url, stream, probe, message, secondary_url)
     bar.start()
     try:
         yield bar

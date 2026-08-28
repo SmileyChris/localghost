@@ -372,3 +372,40 @@ def test_disabled_bar_accepts_status_updates():
         bar.status("starting app")
 
     assert stream.text == ""
+
+
+TAILNET_URL = "https://demo.tail1234"
+
+
+def test_bar_shows_a_secondary_url_beside_the_primary():
+    drawn = visible(statusbar._bar_line(URL, 80, secondary=TAILNET_URL))
+
+    assert URL in drawn
+    assert TAILNET_URL in drawn
+    assert "Ctrl+C" in drawn
+    assert len(drawn) <= 79
+
+
+def test_hint_is_dropped_before_the_secondary_url():
+    drawn = visible(statusbar._bar_line(URL, 70, secondary=TAILNET_URL))
+
+    assert TAILNET_URL in drawn
+    assert "Ctrl+C" not in drawn
+    assert len(drawn) <= 69
+
+
+def test_secondary_url_is_dropped_before_the_primary():
+    drawn = visible(statusbar._bar_line(URL, 50, secondary=TAILNET_URL))
+
+    assert URL in drawn
+    assert TAILNET_URL not in drawn
+    assert len(drawn) <= 49
+
+
+def test_pinned_shows_the_secondary_url():
+    stream = Stream()
+
+    with statusbar.pinned(URL, secondary_url=TAILNET_URL, stream=stream):
+        pass
+
+    assert TAILNET_URL in visible(stream.text)

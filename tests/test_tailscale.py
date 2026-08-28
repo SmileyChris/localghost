@@ -625,3 +625,69 @@ def test_tailnet_trust_downloads_and_installs_both_stores(
     assert result.exit_code == 0, result.output
     assert len(installed) == 2
     assert (tmp_path / "tailscale-tail1234-rootCA.pem").read_bytes() == CERTIFICATE_PEM
+
+
+def test_tailnet_origin_mirrors_the_hostname(monkeypatch) -> None:
+    state = TailscaleState("example.com", "tail1234", ("100.64.0.1",), {})
+    monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: state)
+    assert cli_module._tailnet_origin("shop") == "https://shop.tail1234"
+
+    monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: None)
+    assert cli_module._tailnet_origin("shop") is None
+
+    def broken():
+        raise TailscaleError("bad state")
+
+    monkeypatch.setattr(cli_module, "load_tailscale_state", broken)
+    assert cli_module._tailnet_origin("shop") is None
+
+
+def test_compose_run_pins_the_tailnet_origin_too(monkeypatch, tmp_path) -> None:
+    from contextlib import contextmanager
+
+    pins: dict = {}
+
+    @contextmanager
+    def fake_pinned(url, *, secondary_url=None, **kwargs):
+        pins["url"] = url
+        pins["secondary_url"] = secondary_url
+        yield SimpleNamespace(status=lambda message: None)
+
+    state = TailscaleState("example.com", "tail1234", ("100.64.0.1",), {})
+    monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: state)
+    monkeypatch.setattr(cli_module, "title", lambda **kwargs: None)
+    monkeypatch.setattr(
+        cli_module, "_proxy_origin", lambda name: f"https://{name}.localhost"
+    )
+    monkeypatch.setattr(cli_module.statusbar, "pinned", fake_pinned)
+    monkeypatch.setattr(cli_module, "_run_proxy", lambda *args, **kwargs: None)
+    monkeypatch.setattr(cli_module, "_https_configured", lambda: True)
+    monkeypatch.setattr(
+        cli_module.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0),
+    )
+
+    cli_module._run_compose(tmp_path, "demo", False)
+    assert pins["url"] == "https://demo.localhost"
+    assert pins["secondary_url"] == "https://demo.tail1234"
+
+
+def test_host_run_passes_the_tailnet_origin_to_execute(monkeypatch) -> None:
+    from localghost.runner import RunPlan
+
+    executed: dict = {}
+    state = TailscaleState("example.com", "tail1234", ("100.64.0.1",), {})
+    plan = RunPlan("demo", "custom", ("echo",), 3000, "session", "services: {}\n")
+    monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: state)
+    monkeypatch.setattr("localghost.cli.build_plan", lambda *args, **kwargs: plan)
+    monkeypatch.setattr("localghost.cli.find_route_collision", lambda name: None)
+
+    def fake_execute(*args, **kwargs):
+        executed.update(kwargs)
+        return 0
+
+    monkeypatch.setattr("localghost.cli.execute", fake_execute)
+    result = CliRunner().invoke(cli, ["run", "--port", "3000", "--", "echo"])
+    assert result.exit_code == 0, result.output
+    assert executed["secondary_origin"] == "https://demo.tail1234"

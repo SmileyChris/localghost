@@ -77,6 +77,10 @@ localghost                 # reconciles localhost and tailnet hosting
 localghost down            # stops both
 ```
 
+A foreground `localghost run` pins both URLs to the bottom of the terminal —
+`https://shop.localhost · https://shop.tail1234` — so the tailnet address stays
+visible for other devices while the application runs.
+
 To restore the DNS configuration that existed at enable time and remove the
 gateway from the running hub:
 

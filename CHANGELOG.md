@@ -23,6 +23,10 @@ uses [Semantic Versioning](https://semver.org/).
   OAuth client — and translates tag and scope rejections from the Tailscale
   API into the exact console fix. A working credential is stored in the system
   keyring so `disable` and re-enable need no re-entry; `disable` deletes it.
+- While Tailscale hosting is enabled, the pinned status bar of a foreground
+  run shows the mirrored tailnet URL beside the `.localhost` URL. On narrow
+  windows the hint is dropped first, then the tailnet URL, so the primary URL
+  always survives.
 
 ### Changed
 

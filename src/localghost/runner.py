@@ -687,6 +687,7 @@ def execute(
     *,
     cwd: Path | None = None,
     public_origin: str | None = None,
+    secondary_origin: str | None = None,
     status_bar: bool = True,
 ) -> int:
     bridge_attempted = False
@@ -701,6 +702,7 @@ def execute(
         # released, so those messages are plain output either way.
         with statusbar.pinned(
             public_origin or f"http://{plan.name}.localhost",
+            secondary_url=secondary_origin,
             enabled=status_bar and public_origin is not None,
             probe=statusbar.tcp_probe(plan.port),
             message="starting hub",

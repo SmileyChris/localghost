@@ -1322,8 +1322,17 @@ def _pin_recorder(monkeypatch):
     calls = {}
 
     @contextlib.contextmanager
-    def fake_pinned(url, *, stream=None, enabled=True, probe=None, message="starting"):
+    def fake_pinned(
+        url,
+        *,
+        secondary_url=None,
+        stream=None,
+        enabled=True,
+        probe=None,
+        message="starting",
+    ):
         calls["url"] = url
+        calls["secondary_url"] = secondary_url
         calls["enabled"] = enabled
         calls["probe"] = probe
         calls["message"] = message
@@ -1359,6 +1368,30 @@ def test_execute_pins_the_public_origin_while_the_child_runs(monkeypatch):
     )
     assert calls["url"] == "http://demo.localhost"
     assert calls["closed"] is True
+
+
+def test_execute_pins_the_tailnet_origin_alongside(monkeypatch):
+    monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
+    monkeypatch.setattr(runner, "stop_bridge", lambda plan: None)
+    calls = _pin_recorder(monkeypatch)
+
+    class Child:
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *args, **kwargs: Child())
+    plan = runner.RunPlan("demo", "custom", ("x",), 4321, "p", "")
+
+    assert (
+        runner.execute(
+            plan,
+            lambda: None,
+            public_origin="http://demo.localhost",
+            secondary_origin="https://demo.tail1234",
+        )
+        == 0
+    )
+    assert calls["secondary_url"] == "https://demo.tail1234"
 
 
 def test_execute_probes_the_planned_port_for_readiness(monkeypatch):
@@ -1437,7 +1470,15 @@ def test_execute_pins_before_the_hub_is_reconciled(monkeypatch):
     order = []
 
     @contextlib.contextmanager
-    def fake_pinned(url, *, stream=None, enabled=True, probe=None, message="starting"):
+    def fake_pinned(
+        url,
+        *,
+        secondary_url=None,
+        stream=None,
+        enabled=True,
+        probe=None,
+        message="starting",
+    ):
         order.append(f"pin:{message}")
 
         class Bar:
