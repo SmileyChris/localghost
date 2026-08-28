@@ -24,7 +24,7 @@ def test_web_service_and_http_port_are_preferred() -> None:
     assert choose_port(candidates[0], None) == 8000
 
 
-def test_generate_writes_an_override(monkeypatch) -> None:
+def test_save_writes_an_override(monkeypatch) -> None:
     monkeypatch.setattr(
         "localghost.cli.resolve_compose", lambda files: compose_model()
     )
@@ -32,7 +32,7 @@ def test_generate_writes_an_override(monkeypatch) -> None:
 
     with runner.isolated_filesystem():
         Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
-        result = runner.invoke(cli, ["generate", "--no-input"])
+        result = runner.invoke(cli, ["save", "--no-input"])
 
         assert result.exit_code == 0, result.output
         override = Path("compose.override.yaml").read_text(encoding="utf-8")
@@ -54,7 +54,7 @@ def test_existing_override_is_extended_and_backed_up(monkeypatch) -> None:
             "# keep me\nservices:\n  web:\n    environment:\n      DEBUG: '1'\n",
             encoding="utf-8",
         )
-        result = runner.invoke(cli, ["generate", "--no-input", "--extend"])
+        result = runner.invoke(cli, ["save", "--no-input", "--extend"])
 
         assert result.exit_code == 0, result.output
         override = Path("compose.override.yaml").read_text(encoding="utf-8")
@@ -64,22 +64,22 @@ def test_existing_override_is_extended_and_backed_up(monkeypatch) -> None:
         assert Path("compose.override.yaml.bak").exists()
 
 
-def test_host_bridge_is_scaffolded_without_compose() -> None:
+def test_host_run_defaults_are_saved_without_compose(monkeypatch) -> None:
+    monkeypatch.setattr("localghost.runner.shutil.which", lambda _: "/usr/bin/php")
     runner = CliRunner()
 
     with runner.isolated_filesystem():
+        Path("index.php").touch()
         result = runner.invoke(
             cli,
-            ["generate", "--no-input", "--type", "php", "--port", "3000"],
+            ["save", "--no-input", "--type", "php", "--port", "3000"],
             env={"COMPOSE_PROJECT_NAME": "sample-project"},
         )
 
         assert result.exit_code == 0, result.output
-        compose = Path("compose.yaml").read_text(encoding="utf-8")
-        assert "caddy:2.11.4-alpine" in compose
-        assert "http://host.docker.internal:3000" in compose
-        assert "host.docker.internal:host-gateway" in compose
-        assert "loadbalancer.server.port=8080" in compose
+        config = Path(".localghost.toml").read_text(encoding="utf-8")
+        assert 'type = "php"' in config
+        assert "port = 3000" in config
 
 
 def test_dockerfile_is_scaffolded_without_compose() -> None:
@@ -89,7 +89,7 @@ def test_dockerfile_is_scaffolded_without_compose() -> None:
         Path("Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
         result = runner.invoke(
             cli,
-            ["generate", "--no-input", "--port", "8000"],
+            ["save", "--no-input", "--port", "8000"],
             env={"COMPOSE_PROJECT_NAME": "sample-project"},
         )
 

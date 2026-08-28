@@ -112,7 +112,7 @@ uses `websecure` with TLS and becomes active after `localghost trust` enables
 the hub's HTTPS configuration. Keeping both routers means HTTP continues to
 work after HTTPS is enabled.
 
-The generator adds both routers automatically. For hand-written integration,
+`localghost save` adds both routers automatically. For hand-written integration,
 include all four `-secure` labels shown above: entrypoint, rule, service, and
 `tls=true`. A secure router without an explicit service label can be associated
 with the wrong backend when a container defines multiple routers or services.

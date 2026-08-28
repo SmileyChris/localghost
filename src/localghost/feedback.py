@@ -31,12 +31,12 @@ def next_actions(*, https_enabled: bool) -> None:
     """Show useful commands after a successful hub launch."""
     action("Stop the hub", "uvx localghost down")
     action(
-        "Add a route",
-        "uvx localghost generate",
+        "Save a setup",
+        "uvx localghost save",
         (
-            (" for Docker Compose, or ", "default"),
+            (", or ", "default"),
             ("uvx localghost run", LIME),
-            (" for a local app.", "default"),
+            (" to run a local app.", "default"),
         ),
     )
     if not https_enabled:

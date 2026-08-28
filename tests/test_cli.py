@@ -59,8 +59,8 @@ def test_default_command_starts_the_bundled_proxy(monkeypatch) -> None:
     assert kwargs["env"]["LOCALGHOST_IMAGE_TAG"] == f"v{LOCALGHOST_VERSION}"
     assert "Hub is ready at http://traefik.localhost" in result.output
     assert "Stop the hub: uvx localghost down" in result.output
-    assert "Add a route: uvx localghost generate for Docker Compose" in result.output
-    assert "uvx localghost run for a local app." in " ".join(result.output.split())
+    assert "Save a setup: uvx localghost save" in result.output
+    assert "uvx localghost run to run a local app." in " ".join(result.output.split())
 
 
 def test_default_command_reports_existing_proxy_and_routes(monkeypatch) -> None:
@@ -396,23 +396,23 @@ def test_run_rejects_the_removed_mode_flag(tmp_path) -> None:
     assert "no such option" in result.output.lower()
 
 
-def test_generate_rejects_the_removed_mode_flag() -> None:
+def test_save_rejects_the_removed_mode_flag() -> None:
     runner_ = CliRunner()
     with runner_.isolated_filesystem():
-        result = runner_.invoke(cli, ["generate", "--mode", "host", "--no-input"])
+        result = runner_.invoke(cli, ["save", "--mode", "host", "--no-input"])
 
     assert result.exit_code != 0
     assert "no such option" in result.output.lower()
 
 
-def test_generate_takes_the_per_type_default_port() -> None:
+def test_save_takes_the_per_type_default_port() -> None:
     runner_ = CliRunner()
     with runner_.isolated_filesystem():
         Path("manage.py").touch()
 
         result = runner_.invoke(
             cli,
-            ["generate", "--no-input", "--dry-run", "--type", "django"],
+            ["save", "--no-input", "--dry-run", "--type", "django"],
             # A random isolated_filesystem() directory name can contain an
             # underscore, which fails DNS-safe project-name validation; pin
             # a safe name so this test does not depend on that draw.
@@ -423,29 +423,38 @@ def test_generate_takes_the_per_type_default_port() -> None:
         assert "8000" in result.output
 
 
-def test_generate_records_the_type_in_the_config() -> None:
+def test_save_custom_command_does_not_record_an_irrelevant_detected_type() -> None:
     runner_ = CliRunner()
     with runner_.isolated_filesystem():
         Path("manage.py").touch()
 
         result = runner_.invoke(
             cli,
-            ["generate", "--no-input", "--port", "8000", "--", "./serve"],
+            [
+                "save",
+                "--no-input",
+                "--name",
+                "demo",
+                "--port",
+                "8000",
+                "--",
+                "./serve",
+            ],
         )
 
         assert result.exit_code == 0, result.output
-        assert 'type = "django"' in Path(".localghost.toml").read_text()
+        assert 'type = "django"' not in Path(".localghost.toml").read_text()
 
 
-def test_generate_accepts_dockerfile_as_a_type() -> None:
+def test_save_accepts_dockerfile_as_a_type() -> None:
     runner_ = CliRunner()
     with runner_.isolated_filesystem():
         Path("Dockerfile").write_text("FROM scratch\n")
 
         result = runner_.invoke(
             cli,
-            ["generate", "--no-input", "--dry-run", "--type", "dockerfile", "-p", "80"],
-            # See test_generate_takes_the_per_type_default_port: pin a safe
+            ["save", "--no-input", "--dry-run", "--type", "dockerfile", "-p", "80"],
+            # See test_save_takes_the_per_type_default_port: pin a safe
             # name so a random isolated_filesystem() directory name cannot
             # fail DNS-safe project-name validation.
             env={"COMPOSE_PROJECT_NAME": "dockerfile-type"},
@@ -455,20 +464,21 @@ def test_generate_accepts_dockerfile_as_a_type() -> None:
         assert "build:" in result.output
 
 
-def test_generate_flags_the_dockerfile_django_pair_as_ambiguous() -> None:
-    """Same directory as the run-side sibling test, but generate's allowed
-    types include dockerfile, so the pair is ambiguous here even though it
-    is not for `run` (dockerfile is filtered out of RUN_TYPES)."""
+def test_save_uses_run_detection_when_dockerfile_and_django_are_present() -> None:
+    """Dockerfile scaffolding does not make save diverge from run detection."""
     runner_ = CliRunner()
     with runner_.isolated_filesystem():
         Path(".git").mkdir()
         Path("manage.py").touch()
         Path("Dockerfile").write_text("FROM scratch\n")
 
-        result = runner_.invoke(cli, ["generate", "--no-input", "--dry-run"])
+        result = runner_.invoke(
+            cli,
+            ["save", "--no-input", "--dry-run", "--name", "demo"],
+        )
 
-        assert result.exit_code != 0
-        assert "both dockerfile and django were detected" in result.output
+        assert result.exit_code == 0, result.output
+        assert 'type = "django"' in result.output
 
 
 def test_run_accepts_the_deprecated_framework_alias(monkeypatch, tmp_path) -> None:
@@ -880,7 +890,7 @@ def test_interactive_user_can_choose_a_non_default_service(monkeypatch) -> None:
 
     with runner.isolated_filesystem():
         Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
-        result = runner.invoke(cli, ["generate"], input="worker\n")
+        result = runner.invoke(cli, ["save"], input="worker\n")
 
         assert result.exit_code == 0, result.output
         assert "web: ports 8000 (likely)" in result.output
@@ -896,7 +906,7 @@ def test_interactive_user_is_prompted_for_an_ambiguous_port(monkeypatch) -> None
 
     with runner.isolated_filesystem():
         Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
-        result = runner.invoke(cli, ["generate"], input="\n9000\n")
+        result = runner.invoke(cli, ["save"], input="\n9000\n")
 
         assert result.exit_code == 0, result.output
         assert "Container HTTP port" in result.output
@@ -911,7 +921,7 @@ def test_no_input_requires_a_port_when_it_cannot_choose_safely(monkeypatch) -> N
 
     with runner.isolated_filesystem():
         Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
-        result = runner.invoke(cli, ["generate", "--no-input"])
+        result = runner.invoke(cli, ["save", "--no-input"])
 
     assert result.exit_code != 0
     assert "multiple possible ports (7000, 9000)" in result.output
@@ -924,7 +934,7 @@ def test_explicit_unknown_service_lists_valid_choices(monkeypatch) -> None:
 
     with runner.isolated_filesystem():
         Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
-        result = runner.invoke(cli, ["generate", "--no-input", "--service", "missing"])
+        result = runner.invoke(cli, ["save", "--no-input", "--service", "missing"])
 
     assert result.exit_code != 0
     assert "choose one of: web, worker" in result.output
@@ -936,7 +946,7 @@ def test_unsafe_project_name_explains_env_remedy(monkeypatch) -> None:
 
     with runner.isolated_filesystem():
         Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
-        result = runner.invoke(cli, ["generate", "--no-input"])
+        result = runner.invoke(cli, ["save", "--no-input"])
 
     assert result.exit_code != 0
     assert "set a safe, unique COMPOSE_PROJECT_NAME in .env" in result.output
@@ -948,26 +958,25 @@ def test_dry_run_prints_yaml_without_writing(monkeypatch) -> None:
 
     with runner.isolated_filesystem():
         Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
-        result = runner.invoke(cli, ["generate", "--no-input", "--dry-run"])
+        result = runner.invoke(cli, ["save", "--no-input", "--dry-run"])
 
         assert result.exit_code == 0, result.output
         assert "localghost:" in result.output
         assert not Path("compose.override.yaml").exists()
 
 
-def test_generate_rejects_options_for_the_wrong_project_type(monkeypatch) -> None:
+def test_save_can_select_a_host_type_in_a_compose_project(monkeypatch) -> None:
     install_compose(monkeypatch, compose_model())
     runner = CliRunner()
 
     with runner.isolated_filesystem():
-        no_compose = runner.invoke(cli, ["generate", "--extend"])
-        assert no_compose.exit_code != 0
-        assert "--extend requires an existing Compose project" in no_compose.output
-
         Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
-        compose = runner.invoke(cli, ["generate", "--type", "django"])
-        assert compose.exit_code != 0
-        assert "--type can only be used" in compose.output
+        Path("manage.py").touch()
+        host = runner.invoke(
+            cli, ["save", "--type", "django", "--name", "demo"]
+        )
+        assert host.exit_code == 0, host.output
+        assert 'type = "django"' in Path(".localghost.toml").read_text()
 
 
 def test_compose_file_environment_selects_compose_mode(monkeypatch) -> None:
@@ -977,7 +986,7 @@ def test_compose_file_environment_selects_compose_mode(monkeypatch) -> None:
     with runner.isolated_filesystem():
         result = runner.invoke(
             cli,
-            ["generate", "--no-input", "--dry-run"],
+            ["save", "--no-input", "--dry-run"],
             env={"COMPOSE_FILE": "custom.yaml"},
         )
 
@@ -997,7 +1006,7 @@ def test_new_override_refuses_a_router_owned_by_another_service(monkeypatch) -> 
 
     with runner.isolated_filesystem():
         Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
-        result = runner.invoke(cli, ["generate", "--no-input", "--service", "web"])
+        result = runner.invoke(cli, ["save", "--no-input", "--service", "web"])
 
         assert result.exit_code != 0
         assert "already defined for service 'worker'" in result.output
@@ -1013,13 +1022,13 @@ def test_existing_override_requires_confirmation_or_extend(monkeypatch) -> None:
         Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
         original = "# existing\nservices: {}\n"
         Path("compose.override.yaml").write_text(original, encoding="utf-8")
-        declined = runner.invoke(cli, ["generate", "--service", "web"], input="n\n")
+        declined = runner.invoke(cli, ["save", "--service", "web"], input="n\n")
 
         assert declined.exit_code != 0
         assert "refusing to overwrite" in declined.output
         assert Path("compose.override.yaml").read_text(encoding="utf-8") == original
 
-        accepted = runner.invoke(cli, ["generate", "--service", "web"], input="y\n")
+        accepted = runner.invoke(cli, ["save", "--service", "web"], input="y\n")
 
         assert accepted.exit_code == 0, accepted.output
         assert "Backup:" in accepted.output
@@ -1033,7 +1042,7 @@ def test_existing_complete_override_reports_no_change(monkeypatch) -> None:
         Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
         first_model = compose_model()
         install_compose(monkeypatch, first_model)
-        first = runner.invoke(cli, ["generate", "--no-input"])
+        first = runner.invoke(cli, ["save", "--no-input"])
         assert first.exit_code == 0, first.output
 
         complete_model = compose_model()
@@ -1062,38 +1071,46 @@ def test_existing_complete_override_reports_no_change(monkeypatch) -> None:
                 ): "8000",
         }
         install_compose(monkeypatch, complete_model)
-        second = runner.invoke(cli, ["generate", "--no-input", "--extend"])
+        second = runner.invoke(cli, ["save", "--no-input", "--extend"])
 
         assert second.exit_code == 0, second.output
         assert "already contains" in second.output
         assert not Path("compose.override.yaml.bak").exists()
 
 
-def test_no_compose_type_reads_project_name_from_dotenv() -> None:
+def test_save_host_defaults_to_toml_with_project_name_from_dotenv(monkeypatch) -> None:
+    monkeypatch.setattr("localghost.runner.shutil.which", lambda _: "/usr/bin/php")
     runner = CliRunner()
 
     with runner.isolated_filesystem():
         Path(".env").write_text(
             "COMPOSE_PROJECT_NAME='safe-project'\n", encoding="utf-8"
         )
+        Path("index.php").touch()
         result = runner.invoke(
             cli,
-            ["generate", "--no-input", "--type", "php", "--port", "3000"],
+            ["save", "--no-input", "--type", "php", "--port", "3000"],
         )
 
         assert result.exit_code == 0, result.output
-        assert Path("compose.yaml").exists()
+        config = Path(".localghost.toml").read_text()
+        assert 'type = "php"' in config
+        assert "port = 3000" in config
 
 
-def test_no_compose_type_validates_inputs_and_refuses_overwrite() -> None:
+def test_save_host_defaults_reject_compose_options_and_refuse_overwrite(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("localghost.runner.shutil.which", lambda _: "/usr/bin/php")
     runner = CliRunner()
 
     with runner.isolated_filesystem():
         environment = {"COMPOSE_PROJECT_NAME": "safe-project"}
+        Path("index.php").touch()
         invalid_service = runner.invoke(
             cli,
             [
-                "generate",
+                "save",
                 "--no-input",
                 "--type",
                 "php",
@@ -1105,21 +1122,23 @@ def test_no_compose_type_validates_inputs_and_refuses_overwrite() -> None:
             env=environment,
         )
         assert invalid_service.exit_code != 0
-        assert "not a valid service name" in invalid_service.output
+        assert "--service can only be used" in invalid_service.output
 
         # php (like every non-dockerfile, non-compose type) has a default
         # port, so only dockerfile -- which has none -- can still exercise
         # the "requires --port" guard here.
+        Path("Dockerfile").write_text("FROM scratch\n")
         missing_port = runner.invoke(
-            cli, ["generate", "--no-input", "--type", "dockerfile"], env=environment
+            cli, ["save", "--no-input", "--type", "dockerfile"], env=environment
         )
         assert missing_port.exit_code != 0
         assert "requires --port" in missing_port.output
 
+        Path("Dockerfile").unlink()
         missing_dockerfile = runner.invoke(
             cli,
             [
-                "generate",
+                "save",
                 "--no-input",
                 "--type",
                 "dockerfile",
@@ -1129,30 +1148,32 @@ def test_no_compose_type_validates_inputs_and_refuses_overwrite() -> None:
             env=environment,
         )
         assert missing_dockerfile.exit_code != 0
-        assert "requires a Dockerfile" in missing_dockerfile.output
+        assert "could not find a dockerfile project root" in (
+            missing_dockerfile.output
+        )
 
-        Path("generated.yaml").write_text("keep\n", encoding="utf-8")
+        Path("saved.yaml").write_text("keep\n", encoding="utf-8")
         overwrite = runner.invoke(
             cli,
             [
-                "generate",
+                "save",
                 "--no-input",
                 "--type",
                 "php",
                 "--port",
                 "3000",
                 "--output",
-                "generated.yaml",
+                "saved.yaml",
             ],
             env=environment,
         )
         assert overwrite.exit_code != 0
-        assert "refusing to overwrite" in overwrite.output
-        assert Path("generated.yaml").read_text(encoding="utf-8") == "keep\n"
+        assert "--output can only be used" in overwrite.output
+        assert Path("saved.yaml").read_text(encoding="utf-8") == "keep\n"
 
 
-def test_no_compose_interactive_silently_detects_a_lone_dockerfile(monkeypatch) -> None:
-    """generate now shares run's detect-first behaviour: an unambiguous
+def test_save_interactively_detects_a_lone_dockerfile(monkeypatch) -> None:
+    """save now shares run's detect-first behaviour: an unambiguous
     Dockerfile is picked up without an "Application type" confirmation
     prompt -- only the still-unresolved port is asked for."""
     monkeypatch.setattr("localghost.cli._is_interactive", lambda _: True)
@@ -1162,7 +1183,7 @@ def test_no_compose_interactive_silently_detects_a_lone_dockerfile(monkeypatch) 
         Path("Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
         result = runner.invoke(
             cli,
-            ["generate"],
+            ["save"],
             input="8080\n",
             env={"COMPOSE_PROJECT_NAME": "safe-project"},
         )
@@ -1173,24 +1194,19 @@ def test_no_compose_interactive_silently_detects_a_lone_dockerfile(monkeypatch) 
         assert "build: ." in Path("compose.yaml").read_text(encoding="utf-8")
 
 
-def test_no_compose_interactive_prompts_when_nothing_is_detected(monkeypatch) -> None:
+def test_save_errors_when_nothing_is_detected(monkeypatch) -> None:
     monkeypatch.setattr("localghost.cli._is_interactive", lambda _: True)
     runner = CliRunner()
 
     with runner.isolated_filesystem():
         result = runner.invoke(
             cli,
-            ["generate"],
-            input="\n",
+            ["save"],
             env={"COMPOSE_PROJECT_NAME": "safe-project"},
         )
 
-        assert result.exit_code == 0, result.output
-        assert "Application type" in result.output
-        # php is the fallback default when no Dockerfile is present, and it
-        # has a default port, so no separate port prompt is needed.
-        assert "Container HTTP port" not in result.output
-        assert "for the host application on port 8080" in result.output
+        assert result.exit_code != 0
+        assert "could not detect a project type" in result.output
 
 
 def test_compose_run_detached_records_a_session(monkeypatch, tmp_path) -> None:
@@ -1253,7 +1269,7 @@ def test_compose_run_rejects_a_host_command(tmp_path) -> None:
     )
 
     assert result.exit_code != 0
-    assert "compose does not accept" in result.output.lower()
+    assert "cannot be combined with --type compose" in result.output.lower()
 
 
 def test_compose_run_dry_run_prints_the_plan_and_starts_nothing(
@@ -1298,7 +1314,7 @@ def test_compose_run_refuses_an_unrouted_project(monkeypatch, tmp_path) -> None:
 
     assert result.exit_code != 0
     assert "compose.yaml" in result.output
-    assert "localghost generate" in result.output
+    assert "localghost run --save" in result.output
     # The failure names the URL nothing would answer at, but must never
     # present it as a working destination.
     assert "Public URL" not in result.output
@@ -1309,7 +1325,7 @@ def test_compose_routing_check_never_pins_an_explicit_file(
     monkeypatch, tmp_path
 ) -> None:
     """Passing --file to `docker compose config` disables Compose's own
-    compose.override.yaml merge, so a project `generate` just fixed would
+    compose.override.yaml merge, so a project `save` just fixed would
     still be refused with the identical error. The check must therefore let
     Compose's own discovery run, against compose_root -- not the process's
     own cwd, for -C/--root runs -- rather than pinning an explicit file."""
@@ -1337,17 +1353,17 @@ def test_compose_routing_check_never_pins_an_explicit_file(
     assert recorded["cwd"] == tmp_path
 
 
-def test_compose_run_routes_after_generate_fixes_an_override() -> None:
+def test_compose_run_routes_after_save_fixes_an_override() -> None:
     """End-to-end against real `docker compose config` (no mocking): a run
-    refused for missing routing labels must un-refuse once `generate` writes
-    them, proving the check reads the same merged model `generate` writes to
+    refused for missing routing labels must un-refuse once `save` writes
+    them, proving the check reads the same merged model `save` writes to
     and `_run_compose` itself would read. --dry-run avoids needing a daemon."""
     runner = CliRunner()
     # A random isolated_filesystem() directory name can contain an
     # underscore; real `docker compose config` accepts that as a project
     # name, but our stricter DNS-safe check does not, so pin a safe name
     # for every invocation instead of leaving it to the directory's draw.
-    environment = {"COMPOSE_PROJECT_NAME": "routes-after-generate"}
+    environment = {"COMPOSE_PROJECT_NAME": "routes-after-save"}
     with runner.isolated_filesystem():
         Path("compose.yaml").write_text(
             "services:\n  web:\n    image: nginx\n    expose:\n      - '80'\n"
@@ -1357,12 +1373,12 @@ def test_compose_run_routes_after_generate_fixes_an_override() -> None:
             cli, ["run", "--type", "compose", "--dry-run"], env=environment
         )
         assert refused.exit_code != 0, refused.output
-        assert "run localghost generate" in refused.output
+        assert "localghost run --save" in refused.output
 
-        generated = runner.invoke(
-            cli, ["generate", "--no-input", "--port", "80"], env=environment
+        saved = runner.invoke(
+            cli, ["save", "--no-input", "--port", "80"], env=environment
         )
-        assert generated.exit_code == 0, generated.output
+        assert saved.exit_code == 0, saved.output
         assert Path("compose.override.yaml").exists()
 
         routed = runner.invoke(
@@ -1372,29 +1388,20 @@ def test_compose_run_routes_after_generate_fixes_an_override() -> None:
         assert "Public URL:" in routed.output
 
 
-def test_a_configured_compose_type_skips_the_routing_check(
+def test_a_configured_compose_type_still_validates_routing(
     monkeypatch, tmp_path
 ) -> None:
     (tmp_path / "compose.yaml").write_text("services: {}\n")
     (tmp_path / ".localghost.toml").write_text('[run]\ntype = "compose"\n')
     monkeypatch.setattr(
         "localghost.cli.resolve_compose",
-        lambda files, **kwargs: pytest.fail(
-            "resolved the model despite an explicit type"
-        ),
-    )
-    monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        "localghost.cli.subprocess.run",
-        lambda command, **kwargs: CompletedProcess(command, 0),
+        lambda files, **kwargs: {"networks": {}, "services": {"web": {}}},
     )
 
     result = CliRunner().invoke(cli, ["run", "-C", str(tmp_path), "--name", "demo"])
 
-    assert result.exit_code == 0, result.output
-    # No HTTPS is configured in the test environment, so the public URL is
-    # printed over http, matching the sibling non-skipping compose-run test.
-    assert "http://demo.localhost" in result.output
+    assert result.exit_code != 0
+    assert "localghost run --save" in result.output
 
 
 def test_a_pinned_root_with_only_a_configured_name_still_detects_compose(
@@ -1562,22 +1569,22 @@ def test_pinned_root_from_discovered_config_does_not_claim_a_root_flag(
     assert "--root" not in result.output
 
 
-def test_generate_command_requires_a_port() -> None:
+def test_save_command_requires_a_port() -> None:
     runner = CliRunner()
     with runner.isolated_filesystem():
-        result = runner.invoke(cli, ["generate", "--no-input", "--", "./server"])
+        result = runner.invoke(cli, ["save", "--no-input", "--", "./server"])
 
     assert result.exit_code != 0
     assert "a custom command requires --port" in result.output
 
 
-def test_generate_command_rejects_dockerfile_type() -> None:
+def test_save_command_rejects_dockerfile_type() -> None:
     runner = CliRunner()
     with runner.isolated_filesystem():
         result = runner.invoke(
             cli,
             [
-                "generate",
+                "save",
                 "--no-input",
                 "--type",
                 "dockerfile",
@@ -1592,54 +1599,31 @@ def test_generate_command_rejects_dockerfile_type() -> None:
     assert "cannot be combined with --type dockerfile" in result.output
 
 
-def test_generate_no_longer_offers_compose_as_a_type() -> None:
-    """compose was never a legitimate generate --type value: with no Compose
-    file present it asked generate to scaffold a *host* bridge for a type
-    named "compose"; with one present, --type is rejected outright
-    regardless of its value. It is dropped from GENERATE_TYPES rather than
-    special-cased."""
+def test_save_offers_compose_as_a_type_but_requires_a_compose_file() -> None:
     runner_ = CliRunner()
     with runner_.isolated_filesystem():
         result = runner_.invoke(
-            cli, ["generate", "--no-input", "--type", "compose", "--port", "80"]
+            cli, ["save", "--no-input", "--type", "compose", "--port", "80"]
         )
 
     assert result.exit_code != 0
-    assert "not one of" in result.output
-    assert "'compose'" in result.output
-    assert "'dockerfile'" in result.output
+    assert "could not find a compose project root" in result.output
 
 
-def test_generate_command_rejects_compose_type_for_a_command(
-    tmp_path, monkeypatch, cli_module
-) -> None:
-    """`_generate_without_compose`'s upward detection can land on 'compose'
-    through an ancestor's compose.yaml even though compose is no longer an
-    offered --type value; the command-writing path must still refuse it
-    explicitly rather than writing type = "compose" into .localghost.toml --
-    which run would then either refuse outright, or, if the recorded
-    command were later dropped by hand, treat as a project that skips the
-    compose routing check despite never actually being wired."""
-    monkeypatch.chdir(tmp_path)
+def test_save_command_rejects_compose_type() -> None:
+    result = CliRunner().invoke(
+        cli,
+        ["save", "--type", "compose", "--port", "3000", "--", "./server"],
+    )
 
-    with pytest.raises(
-        click.ClickException, match="cannot be combined with --type compose"
-    ):
-        cli_module._generate_without_compose(
-            service_name=None,
-            port=3000,
-            output=None,
-            selected_type="compose",
-            dry_run=False,
-            interactive=False,
-            command=("./server",),
-        )
+    assert result.exit_code != 0
+    assert "cannot be combined with --type compose" in result.output
 
 
-def test_generate_detects_a_dockerfile_from_a_subdirectory_and_writes_at_the_root(
+def test_save_detects_a_dockerfile_from_a_subdirectory_and_writes_at_the_root(
     tmp_path, monkeypatch
 ) -> None:
-    """generate's upward detection can resolve a type from an ancestor
+    """save's upward detection can resolve a type from an ancestor
     directory; every check and default downstream of that detection must
     use the same root, not silently fall back to the invocation directory.
     Before the fix, the Dockerfile existence check stayed cwd-only, so a
@@ -1656,7 +1640,7 @@ def test_generate_detects_a_dockerfile_from_a_subdirectory_and_writes_at_the_roo
 
     result = CliRunner().invoke(
         cli,
-        ["generate", "--no-input", "--port", "80"],
+        ["save", "--no-input", "--port", "80"],
         env={"COMPOSE_PROJECT_NAME": "root-detected-dockerfile"},
     )
 
@@ -1676,11 +1660,21 @@ def test_run_rejects_a_missing_config_path(tmp_path) -> None:
     assert "does not exist" in result.output.lower()
 
 
-def test_generate_command_writes_and_then_extends_the_config() -> None:
+def test_save_command_writes_and_then_extends_the_config() -> None:
     runner = CliRunner()
     with runner.isolated_filesystem():
         created = runner.invoke(
-            cli, ["generate", "--no-input", "--port", "3000", "--", "./server"]
+            cli,
+            [
+                "save",
+                "--no-input",
+                "--name",
+                "demo",
+                "--port",
+                "3000",
+                "--",
+                "./server",
+            ],
         )
         assert created.exit_code == 0, created.output
         assert "Created .localghost.toml." in created.output
@@ -1688,9 +1682,11 @@ def test_generate_command_writes_and_then_extends_the_config() -> None:
         updated = runner.invoke(
             cli,
             [
-                "generate",
+                "save",
                 "--no-input",
                 "--extend",
+                "--name",
+                "demo",
                 "--port",
                 "4000",
                 "--",
@@ -1704,31 +1700,158 @@ def test_generate_command_writes_and_then_extends_the_config() -> None:
         assert "port = 4000" in Path(".localghost.toml").read_text(encoding="utf-8")
 
 
-def test_generate_command_refuses_to_overwrite_without_extend() -> None:
+def test_save_command_refuses_to_overwrite_without_extend() -> None:
     runner = CliRunner()
     with runner.isolated_filesystem():
         Path(".localghost.toml").write_text("[run]\nport = 1\n")
 
         result = runner.invoke(
-            cli, ["generate", "--no-input", "--port", "3000", "--", "./server"]
+            cli,
+            [
+                "save",
+                "--no-input",
+                "--name",
+                "demo",
+                "--port",
+                "3000",
+                "--",
+                "./server",
+            ],
         )
 
         assert result.exit_code != 0
         assert "--extend" in result.output
 
 
-def test_generate_command_dry_run_prints_without_writing() -> None:
+def test_save_command_dry_run_prints_without_writing() -> None:
     runner = CliRunner()
     with runner.isolated_filesystem():
         result = runner.invoke(
             cli,
-            ["generate", "--no-input", "--dry-run", "--port", "3000", "--", "./server"],
+            [
+                "save",
+                "--no-input",
+                "--dry-run",
+                "--name",
+                "demo",
+                "--port",
+                "3000",
+                "--",
+                "./server",
+            ],
         )
 
         assert result.exit_code == 0, result.output
         assert not Path(".localghost.toml").exists()
         assert "[run]" in result.output
         assert "port = 3000" in result.output
+
+
+def test_run_save_persists_a_custom_command_before_running(
+    monkeypatch, tmp_path
+) -> None:
+    (tmp_path / ".git").mkdir()
+    executed = []
+    monkeypatch.setattr(
+        "localghost.cli.execute",
+        lambda plan, *args, **kwargs: executed.append(plan) or 0,
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "run",
+            "-C",
+            str(tmp_path),
+            "--save",
+            "--name",
+            "custom-save",
+            "--port",
+            "34567",
+            "--",
+            "./server",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert executed
+    config = (tmp_path / ".localghost.toml").read_text(encoding="utf-8")
+    assert "port = 34567" in config
+    assert 'command = ["./server"]' in config
+
+
+def test_run_save_writes_compose_integration_and_starts(
+    monkeypatch, tmp_path
+) -> None:
+    (tmp_path / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
+    install_compose(monkeypatch, compose_model())
+    monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
+    commands = []
+    monkeypatch.setattr(
+        "localghost.cli.subprocess.run",
+        lambda command, **kwargs: commands.append(command)
+        or CompletedProcess(command, 0),
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "run",
+            "-C",
+            str(tmp_path),
+            "--type",
+            "compose",
+            "--save",
+            "--service",
+            "web",
+            "--port",
+            "8000",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "compose.override.yaml").exists()
+    assert any(command[:2] == ["docker", "compose"] for command in commands)
+
+
+def test_save_and_run_save_write_the_same_host_configuration(
+    monkeypatch, tmp_path
+) -> None:
+    save_root = tmp_path / "save-only"
+    run_root = tmp_path / "save-and-run"
+    for root in (save_root, run_root):
+        root.mkdir()
+        (root / ".git").mkdir()
+        (root / "manage.py").touch()
+
+    runner = CliRunner()
+    monkeypatch.chdir(save_root)
+    saved = runner.invoke(
+        cli,
+        ["save", "--type", "django", "--name", "demo", "--port", "34567"],
+    )
+    assert saved.exit_code == 0, saved.output
+
+    monkeypatch.chdir(run_root)
+    monkeypatch.setattr("localghost.cli.execute", lambda *args, **kwargs: 0)
+    run = runner.invoke(
+        cli,
+        [
+            "run",
+            "--save",
+            "--type",
+            "django",
+            "--name",
+            "demo",
+            "--port",
+            "34567",
+        ],
+    )
+    assert run.exit_code == 0, run.output
+
+    assert (save_root / ".localghost.toml").read_bytes() == (
+        run_root / ".localghost.toml"
+    ).read_bytes()
 
 
 def test_compose_run_starts_the_proxy_and_reports_the_public_url(
@@ -1905,7 +2028,7 @@ def test_detached_start_failure_removes_bridge(monkeypatch, tmp_path, cli_module
 def test_compose_run_honours_compose_project_name_from_dotenv(
     monkeypatch, tmp_path
 ) -> None:
-    """`.env` must win over the directory name, as it does for `generate`.
+    """`.env` must win over the directory name, as it does for `save`.
 
     Otherwise `localghost run --type compose` and a plain `docker compose up`
     build two different projects from the same directory.

@@ -309,14 +309,14 @@ assert_equal "${second_proxy_id}" "$(proxy ps -q traefik)" \
   'Proxy ID after foreground bridge removal'
 wait_for_body "${PROJECT_B}.localhost" "Hostname: ${b_web_hostname}" >/dev/null
 
-log 'Generate, build, and route an application from a Dockerfile'
+log 'Save, build, and route an application from a Dockerfile'
 DOCKERFILE_DIR=$(mktemp -d)
 cp "${ROOT_DIR}/tests/fixtures/dockerfile-app/Dockerfile" \
   "${DOCKERFILE_DIR}/Dockerfile"
 (
   cd "${DOCKERFILE_DIR}"
   COMPOSE_PROJECT_NAME="${DOCKERFILE_PROJECT}" \
-    uv run --frozen --project "${ROOT_DIR}" localghost generate \
+    uv run --frozen --project "${ROOT_DIR}" localghost save \
     --no-input --type dockerfile --port 80
 )
 dockerfile_app up -d --build

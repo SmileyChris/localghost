@@ -92,27 +92,25 @@ host state and passed to trust-store tooling.
 
 Applications opt into HTTPS with a second, project-scoped router using the same
 hostname and backend service as the HTTP router. The secure router selects the
-`websecure` entrypoint and sets `tls=true`. The generator and checked-in examples
+`websecure` entrypoint and sets `tls=true`. The save workflow and checked-in examples
 include both routers, so enabling or disabling the hub's HTTPS configuration
 does not require regenerating application configuration.
 
 ## Host-native applications
 
-The optional CLI can generate a small consumer Compose project for an HTTP
-process running directly on the host. A pinned Caddy container — the bridge —
-joins the shared network, carries the ordinary Traefik labels, and forwards
-requests to `host.docker.internal`. This keeps host-specific routes out of the
-persistent hub configuration and gives the bridge an independent application
-lifecycle.
+The CLI creates an ephemeral Caddy bridge for an HTTP process running directly
+on the host. The bridge joins the shared network, carries the ordinary Traefik
+labels, and forwards requests to `host.docker.internal`. This keeps
+host-specific routes out of the persistent hub configuration.
 
 The host process must listen on an interface reachable from Docker. Binding only
 to host loopback is generally insufficient.
 
-`localghost run` uses the same Caddy image but creates its Compose model
-in memory with a unique internal project and foreground ownership labels. Its
+`localghost run` creates the bridge model in memory with a unique internal
+project and foreground ownership labels. Its
 literal `<name>-app` Traefik objects disappear with the child process; the
-hub is retained. `generate --type <type>`, naming the specific framework or
-`php`, remains the persistent, user-managed alternative.
+hub is retained. `save` records repeatable host run settings in
+`.localghost.toml`; it does not make the bridge itself persistent.
 
 The hub is always started as the fixed `localghost` Compose project, even
 when a host application sets `COMPOSE_PROJECT_NAME` for its own route.

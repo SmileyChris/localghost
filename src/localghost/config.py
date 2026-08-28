@@ -64,9 +64,9 @@ def load_config(path: Path) -> RunConfig:
         selected_type = values["framework"]
     if selected_type is not None and selected_type not in RUN_TYPES:
         # [run].type configures `run`, which never runs `dockerfile`
-        # directly -- that value only makes `generate --type dockerfile`
+        # directly -- that value only makes `save --type dockerfile`
         # meaningful. Validating the run-valid set here, rather than every
-        # type `generate` knows about, means a bad value fails at config
+        # type `save` knows about, means a bad value fails at config
         # load with a clear message instead of surfacing later, mid-`run`,
         # as a confusing "detected nothing there" from build_plan's pinned
         # branch.

@@ -1003,13 +1003,13 @@ def test_a_dockerfile_does_not_make_a_django_project_ambiguous(tmp_path):
     assert runner.discover_type(tmp_path) == ("django", tmp_path)
 
 
-def test_generate_sees_the_dockerfile_django_pair_as_ambiguous(tmp_path):
+def test_save_sees_the_dockerfile_django_pair_as_ambiguous(tmp_path):
     (tmp_path / ".git").mkdir()
     (tmp_path / "manage.py").touch()
     (tmp_path / "Dockerfile").write_text("FROM scratch\n")
 
     with pytest.raises(click.ClickException) as error:
-        runner.discover_type(tmp_path, allowed=runner.GENERATE_TYPES)
+        runner.discover_type(tmp_path, allowed=runner.SAVABLE_NON_COMPOSE_TYPES)
 
     assert "both dockerfile and django were detected" in str(error.value)
     assert "--type dockerfile or --type django" in str(error.value)
@@ -1031,7 +1031,7 @@ def test_requesting_a_type_the_command_rejects_says_so(tmp_path):
         runner.discover_type(tmp_path, "dockerfile")
 
     assert "'dockerfile' cannot be run" in str(error.value)
-    assert "localghost generate --type dockerfile" in str(error.value)
+    assert "localghost save --type dockerfile" in str(error.value)
 
 
 def test_search_path_stops_at_any_vcs_directory(tmp_path, monkeypatch):
@@ -1177,8 +1177,8 @@ def test_a_laravel_project_missing_artisan_degrades_to_php(tmp_path):
     assert runner._types_at(tmp_path) == ["php"]
 
 
-def test_dockerfile_is_generate_only(tmp_path):
-    assert "dockerfile" in runner.GENERATE_TYPES
+def test_dockerfile_is_save_only(tmp_path):
+    assert "dockerfile" in runner.SAVABLE_NON_COMPOSE_TYPES
     assert "dockerfile" not in runner.RUN_TYPES
 
 

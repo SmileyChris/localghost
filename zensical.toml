@@ -10,7 +10,7 @@ nav = [
   {"Home" = "index.md"},
   {"Use localghost" = [
     {"Integrate applications" = "integrating-applications.md"},
-    {"Generate configuration" = "generating-an-override.md"},
+    {"Save project setup" = "saving-setup.md"},
     {"Run host applications" = "running-host-apps.md"},
   ]},
   {"Operate localghost" = [

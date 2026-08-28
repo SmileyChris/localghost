@@ -3,6 +3,21 @@
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Changed
+
+- Replaced `localghost generate` with the project-oriented `localghost save`.
+  Saving now has one contract across project types: host and custom runs are
+  recorded in `.localghost.toml`, Compose integration is written to
+  `compose.override.yaml`, and Dockerfile-only projects can be saved as a new
+  `compose.yaml`.
+- Added `localghost run --save`, which uses the same persistence path as
+  `localghost save` and then starts the application. Plain `run` remains
+  non-mutating and directs an unconfigured Compose project to `run --save`.
+- Explicit `type = "compose"` run configuration now resolves type ambiguity
+  without bypassing validation of the resolved Compose routing model.
+
 ## [2.1.0] - 2026-08-26
 
 ### Added

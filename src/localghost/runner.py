@@ -52,12 +52,12 @@ SUPPORTED_TYPES = (
     "php",
 )
 RUN_TYPES = tuple(item for item in SUPPORTED_TYPES if item != "dockerfile")
-# `compose` is never a legitimate `generate --type` value: with no Compose
-# file present it would ask generate to scaffold a *host* bridge for a type
-# named "compose", and with one present, `--type` is already rejected
-# outright regardless of its value. Excluding it here removes the dead,
-# actively-misleading choice instead of special-casing it at every call site.
-GENERATE_TYPES = tuple(item for item in SUPPORTED_TYPES if item != "compose")
+# Types the non-Compose save path can persist. Compose is handled separately
+# because it extends a resolved Compose model rather than writing run defaults
+# or scaffolding a Dockerfile project.
+SAVABLE_NON_COMPOSE_TYPES = tuple(
+    item for item in SUPPORTED_TYPES if item != "compose"
+)
 
 DEFAULT_PORTS = {
     "django": 8000,
@@ -243,7 +243,7 @@ def discover_type(
     if requested is not None and requested not in allowed:
         if requested == "dockerfile":
             raise click.ClickException(
-                "'dockerfile' cannot be run directly; run `localghost generate "
+                "'dockerfile' cannot be run directly; run `localghost save "
                 "--type dockerfile` to build a Compose file first"
             )
         raise click.ClickException(

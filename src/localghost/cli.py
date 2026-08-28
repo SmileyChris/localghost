@@ -14,6 +14,7 @@ import sys
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
+from dataclasses import dataclass
 from pathlib import Path
 
 import click
@@ -44,7 +45,6 @@ from .generator import (
     Candidate,
     choose_port,
     create_dockerfile_compose,
-    create_host_bridge_compose,
     create_override,
     extend_override,
     load_override,
@@ -60,8 +60,6 @@ from .paths import state_directory
 from .roots import discover_config, resolve_root
 from .routes import active_routes, proxy_is_running
 from .runner import (
-    DEFAULT_PORTS,
-    GENERATE_TYPES,
     RUN_TYPES,
     RunPlan,
     _compose_file,
@@ -73,7 +71,6 @@ from .runner import (
     resolve_pinned_type,
     start_bridge,
     stop_bridge,
-    type_choices,
 )
 from .sessions import alive as session_alive
 from .sessions import clean as clean_sessions
@@ -84,6 +81,23 @@ from .trust import MkcertInstaller, PublicCertificate, TrustError, ZenNssInstall
 
 LOCALGHOST_VERSION = importlib.metadata.version("localghost")
 TRAEFIK_IMAGE = f"localghost-traefik:v{LOCALGHOST_VERSION}"
+SAVE_TYPES = (*RUN_TYPES, "dockerfile")
+
+
+@dataclass(frozen=True)
+class ResolvedApplication:
+    """One resolution shared by run, save, and run --save."""
+
+    cwd: Path
+    config_file: Path | None
+    requested_type: str | None
+    selected_type: str
+    root: Path
+    name: str | None
+    port: int | None
+    command: tuple[str, ...]
+    plan: RunPlan | None
+    explicit_run_settings: bool
 
 
 @click.group(invoke_without_command=True)
@@ -96,7 +110,7 @@ TRAEFIK_IMAGE = f"localghost-traefik:v{LOCALGHOST_VERSION}"
 )
 @click.pass_context
 def cli(ctx: click.Context, show_status: bool) -> None:
-    """Connect local applications to the hub."""
+    """Give local applications friendly .localhost URLs."""
     if show_status:
         if ctx.invoked_subcommand is not None:
             raise click.UsageError("--status cannot be combined with a subcommand")
@@ -371,6 +385,17 @@ def _trust_status() -> None:
     help="Run in the background and manage it later.",
 )
 @click.option(
+    "save_setup",
+    "--save",
+    is_flag=True,
+    help="Save this project's Localghost setup before running.",
+)
+@click.option(
+    "service_name",
+    "--service",
+    help="Compose service to expose when saving its integration.",
+)
+@click.option(
     "config",
     "--config",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -397,90 +422,84 @@ def run(
     root: Path | None,
     port: int | None,
     detach: bool,
+    save_setup: bool,
+    service_name: str | None,
     config: Path | None,
     dry_run: bool,
     no_status_bar: bool,
     command: tuple[str, ...],
 ) -> None:
     """Run a configured host or Compose application behind the hub."""
-    cwd = working_directory or Path.cwd()
     if framework is not None:
         if selected_type is not None:
             raise click.UsageError("--type and --framework cannot both be given")
         warning("Deprecated option", ["--framework is deprecated; use --type"])
         selected_type = framework
-        # The alias is now fully folded into `selected_type`; clearing it
-        # stops any later check from testing the alias variable itself
-        # (which would still read "compose" etc.) instead of the actual
-        # host-only settings it means to guard.
-        framework = None
-    config_file = config or discover_config(cwd)
-    settings = load_config(config_file) if config_file else RunConfig()
-    config_dir = config_file.parent if config_file else None
-    explicit_run_settings = bool(command) or any(
-        value is not None for value in (name, selected_type, port, config)
+    resolved = _resolve_application(
+        working_directory=working_directory,
+        name=name,
+        selected_type=selected_type,
+        root=root,
+        port=port,
+        config=config,
+        command=command,
     )
-    command = command or settings.command
-    name = name or settings.name
-    selected_type = selected_type or settings.type
-    port = port or settings.port
-    root_from_flag = root is not None
-    pinned = resolve_root(
-        start=cwd, flag=root, configured=settings.root, config_dir=config_dir
-    )
-    resolved_root: Path | None = None
-    if not command:
-        # Only compose is dispatched from here; every other detected type is
-        # re-discovered inside build_plan, which also needs the ambiguity
-        # and "nothing detected" errors this raises. Type and root are
-        # resolved together here for a pinned root exactly as much as an
-        # unpinned one, so compose's project name, routing check, and
-        # `docker compose` invocation below all anchor to the same
-        # directory build_plan would use for a host type. This resolution
-        # runs whether or not --type was given explicitly: an explicit
-        # --type compose still needs its root walked from cwd/pinned
-        # exactly like the undetected case, or compose_root falls back to
-        # cwd below and a subdirectory run hijacks another project's route.
-        if pinned is not None:
-            selected_type, resolved_root = resolve_pinned_type(
-                pinned, selected_type, from_flag=root_from_flag
-            )
-        else:
-            selected_type, resolved_root = discover_type(cwd, selected_type)
-    if selected_type == "compose":
+    if resolved.selected_type == "compose":
         # Compose owns the application's configuration, so host-only
         # settings are rejected; --root is orthogonal and stays allowed.
-        if command or port is not None:
+        if resolved.command or (resolved.port is not None and not save_setup):
             raise click.ClickException(
                 "compose does not accept a host command or --port; Compose "
                 "owns them"
             )
-        compose_root = resolved_root or pinned or cwd
-        project = name or _local_project_name(compose_root)
-        trusted = settings.type == "compose"
-        if not trusted:
-            _check_compose_routing(compose_root, project)
+        project = resolved.name or _local_project_name(resolved.root)
+        if save_setup:
+            _persist_resolved_application(
+                resolved,
+                service_name=service_name,
+                port=resolved.port,
+                output=None,
+                extend=True,
+                dry_run=dry_run,
+                interactive=_is_interactive(False),
+                final_hint=False,
+            )
+            if dry_run:
+                return
+        else:
+            _check_compose_routing(resolved.root, project)
         if dry_run:
             compose_dry_run(project=project, url=_proxy_origin(project))
             return
-        _run_compose(compose_root, name, detach, status_bar=not no_status_bar)
+        _run_compose(
+            resolved.root,
+            resolved.name,
+            detach,
+            status_bar=not no_status_bar,
+        )
         return
-    plan = build_plan(
-        pinned or cwd,
-        name,
-        selected_type,
-        port,
-        command,
-        pinned=pinned,
-        pinned_from_flag=root_from_flag,
-    )
-    matching = find_matching(name=plan.name, cwd=plan.project_root or cwd)
+    plan = resolved.plan
+    assert plan is not None
+    if save_setup:
+        _persist_resolved_application(
+            resolved,
+            service_name=service_name,
+            port=resolved.port,
+            output=None,
+            extend=True,
+            dry_run=dry_run,
+            interactive=_is_interactive(False),
+            final_hint=False,
+        )
+        if dry_run:
+            return
+    matching = find_matching(name=plan.name, cwd=plan.project_root or resolved.cwd)
     if matching:
         message = (
             f"Session {matching.id} is already running; attach with: "
             f"localghost manage attach {matching.id}"
         )
-        if explicit_run_settings:
+        if resolved.explicit_run_settings:
             raise click.ClickException(message)
         click.echo(message)
         return
@@ -493,25 +512,110 @@ def run(
         _reclaim_route(collision, plan.name)
     django_warnings = django_settings_warnings(
         plan,
-        plan.working_directory or cwd,
+        plan.working_directory or resolved.cwd,
         public_origin=_proxy_origin(plan.name),
     )
     if django_warnings:
         warning("Django settings", django_warnings)
     _print_run_plan(plan, dry_run=False, detach=detach)
     if detach:
-        _detach_host(plan, cwd)
+        _detach_host(plan, resolved.cwd)
         return
     status = execute(
         plan,
         lambda: _run_proxy("up", https_enabled=_https_configured()),
-        cwd=plan.working_directory or cwd,
+        cwd=plan.working_directory or resolved.cwd,
         public_origin=_proxy_origin(plan.name),
         status_bar=not no_status_bar,
     )
     if status:
         raise click.exceptions.Exit(status)
     success("Application stopped.")
+
+
+def _resolve_application(
+    *,
+    working_directory: Path | None,
+    name: str | None,
+    selected_type: str | None,
+    root: Path | None,
+    port: int | None,
+    config: Path | None,
+    command: tuple[str, ...],
+) -> ResolvedApplication:
+    """Resolve the effective application once for running and persistence."""
+    cwd = working_directory or Path.cwd()
+    requested_type = selected_type
+    config_file = config or discover_config(cwd)
+    settings = load_config(config_file) if config_file else RunConfig()
+    config_dir = config_file.parent if config_file else None
+    explicit_run_settings = bool(command) or any(
+        value is not None for value in (name, selected_type, port, config)
+    )
+    command = command or settings.command
+    name = name or settings.name
+    selected_type = selected_type or settings.type
+    port = port or settings.port
+    if command and selected_type in {"compose", "dockerfile"}:
+        raise click.ClickException(
+            f"a command cannot be combined with --type {selected_type}"
+        )
+    root_from_flag = root is not None
+    pinned = resolve_root(
+        start=cwd,
+        flag=root,
+        configured=settings.root,
+        config_dir=config_dir,
+    )
+    resolved_root: Path | None = None
+    compose_from_environment = (
+        not command and selected_type is None and bool(os.environ.get("COMPOSE_FILE"))
+    )
+    if compose_from_environment:
+        selected_type, resolved_root = "compose", cwd.resolve()
+    elif not command:
+        if pinned is not None:
+            selected_type, resolved_root = resolve_pinned_type(
+                pinned,
+                selected_type,
+                from_flag=root_from_flag,
+            )
+        else:
+            selected_type, resolved_root = discover_type(cwd, selected_type)
+    if selected_type == "compose":
+        return ResolvedApplication(
+            cwd=cwd,
+            config_file=config_file,
+            requested_type=requested_type,
+            selected_type=selected_type,
+            root=resolved_root or pinned or cwd,
+            name=name,
+            port=port,
+            command=command,
+            plan=None,
+            explicit_run_settings=explicit_run_settings,
+        )
+    plan = build_plan(
+        pinned or cwd,
+        name,
+        selected_type,
+        port,
+        command,
+        pinned=pinned,
+        pinned_from_flag=root_from_flag,
+    )
+    return ResolvedApplication(
+        cwd=cwd,
+        config_file=config_file,
+        requested_type=requested_type,
+        selected_type=plan.type,
+        root=plan.project_root or pinned or cwd,
+        name=name,
+        port=plan.port,
+        command=command,
+        plan=plan,
+        explicit_run_settings=explicit_run_settings,
+    )
 
 
 def _session_log_path(name: str) -> Path:
@@ -566,7 +670,7 @@ def _check_compose_routing(compose_root: Path, project: str) -> None:
     is read-only, so this is safe to run on the `--dry-run` path too.
 
     Never passes an explicit `--file`: that disables Compose's automatic
-    `compose.override.yaml` merge, so a project `generate` just fixed would
+    `compose.override.yaml` merge, so a project `save` just fixed would
     still be refused. `_run_compose`'s real `docker compose up` also passes
     no `--file`, relying on Compose's own discovery against `cwd`, so this
     matches it exactly -- including running against `compose_root` rather
@@ -579,15 +683,15 @@ def _check_compose_routing(compose_root: Path, project: str) -> None:
     label = compose_file.name if compose_file else "the Compose project"
     raise click.ClickException(
         f"found {label} but {problem}, so nothing would be reachable at "
-        f"{_proxy_origin(project)}; run localghost generate to add the "
-        "routing labels"
+        f"{_proxy_origin(project)}; run localghost run --save to save the "
+        "routing setup and start the application"
     )
 
 
 def _run_compose(
     cwd: Path, name: str | None, detach: bool, *, status_bar: bool = True
 ) -> None:
-    # Same precedence generate uses -- COMPOSE_PROJECT_NAME, then .env, then
+    # Same precedence save uses -- COMPOSE_PROJECT_NAME, then .env, then
     # the directory -- so this and a plain `docker compose up` agree on the
     # project rather than building two stacks from one directory.
     project = name or _local_project_name(cwd)
@@ -976,12 +1080,35 @@ def _environment_port(name: str, default: int) -> int:
     help="Compose file to inspect; repeat for an existing file stack.",
 )
 @click.option("service_name", "--service", "-s", help="Service to expose.")
+@click.option("name", "--name", help="Local application name for NAME.localhost.")
+@click.option(
+    "working_directory",
+    "--directory",
+    "-C",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help=(
+        "Application directory to detect and save "
+        "(defaults to the current directory)."
+    ),
+)
+@click.option(
+    "root",
+    "--root",
+    type=click.Path(file_okay=False, path_type=Path),
+    help="Treat this directory as the project root instead of searching.",
+)
+@click.option(
+    "config",
+    "--config",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Run configuration TOML path.",
+)
 @click.option(
     "port",
     "--port",
     "-p",
     type=click.IntRange(1, 65535),
-    help="Container HTTP port.",
+    help="HTTP port on which the selected application listens.",
 )
 @click.option(
     "output",
@@ -989,29 +1116,37 @@ def _environment_port(name: str, default: int) -> int:
     "-o",
     type=click.Path(path_type=Path, dir_okay=False),
     default=None,
-    help="Output path (defaults to compose.override.yaml or compose.yaml).",
+    help="Compose output path when saving Compose or a Dockerfile.",
 )
 @click.option(
     "selected_type",
     "--type",
-    type=click.Choice(GENERATE_TYPES),
+    type=click.Choice(SAVE_TYPES),
     help="Project type; detected from the directory when omitted.",
 )
 @click.option(
     "--extend",
     is_flag=True,
-    help="Extend an existing output without prompting when it is safe.",
+    help="Safely update an existing saved setup without prompting.",
 )
-@click.option("--dry-run", is_flag=True, help="Print YAML without writing it.")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Print the saved configuration without writing it.",
+)
 @click.option(
     "--no-input",
     is_flag=True,
     help="Use detected defaults and never prompt.",
 )
 @click.argument("command", nargs=-1, type=click.UNPROCESSED)
-def generate(
+def save(
     files: tuple[Path, ...],
     service_name: str | None,
+    name: str | None,
+    working_directory: Path | None,
+    root: Path | None,
+    config: Path | None,
     port: int | None,
     output: Path | None,
     selected_type: str | None,
@@ -1020,39 +1155,110 @@ def generate(
     no_input: bool,
     command: tuple[str, ...],
 ) -> None:
-    """Generate Compose configuration for the current application."""
+    """Save Localghost setup for the current application."""
     if not dry_run:
         title()
     interactive = _is_interactive(no_input)
-    if not files and not _has_compose_file():
-        if extend and not command:
-            raise click.ClickException("--extend requires an existing Compose project")
-        _generate_without_compose(
+    if files:
+        if selected_type not in (None, "compose"):
+            raise click.ClickException("--file can only be used with --type compose")
+        if command or name is not None or root is not None or config is not None:
+            raise click.ClickException(
+                "--file cannot be combined with host run settings"
+            )
+        _save_compose_project(
+            cwd=working_directory or Path.cwd(),
+            files=files,
             service_name=service_name,
             port=port,
             output=output,
-            selected_type=selected_type,
+            extend=extend,
             dry_run=dry_run,
             interactive=interactive,
-            command=command,
-            extend=extend,
         )
         return
-
-    if selected_type is not None:
-        raise click.ClickException(
-            "--type can only be used when no Compose file is present"
+    if selected_type == "dockerfile":
+        if command:
+            raise click.ClickException(
+                "a command cannot be combined with --type dockerfile"
+            )
+        _save_dockerfile_project(
+            working_directory=working_directory,
+            root=root,
+            service_name=service_name,
+            port=port,
+            output=output,
+            dry_run=dry_run,
         )
-    if command:
-        raise click.ClickException("a command can only be used for host generation")
+        return
+    try:
+        resolved = _resolve_application(
+            working_directory=working_directory,
+            name=name,
+            selected_type=selected_type,
+            root=root,
+            port=port,
+            config=config,
+            command=command,
+        )
+    except click.ClickException as run_error:
+        if selected_type is not None or command:
+            raise
+        start = working_directory or Path.cwd()
+        try:
+            fallback_type, fallback_root = discover_type(
+                start,
+                None,
+                allowed=SAVE_TYPES,
+            )
+        except click.ClickException:
+            raise run_error from None
+        if fallback_type != "dockerfile":
+            raise run_error from None
+        _save_dockerfile_project(
+            working_directory=fallback_root,
+            root=fallback_root,
+            service_name=service_name,
+            port=port,
+            output=output,
+            dry_run=dry_run,
+        )
+        return
+    _persist_resolved_application(
+        resolved,
+        service_name=service_name,
+        port=resolved.port,
+        output=output,
+        extend=extend,
+        dry_run=dry_run,
+        interactive=interactive,
+    )
 
-    output = output or Path("compose.override.yaml")
+
+def _save_compose_project(
+    *,
+    cwd: Path,
+    files: tuple[Path, ...],
+    service_name: str | None,
+    port: int | None,
+    output: Path | None,
+    extend: bool,
+    dry_run: bool,
+    interactive: bool,
+    final_hint: bool = True,
+) -> None:
+    """Persist the Compose setup shared by ``save`` and ``run --save``."""
+    output = output or cwd / "compose.override.yaml"
     output_exists = output.exists()
 
     inspection_files = files
     if output_exists and files and output not in files:
         inspection_files = (*files, output)
-    model = resolve_compose(inspection_files)
+    model = (
+        resolve_compose(inspection_files)
+        if cwd.resolve() == Path.cwd().resolve()
+        else resolve_compose(inspection_files, cwd=cwd)
+    )
     project_name = validate_project_name(model)
     candidates = rank_services(model, project_name)
     candidate = _select_candidate(candidates, service_name, interactive)
@@ -1097,137 +1303,170 @@ def generate(
                 f"port {selected_port}."
             )
 
-    if not dry_run:
+    if not dry_run and final_hint:
         info(
-            "Review the override, ignore it in Git if local-only, then run "
+            "Run it with localghost run, or start the hub and keep using "
             "docker compose up."
         )
 
 
-def _generate_without_compose(
+def _persist_resolved_application(
+    resolved: ResolvedApplication,
+    *,
     service_name: str | None,
     port: int | None,
     output: Path | None,
-    selected_type: str | None,
+    extend: bool,
     dry_run: bool,
     interactive: bool,
-    command: tuple[str, ...] = (),
-    extend: bool = False,
+    final_hint: bool = True,
 ) -> None:
-    # Detection may walk to an ancestor root; every cwd-scoped check and
-    # default below is anchored to that same root throughout, rather than
-    # silently re-reading the invocation directory once detection has
-    # already moved on (see the Dockerfile check below).
-    invocation_directory = Path.cwd()
-    root = invocation_directory
-    if selected_type is None:
-        # A genuine "nothing here" failure is deferred to the prompt/error
-        # below, but an ambiguity error (two types detected) must propagate
-        # as-is rather than being silently swallowed into a generic prompt.
-        try:
-            selected_type, root = discover_type(root, None, allowed=GENERATE_TYPES)
-        except click.ClickException as exc:
-            if "could not detect a project type" not in exc.message:
-                raise
-            selected_type = None
-
-    if command:
-        if selected_type in ("dockerfile", "compose"):
-            # dockerfile has no host command to record; compose is not a
-            # host type at all (see GENERATE_TYPES) and must never reach
-            # here, but detection above can still land on it through an
-            # ancestor's compose.yaml, so it is refused explicitly rather
-            # than being written into .localghost.toml, where it would both
-            # make `run` refuse the very command just recorded and, were
-            # `command` ever dropped by hand, disarm run's compose routing
-            # check for a project that was never actually wired.
+    """Persist the exact resolution used by both save entry points."""
+    if resolved.selected_type == "compose":
+        if output is not None and resolved.config_file is not None:
             raise click.ClickException(
-                f"a command cannot be combined with --type {selected_type}"
+                "--output cannot be combined with a run configuration file"
             )
-        if port is None:
-            raise click.ClickException("a custom command requires --port")
-        config = RunConfig(
-            type=selected_type, name=service_name, port=port, command=command
+        _save_compose_project(
+            cwd=resolved.root,
+            files=(),
+            service_name=service_name,
+            port=port,
+            output=output,
+            extend=extend,
+            dry_run=dry_run,
+            interactive=interactive,
+            final_hint=final_hint,
         )
-        target = Path(CONFIG_NAME)
-        if dry_run:
-            click.echo(render_run_config(config), nl=False)
-            return
-        existed = target.exists()
-        backup = write_run_config(
-            target, config, extend=extend, interactive=interactive
-        )
-        success(f"{'Updated' if existed else 'Created'} {CONFIG_NAME}.")
-        if backup:
-            info(f"Backup: {backup}")
+        if resolved.requested_type == "compose":
+            compose_config = RunConfig(type="compose", name=resolved.name)
+            if dry_run:
+                click.echo(render_run_config(compose_config), nl=False)
+            else:
+                _save_run_config(
+                    resolved.root,
+                    compose_config,
+                    extend=extend,
+                    interactive=interactive,
+                    target=resolved.config_file,
+                )
         return
-    # A relative default reads far better than an absolute one, and applies
-    # whenever detection didn't have to walk away from the invocation
-    # directory -- the overwhelmingly common case.
-    default_output = (
-        Path("compose.yaml") if root == invocation_directory else root / "compose.yaml"
-    )
-    output = output or default_output
-    if output.exists() and not dry_run:
-        raise click.ClickException(f"refusing to overwrite existing '{output}'")
-    validate_project_name_value(_local_project_name(root))
-
-    if selected_type is None and interactive:
-        selected_type = click.prompt(
-            "No Compose file found. Application type",
-            default="dockerfile" if (root / "Dockerfile").is_file() else "php",
-            type=click.Choice(GENERATE_TYPES),
-            show_choices=True,
+    if service_name is not None:
+        raise click.ClickException("--service can only be used with Compose")
+    if output is not None:
+        raise click.ClickException(
+            "--output can only be used with Compose or a Dockerfile"
         )
-    if selected_type is None:
-        raise click.ClickException(type_choices("--type", GENERATE_TYPES))
+    plan = resolved.plan
+    assert plan is not None
+    saved_config = _run_config_from_plan(
+        plan,
+        explicit_name=resolved.name,
+        source_command=resolved.command,
+    )
+    if dry_run:
+        click.echo(render_run_config(saved_config), nl=False)
+        return
+    _save_run_config(
+        resolved.root,
+        saved_config,
+        extend=extend,
+        interactive=interactive,
+        target=resolved.config_file,
+    )
 
+
+def _save_dockerfile_project(
+    *,
+    working_directory: Path | None,
+    root: Path | None,
+    service_name: str | None,
+    port: int | None,
+    output: Path | None,
+    dry_run: bool,
+) -> None:
+    start = working_directory or Path.cwd()
+    project_root = resolve_root(
+        start=start,
+        flag=root,
+        configured=None,
+        config_dir=None,
+    )
+    if project_root is None:
+        _, project_root = discover_type(
+            start,
+            "dockerfile",
+            allowed=SAVE_TYPES,
+        )
+    if port is None and _is_interactive(False):
+        port = click.prompt(
+            "Container HTTP port",
+            type=click.IntRange(1, 65535),
+        )
+    if port is None:
+        raise click.ClickException("--type dockerfile requires --port")
     service_name = service_name or "app"
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", service_name):
         raise click.ClickException(f"'{service_name}' is not a valid service name")
-
-    if port is None:
-        port = DEFAULT_PORTS.get(selected_type)
-    if port is None:
-        if not interactive:
-            raise click.ClickException(
-                f"no Compose file found; --type {selected_type} requires --port"
-            )
-        prompt = (
-            "Container HTTP port"
-            if selected_type == "dockerfile"
-            else "Host HTTP port"
-        )
-        port = click.prompt(prompt, type=click.IntRange(1, 65535))
-
-    if selected_type == "dockerfile":
-        if not (root / "Dockerfile").is_file():
-            raise click.ClickException(
-                "--type dockerfile requires a Dockerfile in the project directory"
-            )
-        document = create_dockerfile_compose(service_name, port)
-        description = "Dockerfile application"
-    else:
-        document = create_host_bridge_compose(service_name, port)
-        description = f"host application on port {port}"
-
+    validate_project_name_value(_local_project_name(project_root))
+    output = output or project_root / "compose.yaml"
+    if output.exists() and not dry_run:
+        raise click.ClickException(f"refusing to overwrite existing '{output}'")
+    document = create_dockerfile_compose(service_name, port)
     if dry_run:
         click.echo(render_override(document), nl=False)
         return
-
     write_new(output, document)
-    success(f"Created {output} for the {description}.")
-    if selected_type != "dockerfile":
-        info(
-            "Ensure the host process listens on a Docker-reachable interface "
-            "such as 0.0.0.0."
+    success(f"Created {output} for the Dockerfile application.")
+    info("Run it with localghost run.")
+
+
+def _run_config_from_plan(
+    plan: RunPlan,
+    *,
+    explicit_name: str | None = None,
+    source_command: tuple[str, ...] = (),
+) -> RunConfig:
+    return RunConfig(
+        type=None if plan.type == "custom" else plan.type,
+        name=explicit_name,
+        port=plan.port,
+        command=(source_command or plan.command) if plan.type == "custom" else (),
+    )
+
+
+def _save_run_config(
+    root: Path,
+    config: RunConfig,
+    *,
+    extend: bool,
+    interactive: bool,
+    target: Path | None = None,
+) -> None:
+    target = target or root / CONFIG_NAME
+    existed = target.exists()
+    backup = write_run_config(
+        target, config, extend=extend, interactive=interactive
+    )
+    shown = (
+        Path(CONFIG_NAME)
+        if target.parent.resolve() == Path.cwd().resolve()
+        else target
+    )
+    success(f"{'Updated' if existed else 'Created'} {shown}.")
+    if backup:
+        shown_backup = (
+            Path(backup.name)
+            if backup.parent.resolve() == Path.cwd().resolve()
+            else backup
         )
-    info("Start the hub, then run docker compose up.")
+        info(f"Backup: {shown_backup}")
 
 
-def _has_compose_file() -> bool:
+def _has_compose_file(root: Path | None = None) -> bool:
+    root = root or Path.cwd()
     return bool(os.environ.get("COMPOSE_FILE")) or any(
-        Path(filename).is_file()
+        (root / filename).is_file()
         for filename in (
             "compose.yaml",
             "compose.yml",

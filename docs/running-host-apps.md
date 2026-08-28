@@ -19,9 +19,9 @@ directory; `--type` resolves ambiguity or skips detection entirely.
 | **laravel** | `artisan` with a `laravel/framework` Composer dependency | 8000 |
 | **php** | `composer.json`, or `index.php` in `public/`, `web/`, `htdocs/`, `www/`, or the project root | 8080 |
 
-`dockerfile` is an eighth type, but it is generate-only — see
-[Generating an override](generating-an-override.md). Running a Dockerfile
-project first needs `localghost generate --type dockerfile` to produce a
+`dockerfile` is an eighth type, but it is save-only — see
+[Saving project setup](saving-setup.md). Running a Dockerfile
+project first needs `localghost save --type dockerfile` to produce a
 Compose file; after that the project is `compose`.
 
 Within PHP, `cakephp` and `laravel` are specializations of `php` rather than
@@ -48,7 +48,7 @@ may still use a different working directory for its server process.
 
 ## Usage
 
-Start the hub first (if it isn't already running), then run your app:
+Run your app; Localghost starts the hub when needed:
 
 ```sh
 cd my-django-project
@@ -64,13 +64,12 @@ are rejected when a `compose` type is selected or detected:
 uvx localghost run --type compose
 ```
 
-Before starting anything, a compose run checks that the project is actually
+Before starting anything, a Compose run checks that the project is actually
 wired to the hub — the `localghost` network is present, and at least one
 service carries `traefik.enable=true` on that network. A project that has not
-run `generate` is refused with an error naming what's missing, rather than
-starting and printing a URL that would never route. Setting `type = "compose"`
-in `.localghost.toml` skips this check, since a committed config file is the
-project declaring itself already wired.
+saved its setup is refused with an exact `localghost run --save` next action,
+rather than starting and printing a URL that would never route. A saved
+`type = "compose"` resolves ambiguity but never bypasses this routing check.
 
 ### Configured runs
 
@@ -94,7 +93,7 @@ command = ["./server", "--port", "{port}"]
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `type` | one of the seven types `run --type` accepts (not `dockerfile`, which is generate-only) | Resolves otherwise ambiguous detection, exactly like `--type`. Detected when omitted. Setting `type = "compose"` also skips the routing check described above. |
+| `type` | one of the seven types `run --type` accepts (not `dockerfile`, which is save-only) | Resolves otherwise ambiguous detection, exactly like `--type`. Detected when omitted. |
 | `name` | string | Public name, serving the app at `NAME.localhost`. Defaults to the project root's name. |
 | `root` | path, relative to the config file | Treat this directory as the project root instead of searching. See [Project root and configuration discovery](#project-root-and-configuration-discovery). |
 | `port` | integer, 1–65535 | Host HTTP port. The type's default is used when omitted, except alongside `command`, where it is required. |
@@ -115,10 +114,12 @@ Settings are layered: a command-line option wins over `.localghost.toml`,
 which wins over automatic detection. Use `--config PATH` to read a different
 file.
 
-`localghost generate` writes this file for you when given a command:
+`localghost save` writes this file without running, while `run --save` writes
+the same setup and then starts it:
 
 ```sh
-uvx localghost generate --port 8080 -- ./server --port 8080
+uvx localghost save --port 8080 -- ./server --port 8080
+uvx localghost run --save --port 8080 -- ./server --port 8080
 ```
 
 It refuses to overwrite an existing `.localghost.toml` unless `--extend` is
@@ -272,7 +273,7 @@ starts.
 
 For the `compose` type, the bridge is not a container: it is the routing
 labels and `localghost` network membership on the application's own service,
-which `localghost generate` writes.
+which `localghost save` writes.
 
 ## Django runner detection
 

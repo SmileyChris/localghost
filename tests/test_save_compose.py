@@ -1,4 +1,4 @@
-"""Validate generated Compose files through Docker Compose's resolved model."""
+"""Validate saved Compose files through Docker Compose's resolved model."""
 
 import json
 import os
@@ -28,7 +28,7 @@ def compose_model(*paths: Path, project_name: str) -> dict:
     return json.loads(result.stdout)
 
 
-def test_generated_compose_files_resolve_correctly(
+def test_saved_compose_files_resolve_correctly(
     tmp_path: Path, monkeypatch
 ) -> None:
     runner = CliRunner()
@@ -36,7 +36,7 @@ def test_generated_compose_files_resolve_correctly(
     result = runner.invoke(
         cli,
         [
-            "generate",
+            "save",
             "--no-input",
             "--file",
             str(GENERATOR_FIXTURE),
@@ -63,35 +63,13 @@ def test_generated_compose_files_resolve_correctly(
     assert model["networks"]["localghost"]["external"] is True
     assert "localghost" not in model["services"]["worker"]["networks"]
 
-    host_dir = tmp_path / "host-app"
-    host_dir.mkdir()
-    monkeypatch.chdir(host_dir)
-    result = runner.invoke(
-        cli,
-        ["generate", "--no-input", "--type", "php", "--port", "3000"],
-        env={"COMPOSE_PROJECT_NAME": "host-fixture"},
-    )
-    assert result.exit_code == 0, result.output
-
-    host_model = compose_model(
-        host_dir / "compose.yaml", project_name="host-fixture"
-    )
-    app = host_model["services"]["app"]
-    assert app["image"] == "caddy:2.11.4-alpine"
-    assert "http://host.docker.internal:3000" in app["command"]
-    assert set(app["networks"]) == {"localghost"}
-    assert app["labels"][
-        "traefik.http.services.host-fixture-app.loadbalancer.server.port"
-    ] == "8080"
-    assert host_model["networks"]["localghost"]["external"] is True
-
     dockerfile_dir = tmp_path / "dockerfile-app"
     dockerfile_dir.mkdir()
     (dockerfile_dir / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
     monkeypatch.chdir(dockerfile_dir)
     result = runner.invoke(
         cli,
-        ["generate", "--no-input", "--type", "dockerfile", "--port", "80"],
+        ["save", "--no-input", "--type", "dockerfile", "--port", "80"],
         env={"COMPOSE_PROJECT_NAME": "dockerfile-fixture"},
     )
     assert result.exit_code == 0, result.output
@@ -118,7 +96,7 @@ def test_generated_compose_files_resolve_correctly(
     result = runner.invoke(
         cli,
         [
-            "generate",
+            "save",
             "--no-input",
             "--extend",
             "--file",
@@ -138,7 +116,7 @@ def test_generated_compose_files_resolve_correctly(
     result = runner.invoke(
         cli,
         [
-            "generate",
+            "save",
             "--no-input",
             "--file",
             str(GENERATOR_FIXTURE),

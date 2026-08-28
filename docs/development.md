@@ -131,7 +131,8 @@ publication:
 ```sh
 uvx --from . localghost --help
 uvx --from . localghost down --help
-uvx --from . localghost generate --help
+uvx --from . localghost save --help
+uvx --from . localghost run --help
 ```
 
 ## Release-candidate test

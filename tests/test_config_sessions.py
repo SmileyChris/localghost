@@ -76,8 +76,8 @@ def test_config_accepts_every_supported_type(tmp_path, value):
 
 
 def test_config_rejects_dockerfile_as_a_run_type(tmp_path):
-    """dockerfile is generate-only: `run` never runs it directly. Before the
-    fix, [run].type was validated against every type generate knows about
+    """dockerfile is save-only: `run` never runs it directly. Before the
+    fix, [run].type was validated against every type save knows about
     (including dockerfile), so a bad value passed config load only to fail
     later, mid-`run`, inside build_plan's pinned branch with a confusing
     "detected nothing there" -- naming a directory that does hold a
