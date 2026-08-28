@@ -457,6 +457,7 @@ def tailscale_enable(
     title()
     if load_tailscale_state() is not None:
         raise click.ClickException("Tailscale hosting is already enabled")
+    localhost_trusted = _https_configured()
     if not tag.startswith("tag:"):
         raise click.UsageError("--tag must start with 'tag:'")
     try:
@@ -501,7 +502,17 @@ def tailscale_enable(
     except (TailscaleError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     success(f"Tailnet routes are enabled at https://<project>.{chosen_suffix}.")
-    action("Trust this client", "localghost trust")
+    if localhost_trusted:
+        info("Installing the tailnet HTTPS root (sudo may be requested)…")
+        try:
+            _install_tailnet_trust(chosen_suffix, show_details=False)
+        except click.ClickException as exc:
+            warning("Tailnet trust was not installed", [str(exc)])
+            action("Trust this client", "localghost trust")
+        else:
+            success("Tailnet HTTPS is trusted on this client.")
+    else:
+        action("Trust localhost and tailnet HTTPS", "localghost trust")
 
 
 @tailscale.command("disable")

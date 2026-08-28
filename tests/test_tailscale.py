@@ -270,6 +270,7 @@ def test_enable_uses_ephemeral_credentials_and_saves_public_state(monkeypatch) -
     saved = []
     monkeypatch.setattr(cli_module, "TailscaleAPI", FakeAPI)
     monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: None)
+    monkeypatch.setattr(cli_module, "_https_configured", lambda: False)
     monkeypatch.setattr(cli_module, "_bootstrap_public_root", lambda: None)
     monkeypatch.setattr(cli_module, "_bootstrap_tailnet_root", lambda suffix: None)
     monkeypatch.setattr(

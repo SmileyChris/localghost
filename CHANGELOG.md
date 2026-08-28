@@ -25,6 +25,11 @@ uses [Semantic Versioning](https://semver.org/).
   transient URL display is removed, with a plain-output fallback hint.
 - Trust-store operations stage each selected public root in an isolated mkcert
   `CAROOT`, so managing a tailnet root cannot silently target `.localhost`.
+- Trust setup now explains before installation that sudo may be requested for
+  the system trust store.
+- Tailscale enable now offers automatic tailnet trust only when localhost trust
+  was already enabled; otherwise it remains non-privileged and points to the
+  standard trust command.
 - `localghost trust`, `trust --status`, and `trust --remove` now manage the
   active tailnet authority alongside `.localhost`; `tailscale trust` remains a
   compatibility alias.
