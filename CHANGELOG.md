@@ -7,6 +7,8 @@ uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Foreground runs now leave a persistent exit-status diagnosis after the
+  transient URL display is removed, with a plain-output fallback hint.
 - Replaced `localghost generate` with the project-oriented `localghost save`.
   Saving now has one contract across project types: host and custom runs are
   recorded in `.localghost.toml`, Compose integration is written to

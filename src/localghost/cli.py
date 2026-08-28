@@ -529,6 +529,7 @@ def run(
         status_bar=not no_status_bar,
     )
     if status:
+        _report_application_exit(status)
         raise click.exceptions.Exit(status)
     success("Application stopped.")
 
@@ -718,6 +719,7 @@ def _run_compose(
         bar.status("starting")
         result = subprocess.run(command, cwd=cwd, check=False)
     if result.returncode:
+        _report_application_exit(result.returncode)
         raise click.exceptions.Exit(result.returncode)
     if detach:
         log = _session_log_path(project)
@@ -732,6 +734,17 @@ def _run_compose(
             project=project,
         )
         success(f"Started detached Compose session for {project}.")
+
+
+def _report_application_exit(status: int) -> None:
+    """Leave a stable diagnosis after the transient status display is gone."""
+    warning(
+        "Application exited",
+        [
+            f"The application command exited with status {status}.",
+            "Its output is above; use --no-status-bar for plain terminal output.",
+        ],
+    )
 
 
 def _print_run_plan(plan: RunPlan, dry_run: bool, detach: bool = False) -> None:
