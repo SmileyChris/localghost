@@ -21,6 +21,7 @@ from localghost.tailscale import (
     save_state,
     validate_suffix,
 )
+from localghost.trust import TrustError
 
 CERTIFICATE_PEM = b"""-----BEGIN CERTIFICATE-----
 MAA=
@@ -627,6 +628,103 @@ def test_tailnet_trust_downloads_and_installs_both_stores(
     assert result.exit_code == 0, result.output
     assert len(installed) == 2
     assert (tmp_path / "tailscale-tail1234-rootCA.pem").read_bytes() == CERTIFICATE_PEM
+
+
+def test_tailnet_trust_removes_a_superseded_root_before_installing(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    previous = CERTIFICATE_PEM.replace(b"MAA=", b"MAE=")
+    path = tmp_path / "tailscale-tail1234-rootCA.pem"
+    path.write_bytes(previous)
+    events = []
+
+    class Installer:
+        def __init__(self, path, **kwargs):
+            self.path = path
+
+        def install(self, **kwargs):
+            events.append(("install", self.path.read_bytes()))
+
+        def uninstall(self):
+            events.append(("uninstall", self.path.read_bytes()))
+
+    monkeypatch.setattr(
+        cli_module, "fetch_tailscale_root", lambda suffix, gateway_ips: CERTIFICATE_PEM
+    )
+    monkeypatch.setattr(cli_module, "MkcertInstaller", Installer)
+    monkeypatch.setattr(cli_module, "ZenNssInstaller", Installer)
+
+    result = CliRunner().invoke(cli, ["tailscale", "trust", "tail1234"])
+
+    assert result.exit_code == 0, result.output
+    # The superseded root must leave the trust stores while its own bytes are
+    # still on disk; afterwards the new root is written and installed.
+    assert events == [
+        ("uninstall", previous),
+        ("uninstall", previous),
+        ("install", CERTIFICATE_PEM),
+        ("install", CERTIFICATE_PEM),
+    ]
+    assert path.read_bytes() == CERTIFICATE_PEM
+    assert "replaced" in result.output.lower()
+
+
+def test_tailnet_trust_keeps_an_unchanged_root_installed(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    (tmp_path / "tailscale-tail1234-rootCA.pem").write_bytes(CERTIFICATE_PEM)
+
+    class Installer:
+        def __init__(self, path, **kwargs):
+            self.path = path
+
+        def install(self, **kwargs):
+            return None
+
+        def uninstall(self):
+            pytest.fail("an unchanged root was removed")
+
+    monkeypatch.setattr(
+        cli_module, "fetch_tailscale_root", lambda suffix, gateway_ips: CERTIFICATE_PEM
+    )
+    monkeypatch.setattr(cli_module, "MkcertInstaller", Installer)
+    monkeypatch.setattr(cli_module, "ZenNssInstaller", Installer)
+
+    result = CliRunner().invoke(cli, ["tailscale", "trust", "tail1234"])
+
+    assert result.exit_code == 0, result.output
+
+
+def test_tailnet_trust_warns_when_a_superseded_root_cannot_be_removed(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    path = tmp_path / "tailscale-tail1234-rootCA.pem"
+    path.write_bytes(CERTIFICATE_PEM.replace(b"MAA=", b"MAE="))
+    installed = []
+
+    class Installer:
+        def __init__(self, path, **kwargs):
+            self.path = path
+
+        def install(self, **kwargs):
+            installed.append(self.path)
+
+        def uninstall(self):
+            raise TrustError("store is locked")
+
+    monkeypatch.setattr(
+        cli_module, "fetch_tailscale_root", lambda suffix, gateway_ips: CERTIFICATE_PEM
+    )
+    monkeypatch.setattr(cli_module, "MkcertInstaller", Installer)
+    monkeypatch.setattr(cli_module, "ZenNssInstaller", Installer)
+
+    result = CliRunner().invoke(cli, ["tailscale", "trust", "tail1234"])
+
+    assert result.exit_code == 0, result.output
+    assert "store is locked" in result.output
+    assert len(installed) == 2
+    assert path.read_bytes() == CERTIFICATE_PEM
 
 
 def test_tailnet_origin_mirrors_the_hostname(monkeypatch) -> None:

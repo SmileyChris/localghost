@@ -663,6 +663,7 @@ def _install_tailnet_trust(suffix: str, *, show_details: bool = True) -> None:
     except (TailscaleError, TrustError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     path = _tailnet_root_path(suffix)
+    replaced = _remove_superseded_root(path, certificate, scope=suffix)
     _write_public_root(path, certificate.pem)
     if show_details:
         details(
@@ -679,7 +680,42 @@ def _install_tailnet_trust(suffix: str, *, show_details: bool = True) -> None:
         ZenNssInstaller(path, scope=suffix).install()
     except TrustError as exc:
         raise click.ClickException(str(exc)) from exc
-    success(f"Trusted localghost HTTPS for *.{suffix} on this client.")
+    if replaced:
+        success(
+            f"Replaced the previous .{suffix} root; this client now trusts the "
+            "current one."
+        )
+    else:
+        success(f"Trusted localghost HTTPS for *.{suffix} on this client.")
+
+
+def _remove_superseded_root(
+    path: Path, certificate: PublicCertificate, *, scope: str
+) -> bool:
+    """Take a replaced root out of the trust stores before it is overwritten.
+
+    mkcert and certutil both identify an installed authority by the
+    certificate they are given, so a rotated root can only be removed while
+    its own bytes are still on disk. Failing to remove it must not block
+    trusting the current one, or the client keeps only the dead root.
+    """
+    if not path.exists():
+        return False
+    try:
+        previous = PublicCertificate.parse(path.read_bytes())
+    except TrustError:
+        previous = None
+    if previous is not None and previous.fingerprint == certificate.fingerprint:
+        return False
+    try:
+        ZenNssInstaller(path, scope=scope).uninstall()
+        MkcertInstaller(path).uninstall()
+    except TrustError as exc:
+        warning(
+            f"The superseded .{scope} root was left in the trust stores",
+            [str(exc), "Remove it with this client's trust-store tooling."],
+        )
+    return True
 
 
 @cli.command()

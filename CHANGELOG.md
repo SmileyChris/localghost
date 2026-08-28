@@ -42,6 +42,10 @@ uses [Semantic Versioning](https://semver.org/).
   `.localhost` root and a tailnet root at the same time. Installing one no
   longer sweeps the other out of the profile; each authority only replaces its
   own superseded entries.
+- Trusting a tailnet root now removes a superseded root from this client's
+  trust stores before overwriting it on disk. A rotated hub authority — after
+  a CA volume purge — no longer leaves an unremovable root trusted under the
+  same subject name.
 - Trust setup now explains before installation that sudo may be requested for
   the system trust store.
 - Tailscale enable now offers automatic tailnet trust only when localhost trust
