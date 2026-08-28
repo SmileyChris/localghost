@@ -356,13 +356,15 @@ def _remove_trust() -> None:
     certificate_path = _public_root_path()
     if certificate_path.exists():
         try:
-            ZenNssInstaller(certificate_path).uninstall()
+            ZenNssInstaller(certificate_path, scope="localhost").uninstall()
             MkcertInstaller(certificate_path).uninstall()
         except TrustError as exc:
             raise click.ClickException(str(exc)) from exc
-    for tailnet_path in _state_directory().glob("tailscale-*-rootCA.pem"):
+    for tailnet_path in sorted(_state_directory().glob("tailscale-*-rootCA.pem")):
         try:
-            ZenNssInstaller(tailnet_path).uninstall()
+            ZenNssInstaller(
+                tailnet_path, scope=_tailnet_root_scope(tailnet_path)
+            ).uninstall()
             MkcertInstaller(tailnet_path).uninstall()
         except TrustError as exc:
             raise click.ClickException(str(exc)) from exc
@@ -645,6 +647,11 @@ def _tailnet_root_path(suffix: str) -> Path:
     return _state_directory() / f"tailscale-{suffix}-rootCA.pem"
 
 
+def _tailnet_root_scope(path: Path) -> str:
+    """Recover the suffix a stored tailnet root belongs to."""
+    return path.name.removeprefix("tailscale-").removesuffix("-rootCA.pem")
+
+
 def _install_tailnet_trust(suffix: str, *, show_details: bool = True) -> None:
     try:
         suffix = validate_tailscale_suffix(suffix)
@@ -669,7 +676,7 @@ def _install_tailnet_trust(suffix: str, *, show_details: bool = True) -> None:
         )
     try:
         MkcertInstaller(path).install()
-        ZenNssInstaller(path).install()
+        ZenNssInstaller(path, scope=suffix).install()
     except TrustError as exc:
         raise click.ClickException(str(exc)) from exc
     success(f"Trusted localghost HTTPS for *.{suffix} on this client.")
@@ -1412,7 +1419,7 @@ def _enable_https() -> None:
         title="HTTPS setup",
     )
     mkcert_installer = MkcertInstaller(certificate_path)
-    zen_installer = ZenNssInstaller(certificate_path)
+    zen_installer = ZenNssInstaller(certificate_path, scope="localhost")
     root_rotated = _detect_root_rotation(certificate)
     try:
         mkcert_installer.install(force=root_rotated)

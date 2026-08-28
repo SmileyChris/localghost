@@ -38,6 +38,10 @@ uses [Semantic Versioning](https://semver.org/).
   transient URL display is removed, with a plain-output fallback hint.
 - Trust-store operations stage each selected public root in an isolated mkcert
   `CAROOT`, so managing a tailnet root cannot silently target `.localhost`.
+- Zen NSS nicknames now carry the authority's suffix, so a client can trust the
+  `.localhost` root and a tailnet root at the same time. Installing one no
+  longer sweeps the other out of the profile; each authority only replaces its
+  own superseded entries.
 - Trust setup now explains before installation that sudo may be requested for
   the system trust store.
 - Tailscale enable now offers automatic tailnet trust only when localhost trust

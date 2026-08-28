@@ -135,7 +135,12 @@ class MkcertInstaller:
 
 
 class ZenNssInstaller:
-    """Install into Zen profiles, which mkcert does not discover reliably."""
+    """Install into Zen profiles, which mkcert does not discover reliably.
+
+    Nicknames carry the authority's scope — its DNS suffix — so the
+    ``.localhost`` root and a tailnet root can be trusted at the same time.
+    Each authority only ever sweeps its own scope.
+    """
 
     prefix = "localghost-"
 
@@ -143,11 +148,13 @@ class ZenNssInstaller:
         self,
         certificate_path: Path,
         *,
+        scope: str = "localhost",
         home: Path | None = None,
         runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
         which: Callable[[str], str | None] = shutil.which,
     ) -> None:
         self.certificate_path = certificate_path
+        self.scope = scope
         self.home = home or Path.home()
         self.runner = runner
         self.which = which
@@ -156,8 +163,24 @@ class ZenNssInstaller:
         database_files = (self.home / ".config" / "zen").glob("*/cert9.db")
         return sorted(path.parent for path in database_files)
 
+    @property
+    def _scoped_prefix(self) -> str:
+        return f"{self.prefix}{self.scope}-"
+
+    def _digest(self, certificate: PublicCertificate) -> str:
+        return certificate.fingerprint.removeprefix("SHA256:")[:16]
+
     def _nickname(self, certificate: PublicCertificate) -> str:
-        return self.prefix + certificate.fingerprint.removeprefix("SHA256:")[:16]
+        return self._scoped_prefix + self._digest(certificate)
+
+    def _unscoped_nickname(self, certificate: PublicCertificate) -> str:
+        """Return the nickname used before authorities carried a scope."""
+        return self.prefix + self._digest(certificate)
+
+    def _is_unscoped(self, nickname: str) -> bool:
+        return nickname.startswith(self.prefix) and (
+            "-" not in nickname[len(self.prefix) :]
+        )
 
     def _certutil(self) -> str | None:
         return self.which("certutil")
@@ -175,9 +198,14 @@ class ZenNssInstaller:
         return found.fingerprint if found else None
 
     def _stale_nicknames(
-        self, executable: str, profile: Path, keep: str
+        self, executable: str, profile: Path, keep: str, superseded: str
     ) -> list[str]:
-        """Return ``localghost-*`` nicknames in *profile* other than *keep*."""
+        """Return this scope's superseded nicknames in *profile*.
+
+        Another scope's roots are left alone. Unscoped nicknames predate
+        tailnet hosting, so they belong to the ``.localhost`` authority; any
+        other scope claims only the unscoped name of its own certificate.
+        """
         result = self.runner(
             [executable, "-L", "-d", f"sql:{profile}"],
             check=False,
@@ -189,7 +217,12 @@ class ZenNssInstaller:
         stale: list[str] = []
         for line in result.stdout.splitlines():
             nickname = line.strip().split()[0] if line.strip() else ""
-            if nickname.startswith(self.prefix) and nickname != keep:
+            if not nickname.startswith(self.prefix) or nickname == keep:
+                continue
+            if nickname.startswith(self._scoped_prefix) or (
+                self._is_unscoped(nickname)
+                and (self.scope == "localhost" or nickname == superseded)
+            ):
                 stale.append(nickname)
         return stale
 
@@ -205,8 +238,11 @@ class ZenNssInstaller:
             )
         certificate = PublicCertificate.parse(self.certificate_path.read_bytes())
         nickname = self._nickname(certificate)
+        unscoped = self._unscoped_nickname(certificate)
         for profile in profiles:
-            for stale in self._stale_nicknames(executable, profile, nickname):
+            for stale in self._stale_nicknames(
+                executable, profile, nickname, unscoped
+            ):
                 self.runner(
                     [executable, "-D", "-d", f"sql:{profile}", "-n", stale],
                     check=False,
@@ -249,18 +285,22 @@ class ZenNssInstaller:
         if executable is None:
             return
         certificate = PublicCertificate.parse(self.certificate_path.read_bytes())
-        nickname = self._nickname(certificate)
+        nicknames = (
+            self._nickname(certificate),
+            self._unscoped_nickname(certificate),
+        )
         for profile in self._profiles():
-            if self._inspect(executable, profile, nickname) is None:
-                continue
-            result = self.runner(
-                [executable, "-D", "-d", f"sql:{profile}", "-n", nickname],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            if (
-                result.returncode
-                or self._inspect(executable, profile, nickname) is not None
-            ):
-                raise TrustError(f"Zen NSS removal failed for {profile}")
+            for nickname in nicknames:
+                if self._inspect(executable, profile, nickname) is None:
+                    continue
+                result = self.runner(
+                    [executable, "-D", "-d", f"sql:{profile}", "-n", nickname],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                if (
+                    result.returncode
+                    or self._inspect(executable, profile, nickname) is not None
+                ):
+                    raise TrustError(f"Zen NSS removal failed for {profile}")

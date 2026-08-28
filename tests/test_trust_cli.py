@@ -147,7 +147,7 @@ def test_trust_installs_active_tailnet_root(monkeypatch, tmp_path) -> None:
     installed = []
 
     class Installer:
-        def __init__(self, path):
+        def __init__(self, path, **kwargs):
             self.path = path
 
         def install(self, **kwargs):
@@ -173,6 +173,84 @@ def test_trust_installs_active_tailnet_root(monkeypatch, tmp_path) -> None:
     assert tailnet_root.read_bytes() == CERTIFICATE_PEM
 
 
+def test_trust_scopes_each_authority_for_zen(monkeypatch, tmp_path) -> None:
+    state = TailscaleState(
+        tailnet="example.com",
+        suffix="work",
+        gateway_ips=("100.64.0.10",),
+        previous_split_dns={},
+    )
+    scopes = []
+    certificate = PublicCertificate.parse(CERTIFICATE_PEM)
+
+    class Zen:
+        def __init__(self, path, *, scope):
+            scopes.append((path.name, scope))
+
+        def install(self, **kwargs):
+            return None
+
+    class Mkcert:
+        def __init__(self, path):
+            self.path = path
+
+        def install(self, **kwargs):
+            return None
+
+    monkeypatch.setattr(cli_module, "proxy_is_running", lambda: False)
+    monkeypatch.setattr(cli_module, "_bootstrap_public_root", lambda: certificate)
+    monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: state)
+    monkeypatch.setattr(
+        cli_module, "fetch_tailscale_root", lambda suffix, gateway_ips: CERTIFICATE_PEM
+    )
+    monkeypatch.setattr(cli_module, "MkcertInstaller", Mkcert)
+    monkeypatch.setattr(cli_module, "ZenNssInstaller", Zen)
+
+    result = CliRunner().invoke(
+        cli, ["trust"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+    )
+
+    assert result.exit_code == 0, result.output
+    assert scopes == [
+        ("rootCA.pem", "localhost"),
+        ("tailscale-work-rootCA.pem", "work"),
+    ]
+
+
+def test_trust_remove_scopes_each_authority_for_zen(monkeypatch, tmp_path) -> None:
+    (tmp_path / "rootCA.pem").write_bytes(CERTIFICATE_PEM)
+    (tmp_path / "tailscale-work-rootCA.pem").write_bytes(CERTIFICATE_PEM)
+    scopes = []
+
+    class Zen:
+        def __init__(self, path, *, scope):
+            scopes.append((path.name, scope))
+
+        def uninstall(self):
+            return None
+
+    class Mkcert:
+        def __init__(self, path):
+            self.path = path
+
+        def uninstall(self):
+            return None
+
+    monkeypatch.setattr(cli_module, "proxy_is_running", lambda: False)
+    monkeypatch.setattr(cli_module, "MkcertInstaller", Mkcert)
+    monkeypatch.setattr(cli_module, "ZenNssInstaller", Zen)
+
+    result = CliRunner().invoke(
+        cli, ["trust", "--remove"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+    )
+
+    assert result.exit_code == 0, result.output
+    assert scopes == [
+        ("rootCA.pem", "localhost"),
+        ("tailscale-work-rootCA.pem", "work"),
+    ]
+
+
 def test_trust_remove_reconciles_running_proxy_before_uninstall(
     monkeypatch, tmp_path
 ) -> None:
@@ -193,7 +271,7 @@ def test_trust_remove_reconciles_running_proxy_before_uninstall(
             events.append(self.name)
 
     monkeypatch.setattr(
-        "localghost.cli.ZenNssInstaller", lambda path: Installer("zen")
+        "localghost.cli.ZenNssInstaller", lambda path, **kwargs: Installer("zen")
     )
     monkeypatch.setattr(
         "localghost.cli.MkcertInstaller", lambda path: Installer("mkcert")
@@ -222,7 +300,9 @@ def test_trust_remove_reports_store_failure(monkeypatch, tmp_path) -> None:
         def uninstall(self):
             raise TrustError("store failed")
 
-    monkeypatch.setattr("localghost.cli.ZenNssInstaller", lambda path: Installer())
+    monkeypatch.setattr(
+        "localghost.cli.ZenNssInstaller", lambda path, **kwargs: Installer()
+    )
 
     result = CliRunner().invoke(
         cli,
@@ -307,7 +387,7 @@ def test_enable_https_rolls_back_partial_trust_installation(
             events.append("zen uninstall")
 
     monkeypatch.setattr("localghost.cli.MkcertInstaller", lambda path: Mkcert())
-    monkeypatch.setattr("localghost.cli.ZenNssInstaller", lambda path: Zen())
+    monkeypatch.setattr("localghost.cli.ZenNssInstaller", lambda path, **kwargs: Zen())
 
     result = CliRunner().invoke(
         cli, ["trust"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
@@ -374,7 +454,7 @@ def test_enable_https_reports_incomplete_automatic_rollback(
             raise TrustError("Zen cleanup failed")
 
     monkeypatch.setattr("localghost.cli.MkcertInstaller", lambda path: Mkcert())
-    monkeypatch.setattr("localghost.cli.ZenNssInstaller", lambda path: Zen())
+    monkeypatch.setattr("localghost.cli.ZenNssInstaller", lambda path, **kwargs: Zen())
 
     result = CliRunner().invoke(
         cli, ["trust"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
@@ -412,7 +492,7 @@ def test_enable_https_forces_mkcert_reinstall_on_root_rotation(
             calls.append("zen install")
 
     monkeypatch.setattr("localghost.cli.MkcertInstaller", lambda path: Mkcert())
-    monkeypatch.setattr("localghost.cli.ZenNssInstaller", lambda path: Zen())
+    monkeypatch.setattr("localghost.cli.ZenNssInstaller", lambda path, **kwargs: Zen())
 
     result = CliRunner().invoke(
         cli, ["trust"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}

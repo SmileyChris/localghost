@@ -237,7 +237,9 @@ def test_trust_configures_a_stopped_proxy_without_starting_it(
             return None
 
     monkeypatch.setattr("localghost.cli.MkcertInstaller", lambda path: Installer())
-    monkeypatch.setattr("localghost.cli.ZenNssInstaller", lambda path: Installer())
+    monkeypatch.setattr(
+        "localghost.cli.ZenNssInstaller", lambda path, **kwargs: Installer()
+    )
     def run(command, **kwargs):
         commands.append(command)
         return CompletedProcess(command, 0)
@@ -268,7 +270,9 @@ def test_trust_restarts_a_running_proxy_when_https_becomes_configured(
             return None
 
     monkeypatch.setattr("localghost.cli.MkcertInstaller", lambda path: Installer())
-    monkeypatch.setattr("localghost.cli.ZenNssInstaller", lambda path: Installer())
+    monkeypatch.setattr(
+        "localghost.cli.ZenNssInstaller", lambda path, **kwargs: Installer()
+    )
 
     def run(command, **kwargs):
         commands.append(command)
@@ -297,7 +301,9 @@ def test_trust_remove_disables_https_before_mutating_managed_stores(
             return None
 
     monkeypatch.setattr("localghost.cli.MkcertInstaller", lambda path: Installer())
-    monkeypatch.setattr("localghost.cli.ZenNssInstaller", lambda path: Installer())
+    monkeypatch.setattr(
+        "localghost.cli.ZenNssInstaller", lambda path, **kwargs: Installer()
+    )
     def run(command, **kwargs):
         commands.append(command)
         return CompletedProcess(command, 0)

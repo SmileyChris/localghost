@@ -318,4 +318,98 @@ def test_zen_install_removes_stale_localghost_certs(tmp_path) -> None:
         which=lambda name: "certutil",
     ).install()
 
-    assert deletes == ["localghost-DEADBEEFDEADBEEF"]
+    # The .localhost authority owns every unscoped nickname: the stale root
+    # and this root's own pre-scope nickname, which the scoped one replaces.
+    assert deletes == [
+        "localghost-DEADBEEFDEADBEEF",
+        "localghost-" + FINGERPRINT.removeprefix("SHA256:")[:16],
+    ]
+
+
+def listing_runner(entries: list[str], deletes: list[str]):
+    """Answer certutil calls from a fixed nickname listing."""
+
+    def run(command, **kwargs):
+        if command[1] == "-L":
+            if "-a" in command:
+                nickname = command[command.index("-n") + 1]
+                if nickname not in entries:
+                    return CompletedProcess(command, 1, "", "missing")
+                return CompletedProcess(command, 0, CERTIFICATE_PEM.decode(), "")
+            listing = "".join(f"{entry}    C,,\n" for entry in entries)
+            return CompletedProcess(command, 0, listing, "")
+        if command[1] == "-D":
+            nickname = command[command.index("-n") + 1]
+            deletes.append(nickname)
+            entries.remove(nickname)
+            return CompletedProcess(command, 0, "", "")
+        if command[1] == "-A":
+            entries.append(command[command.index("-n") + 1])
+            return CompletedProcess(command, 0, "", "")
+        return CompletedProcess(command, 1, "", "failed")
+
+    return run
+
+
+def test_zen_install_keeps_roots_belonging_to_another_scope(tmp_path) -> None:
+    certificate_path = write_certificate(tmp_path / "tailscale-tail1234-rootCA.pem")
+    zen_profile(tmp_path / "home")
+    deletes: list[str] = []
+    entries = [
+        "localghost-localhost-DEADBEEFDEADBEEF",
+        "localghost-tail1234-DEADBEEFDEADBEEF",
+    ]
+
+    ZenNssInstaller(
+        certificate_path,
+        scope="tail1234",
+        home=tmp_path / "home",
+        runner=listing_runner(entries, deletes),
+        which=lambda name: "certutil",
+    ).install()
+
+    assert deletes == ["localghost-tail1234-DEADBEEFDEADBEEF"]
+    assert "localghost-localhost-DEADBEEFDEADBEEF" in entries
+    assert f"localghost-tail1234-{FINGERPRINT.removeprefix('SHA256:')[:16]}" in entries
+
+
+def test_zen_install_replaces_an_unscoped_nickname_for_the_same_root(tmp_path) -> None:
+    certificate_path = write_certificate(tmp_path / "tailscale-tail1234-rootCA.pem")
+    zen_profile(tmp_path / "home")
+    deletes: list[str] = []
+    legacy = "localghost-" + FINGERPRINT.removeprefix("SHA256:")[:16]
+    entries = [legacy]
+
+    ZenNssInstaller(
+        certificate_path,
+        scope="tail1234",
+        home=tmp_path / "home",
+        runner=listing_runner(entries, deletes),
+        which=lambda name: "certutil",
+    ).install()
+
+    assert deletes == [legacy]
+    digest = FINGERPRINT.removeprefix("SHA256:")[:16]
+    assert entries == [f"localghost-tail1234-{digest}"]
+
+
+def test_zen_uninstall_removes_the_scoped_and_unscoped_nicknames(tmp_path) -> None:
+    certificate_path = write_certificate(tmp_path / "tailscale-tail1234-rootCA.pem")
+    zen_profile(tmp_path / "home")
+    deletes: list[str] = []
+    digest = FINGERPRINT.removeprefix("SHA256:")[:16]
+    entries = [f"localghost-{digest}", f"localghost-tail1234-{digest}"]
+
+    ZenNssInstaller(
+        certificate_path,
+        scope="tail1234",
+        home=tmp_path / "home",
+        runner=listing_runner(entries, deletes),
+        which=lambda name: "certutil",
+    ).uninstall()
+
+    assert sorted(deletes) == [
+        f"localghost-{digest}",
+        f"localghost-tail1234-{digest}",
+    ]
+    assert entries == []

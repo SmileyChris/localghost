@@ -612,7 +612,7 @@ def test_tailnet_trust_downloads_and_installs_both_stores(
     installed = []
 
     class Installer:
-        def __init__(self, path):
+        def __init__(self, path, **kwargs):
             self.path = path
 
         def install(self, **kwargs):
