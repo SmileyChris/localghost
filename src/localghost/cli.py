@@ -1215,8 +1215,9 @@ def save(
             raise click.ClickException(
                 "--file cannot be combined with host run settings"
             )
+        cwd = working_directory or Path.cwd()
         _save_compose_project(
-            cwd=working_directory or Path.cwd(),
+            cwd=cwd,
             files=files,
             service_name=service_name,
             port=port,
@@ -1225,6 +1226,11 @@ def save(
             dry_run=dry_run,
             interactive=interactive,
         )
+        if not dry_run:
+            # `name` is always None here (rejected above), so this matches
+            # `_record_registry`'s compose formula and, in turn, the
+            # `--project-name` `_run_compose` forces at run time.
+            registry.record(_local_project_name(cwd), cwd, "compose")
         return
     if selected_type == "dockerfile":
         if command:
@@ -1470,6 +1476,7 @@ def _save_dockerfile_project(
     write_new(output, document)
     success(f"Created {output} for the Dockerfile application.")
     info("Run it with localghost run.")
+    registry.record(_local_project_name(project_root), project_root, "dockerfile")
 
 
 def _run_config_from_plan(

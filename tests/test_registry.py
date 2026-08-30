@@ -1,4 +1,6 @@
 import json
+from pathlib import Path
+from subprocess import CompletedProcess
 
 from click.testing import CliRunner
 
@@ -92,3 +94,141 @@ def test_forget_requires_name_or_all(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
     result = CliRunner().invoke(cli, ["forget"])
     assert result.exit_code != 0
+
+
+# -- recording wiring: `save` and `run` -------------------------------------
+
+
+def test_save_host_type_records_registry_entry(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr("localghost.runner.shutil.which", lambda _: "/usr/bin/php")
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        Path("index.php").touch()
+        result = runner.invoke(
+            cli,
+            ["save", "--no-input", "--type", "php", "--port", "3000"],
+            env={"COMPOSE_PROJECT_NAME": "sample-project"},
+        )
+        assert result.exit_code == 0, result.output
+    saved = registry.entries()
+    assert len(saved) == 1
+    assert saved[0].type == "php"
+
+
+def test_save_dry_run_records_nothing(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr("localghost.runner.shutil.which", lambda _: "/usr/bin/php")
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        Path("index.php").touch()
+        result = runner.invoke(
+            cli,
+            ["save", "--no-input", "--dry-run", "--type", "php", "--port", "3000"],
+            env={"COMPOSE_PROJECT_NAME": "sample-project"},
+        )
+        assert result.exit_code == 0, result.output
+    assert registry.entries() == []
+
+
+def test_save_compose_via_files_records_registry_entry(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "localghost.cli.resolve_compose",
+        lambda files: {
+            "name": "sample-project",
+            "networks": {"default": {"name": "sample-project_default"}},
+            "services": {"web": {"expose": [8000], "networks": {"default": None}}},
+        },
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
+        result = runner.invoke(
+            cli,
+            ["save", "--no-input", "--file", "compose.yaml"],
+            env={"COMPOSE_PROJECT_NAME": "sample-project"},
+        )
+        assert result.exit_code == 0, result.output
+    saved = registry.entries()
+    assert len(saved) == 1
+    assert saved[0].name == "sample-project"
+    assert saved[0].type == "compose"
+
+
+def test_save_dockerfile_records_registry_entry(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        Path("Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+        result = runner.invoke(
+            cli,
+            ["save", "--no-input", "--port", "8000"],
+            env={"COMPOSE_PROJECT_NAME": "sample-project"},
+        )
+        assert result.exit_code == 0, result.output
+    saved = registry.entries()
+    assert len(saved) == 1
+    assert saved[0].type == "dockerfile"
+
+
+def test_run_host_type_records_registry_entry(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr("localghost.cli.find_route_collision", lambda name: None)
+    monkeypatch.setattr("localghost.cli.execute", lambda *args, **kwargs: 0)
+    result = CliRunner().invoke(
+        cli, ["run", "--name", "demo", "--port", "3000", "--", "echo"]
+    )
+    assert result.exit_code == 0, result.output
+    saved = registry.entries()
+    assert len(saved) == 1
+    assert saved[0].name == "demo"
+    assert saved[0].type == "custom"
+
+
+def test_run_dry_run_records_nothing(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "localghost.cli.find_route_collision",
+        lambda name: (_ for _ in ()).throw(AssertionError("inspected Docker")),
+    )
+    monkeypatch.setattr(
+        "localghost.cli.execute",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("ran")),
+    )
+    result = CliRunner().invoke(
+        cli, ["run", "--dry-run", "--name", "demo", "--port", "3000", "--", "echo"]
+    )
+    assert result.exit_code == 0, result.output
+    assert registry.entries() == []
+
+
+def test_run_compose_records_registry_entry(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    (tmp_path / "compose.yaml").write_text("services: {}\n")
+    monkeypatch.setattr(
+        "localghost.cli.resolve_compose",
+        lambda files, **kwargs: {
+            "name": "demo",
+            "networks": {"localghost": {"external": True}},
+            "services": {
+                "web": {
+                    "labels": {"traefik.enable": "true"},
+                    "networks": {"localghost": None},
+                }
+            },
+        },
+    )
+    monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "localghost.cli.subprocess.run",
+        lambda command, **kwargs: CompletedProcess(command, 0),
+    )
+    result = CliRunner().invoke(
+        cli, ["run", "-C", str(tmp_path), "--type", "compose", "--name", "demo"]
+    )
+    assert result.exit_code == 0, result.output
+    saved = registry.entries()
+    assert len(saved) == 1
+    assert saved[0].name == "demo"
+    assert saved[0].type == "compose"
