@@ -9,6 +9,9 @@ htmlcov/
 site/
 *.py[cod]
 
+# Built inside Docker; a local `go build` must stay out of the repo
+src/localghost/tailscale_gateway/localghost-tailscale-gateway
+
 # Local working documents (not committed)
 PLAN.md
 specs/
