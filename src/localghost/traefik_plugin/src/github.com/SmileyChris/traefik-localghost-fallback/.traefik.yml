@@ -1,0 +1,7 @@
+displayName: Localghost Ghost Pages
+type: middleware
+import: github.com/SmileyChris/traefik-localghost-fallback
+summary: Friendly offline pages for remembered .localhost projects
+
+testData:
+  registryPath: /var/lib/localghost-registry
