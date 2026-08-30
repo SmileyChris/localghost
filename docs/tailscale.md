@@ -81,6 +81,11 @@ machine, or pass `--takeover` to replace the mapping deliberately. When a
 later enable step fails, the split-DNS entry and saved state are rolled back
 so the command can simply be run again.
 
+A suffix that names a public TLD or reserved zone (`dev`, `com`, any
+two-letter country code, `internal`, …) is refused outright: even though the
+root is name-constrained, an anchor scoped to a real TLD could impersonate
+real websites on every machine that trusts it.
+
 Enable performs four bounded operations:
 
 1. creates a single-use, ten-minute auth key;
@@ -150,6 +155,12 @@ The gateway carries a Docker healthcheck that reports healthy only once its
 tailnet node is enrolled and every listener is up. `localghost tailscale
 status` includes that observed state as `Gateway health`, so a gateway that
 died after enable shows up there rather than as a timeout on another device.
+Routers that cannot be mirrored (custom labels without explicit service and
+entrypoints) appear there as `Localhost-only routers`.
+
+An unreachable tailnet never blocks local work: when the hub starts but only
+the gateway fails its healthcheck, `localghost` warns and carries on with the
+`.localhost` routes while the gateway keeps retrying in the background.
 
 To restore the DNS configuration that existed at enable time and remove the
 gateway from the running hub:

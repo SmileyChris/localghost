@@ -129,11 +129,11 @@ func TestRootValidationAcceptsAnUnconstrainedOrMatchingRoot(t *testing.T) {
 		excluded  []string
 		valid     bool
 	}{
-		"unconstrained root from before this change": {valid: true},
-		"root constrained to its own suffix":         {permitted: []string{"tail1234"}, valid: true},
-		"root constrained to another suffix":         {permitted: []string{"other"}, valid: false},
-		"root with two permitted suffixes":           {permitted: []string{"tail1234", "other"}, valid: false},
-		"root with an exclusion":                     {permitted: []string{"tail1234"}, excluded: []string{"bad.tail1234"}, valid: false},
+		"unconstrained root posing as a tailnet root": {valid: false},
+		"root constrained to its own suffix":          {permitted: []string{"tail1234"}, valid: true},
+		"root constrained to another suffix":          {permitted: []string{"other"}, valid: false},
+		"root with two permitted suffixes":            {permitted: []string{"tail1234", "other"}, valid: false},
+		"root with an exclusion":                      {permitted: []string{"tail1234"}, excluded: []string{"bad.tail1234"}, valid: false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cert := rootCertificateForTest(t, test.permitted, test.excluded)
@@ -145,6 +145,17 @@ func TestRootValidationAcceptsAnUnconstrainedOrMatchingRoot(t *testing.T) {
 				t.Fatal("invalid root accepted")
 			}
 		})
+	}
+}
+
+func TestLocalhostRootValidationKeepsLegacyUnconstrainedRoots(t *testing.T) {
+	unconstrained := rootCertificateForTest(t, nil, nil)
+	if err := validateRootCertificate(unconstrained, "localhost"); err != nil {
+		t.Fatalf("legacy unconstrained localhost root rejected: %v", err)
+	}
+	constrained := rootCertificateForTest(t, []string{"localhost"}, nil)
+	if err := validateRootCertificate(constrained, "localhost"); err != nil {
+		t.Fatalf("constrained localhost root rejected: %v", err)
 	}
 }
 

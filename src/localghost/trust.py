@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shutil
 import ssl
 import subprocess
@@ -177,9 +178,23 @@ class ZenNssInstaller:
         """Return the nickname used before authorities carried a scope."""
         return self.prefix + self._digest(certificate)
 
+    _digest_pattern = re.compile(r"[0-9A-F]{16}")
+
+    def _nickname_scope(self, nickname: str) -> str | None:
+        """The scope a managed nickname encodes; None when unscoped.
+
+        Scopes may contain dashes, so the digest anchors the parse: a plain
+        prefix match would let scope ``my`` claim ``my-net`` nicknames.
+        """
+        remainder = nickname[len(self.prefix) :]
+        scope, dash, digest = remainder.rpartition("-")
+        if dash and scope and self._digest_pattern.fullmatch(digest):
+            return scope
+        return None
+
     def _is_unscoped(self, nickname: str) -> bool:
-        return nickname.startswith(self.prefix) and (
-            "-" not in nickname[len(self.prefix) :]
+        return bool(
+            self._digest_pattern.fullmatch(nickname[len(self.prefix) :])
         )
 
     def _certutil(self) -> str | None:
@@ -219,7 +234,7 @@ class ZenNssInstaller:
             nickname = line.strip().split()[0] if line.strip() else ""
             if not nickname.startswith(self.prefix) or nickname == keep:
                 continue
-            if nickname.startswith(self._scoped_prefix) or (
+            if self._nickname_scope(nickname) == self.scope or (
                 self._is_unscoped(nickname)
                 and (self.scope == "localhost" or nickname == superseded)
             ):

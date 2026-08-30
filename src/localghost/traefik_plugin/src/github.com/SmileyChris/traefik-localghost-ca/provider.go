@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -568,6 +569,7 @@ func (p *Provider) mirroredRouters(containers []ContainerInfo) map[string]flatRo
 		return nil
 	}
 	result := make(map[string]flatRouter)
+	collided := make(map[string]bool)
 	for _, container := range containers {
 		for key, rule := range container.Labels {
 			const prefix = "traefik.http.routers."
@@ -597,8 +599,18 @@ func (p *Provider) mirroredRouters(containers []ContainerInfo) map[string]flatRo
 			if strings.EqualFold(container.Labels[base+"tls"], "true") {
 				router.TLS = &flatTLS{}
 			}
+			// A name defined differently by two containers would otherwise be
+			// won by iteration order; identical definitions are replicas.
+			if existing, seen := result[name]; seen && !reflect.DeepEqual(existing, router) {
+				collided[name] = true
+				continue
+			}
 			result[name] = router
 		}
+	}
+	for name := range collided {
+		delete(result, name)
+		fmt.Fprintf(os.Stderr, "localghostCA[%s]: router %s is defined by multiple containers with different settings and cannot be mirrored\n", p.name, name)
 	}
 	return result
 }

@@ -373,6 +373,27 @@ def test_zen_install_keeps_roots_belonging_to_another_scope(tmp_path) -> None:
     assert f"localghost-tail1234-{FINGERPRINT.removeprefix('SHA256:')[:16]}" in entries
 
 
+def test_zen_install_keeps_a_dashed_sibling_scope(tmp_path) -> None:
+    certificate_path = write_certificate(tmp_path / "tailscale-tail-rootCA.pem")
+    zen_profile(tmp_path / "home")
+    deletes: list[str] = []
+    entries = [
+        "localghost-tail-net-DEADBEEFDEADBEEF",
+        "localghost-tail-DEADBEEFDEADBEEF",
+    ]
+
+    ZenNssInstaller(
+        certificate_path,
+        scope="tail",
+        home=tmp_path / "home",
+        runner=listing_runner(entries, deletes),
+        which=lambda name: "certutil",
+    ).install()
+
+    assert deletes == ["localghost-tail-DEADBEEFDEADBEEF"]
+    assert "localghost-tail-net-DEADBEEFDEADBEEF" in entries
+
+
 def test_zen_install_replaces_an_unscoped_nickname_for_the_same_root(tmp_path) -> None:
     certificate_path = write_certificate(tmp_path / "tailscale-tail1234-rootCA.pem")
     zen_profile(tmp_path / "home")

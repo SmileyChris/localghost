@@ -198,6 +198,25 @@ func TestTailnetProviderMirrorsRouterAndMetadata(t *testing.T) {
 	}
 }
 
+func TestMirroredRouterNameCollisionsAreDropped(t *testing.T) {
+	p := &Provider{domainSuffix: "tail1234"}
+	labels := func(service string) map[string]string {
+		return map[string]string{
+			"traefik.http.routers.web.rule":        "Host(`" + service + ".localhost`)",
+			"traefik.http.routers.web.service":     service,
+			"traefik.http.routers.web.entrypoints": "web",
+		}
+	}
+	containers := []ContainerInfo{{Labels: labels("one")}, {Labels: labels("two")}}
+	if routers := p.mirroredRouters(containers); len(routers) != 0 {
+		t.Fatalf("conflicting router definitions must not be mirrored: %#v", routers)
+	}
+	replicas := []ContainerInfo{{Labels: labels("one")}, {Labels: labels("one")}}
+	if routers := p.mirroredRouters(replicas); len(routers) != 1 {
+		t.Fatalf("identical replicas should mirror once: %#v", routers)
+	}
+}
+
 func TestPublishSkipsUnchangedSnapshot(t *testing.T) {
 	p := newTestProvider(t)
 	p.listContainers = func(context.Context) ([]ContainerInfo, error) { return nil, nil }

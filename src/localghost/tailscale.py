@@ -130,11 +130,33 @@ def delete_credential() -> None:
 # when it becomes the gateway hostname.
 _SUFFIX_LIMIT = 63 - len("localghost-")
 
+# The tailnet root is name-constrained to exactly the suffix, so the one
+# remaining way to mint a root for real websites is choosing a real TLD as
+# the suffix. Every ccTLD is exactly two letters, and this best-effort list
+# covers the reserved names and common gTLDs; MagicDNS labels like tail1234
+# are unaffected.
+_PUBLIC_OR_RESERVED = frozenset(
+    "localhost local internal home corp lan mail arpa onion test example "  # noqa: SIM905
+    "invalid alt zip mov "
+    "com net org edu gov mil int info biz name pro mobi asia tel dev app xyz "
+    "online site tech store shop blog cloud page link live art bank club "
+    "design digital email fun games group host life media network news one "
+    "ooo party plus press pub red rocks run social software solutions space "
+    "studio systems team today tools top video vip web website wiki work "
+    "works world zone new day city eco law men ninja".split()
+)
+
 
 def validate_suffix(value: str) -> str:
     value = value.removesuffix(".").lower()
-    if not _SUFFIX.fullmatch(value) or value in {"localhost", "local"}:
+    if not _SUFFIX.fullmatch(value):
         raise ValueError("suffix must be one DNS label (for example, tail1234)")
+    if len(value) == 2 or value in _PUBLIC_OR_RESERVED:
+        raise ValueError(
+            f"suffix .{value} is a public or reserved DNS name; a root "
+            "scoped to it could impersonate real websites — choose a "
+            "private label such as tail1234"
+        )
     if len(value) > _SUFFIX_LIMIT:
         raise ValueError(
             f"suffix must be at most {_SUFFIX_LIMIT} characters so the "

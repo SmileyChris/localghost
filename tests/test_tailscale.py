@@ -1,6 +1,7 @@
 import json
 import stat
 from io import BytesIO
+from pathlib import Path
 from subprocess import CompletedProcess
 from types import SimpleNamespace
 from urllib.error import HTTPError, URLError
@@ -54,9 +55,17 @@ def test_absent_state_and_remove_are_idempotent(monkeypatch, tmp_path) -> None:
     tailscale_module.remove_state()
 
 
-@pytest.mark.parametrize("value", ["localhost", "two.labels", "-bad", "bad-"])
+@pytest.mark.parametrize("value", ["two.labels", "-bad", "bad-"])
 def test_suffix_rejects_unsafe_values(value) -> None:
     with pytest.raises(ValueError, match="one DNS label"):
+        validate_suffix(value)
+
+
+@pytest.mark.parametrize(
+    "value", ["localhost", "dev", "com", "app", "internal", "io", "uk", "test", "corp"]
+)
+def test_suffix_rejects_public_and_reserved_names(value) -> None:
+    with pytest.raises(ValueError, match="public or reserved"):
         validate_suffix(value)
 
 
@@ -105,7 +114,7 @@ def test_detect_suffix_prefers_the_tailnet_label(monkeypatch) -> None:
                     "SearchDomains": ["taildc3ac3.ts.net."],
                     "CurrentTailnet": {
                         "MagicDNSSuffix": "taildc3ac3.ts.net",
-                        "SelfDNSName": "work.taildc3ac3.ts.net.",
+                        "SelfDNSName": "chris-laptop.taildc3ac3.ts.net.",
                     },
                 }
             ),
@@ -126,14 +135,14 @@ def test_detect_suffix_skips_an_unusable_tailnet_label(monkeypatch) -> None:
                 {
                     "CurrentTailnet": {
                         "MagicDNSSuffix": "local.ts.net",
-                        "SelfDNSName": "work.example.ts.net.",
+                        "SelfDNSName": "chris-laptop.example.ts.net.",
                     },
                 }
             ),
             "",
         ),
     )
-    assert detect_suffix() == "work"
+    assert detect_suffix() == "chris-laptop"
 
 
 def test_detect_suffix_falls_back_to_this_machine_name(monkeypatch) -> None:
@@ -144,12 +153,12 @@ def test_detect_suffix_falls_back_to_this_machine_name(monkeypatch) -> None:
             args[0],
             0,
             json.dumps(
-                {"CurrentTailnet": {"SelfDNSName": "work.example.ts.net."}}
+                {"CurrentTailnet": {"SelfDNSName": "chris-laptop.example.ts.net."}}
             ),
             "",
         ),
     )
-    assert detect_suffix() == "work"
+    assert detect_suffix() == "chris-laptop"
 
 
 def test_suffix_length_leaves_room_for_the_gateway_hostname() -> None:
@@ -531,6 +540,7 @@ def _patch_enable(monkeypatch, events, saved, state_dir):
     monkeypatch.setattr(
         cli_module, "_bootstrap_tailscale_gateway", lambda suffix, key: ("100.64.0.1",)
     )
+    monkeypatch.setattr(cli_module, "_ensure_gateway_image", lambda suffix: None)
     monkeypatch.setattr(cli_module, "save_tailscale_state", saved.append)
     monkeypatch.setattr(
         cli_module, "_run_proxy", lambda *args, **kwargs: events.append(kwargs)
@@ -687,6 +697,33 @@ def test_enable_warns_when_tailnet_trust_installation_fails(
     assert result.exit_code == 0, result.output
     assert "Tailnet trust was not installed" in result.output
     assert "localghost trust" in result.output
+
+
+def test_enable_creates_the_auth_key_after_the_image_builds(
+    monkeypatch, tmp_path
+) -> None:
+    events: list = []
+    saved: list = []
+    order: list = []
+    _patch_enable(monkeypatch, events, saved, tmp_path)
+    monkeypatch.setattr(
+        cli_module.TailscaleAPI,
+        "create_auth_key",
+        lambda self, tailnet, tag: order.append("auth-key") or "auth-key",
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "_bootstrap_tailnet_root",
+        lambda suffix: order.append("bootstrap")
+        or PublicCertificate.parse(CERTIFICATE_PEM),
+    )
+    monkeypatch.setattr(
+        cli_module, "_ensure_gateway_image", lambda suffix: order.append("build")
+    )
+
+    result = CliRunner().invoke(cli, ENABLE_ARGS + CREDENTIAL_ARGS)
+    assert result.exit_code == 0, result.output
+    assert order == ["bootstrap", "build", "auth-key"]
 
 
 def test_enable_prints_the_share_command(monkeypatch, tmp_path) -> None:
@@ -999,6 +1036,152 @@ def test_run_proxy_reports_the_original_failure_when_repair_fails(
     with pytest.raises(click.exceptions.Exit):
         cli_module._run_proxy("up", https_enabled=True)
     assert attempts["count"] == 1
+
+
+def test_down_survives_corrupt_tailnet_state(monkeypatch) -> None:
+    def broken():
+        raise TailscaleError("invalid saved Tailscale state")
+
+    monkeypatch.setattr(cli_module, "load_tailscale_state", broken)
+    commands: list = []
+    monkeypatch.setattr(
+        cli_module.subprocess,
+        "run",
+        lambda command, **kwargs: commands.append(command)
+        or CompletedProcess(command, 0, "", ""),
+    )
+
+    cli_module._run_proxy("down")
+    assert any("down" in command for command in commands)
+
+    with pytest.raises(click.ClickException):
+        cli_module._run_proxy("up")
+
+
+def test_trust_continues_when_the_tailnet_root_is_unreachable(monkeypatch) -> None:
+    monkeypatch.setattr(cli_module, "_https_configured", lambda: False)
+    monkeypatch.setattr(cli_module, "proxy_is_running", lambda: True)
+    monkeypatch.setattr(cli_module, "_enable_https", lambda: None)
+    monkeypatch.setattr(
+        cli_module,
+        "load_tailscale_state",
+        lambda: TailscaleState("example.com", "tail1234", ("100.64.0.1",), {}),
+    )
+
+    def failing_install(suffix, **kwargs):
+        raise click.ClickException("could not download the localghost root")
+
+    monkeypatch.setattr(cli_module, "_install_tailnet_trust", failing_install)
+    ups: list = []
+    monkeypatch.setattr(
+        cli_module, "_run_proxy", lambda *args, **kwargs: ups.append(kwargs)
+    )
+
+    result = CliRunner().invoke(cli, ["trust"])
+    assert result.exit_code == 0, result.output
+    assert "Tailnet trust was not installed" in result.output
+    assert ups and ups[0]["https_enabled"] is True
+
+
+def test_remove_trust_keeps_the_hub_on_https_for_the_tailnet(monkeypatch) -> None:
+    monkeypatch.setattr(cli_module, "_https_configured", lambda: True)
+    monkeypatch.setattr(cli_module, "proxy_is_running", lambda: True)
+    monkeypatch.setattr(
+        cli_module,
+        "load_tailscale_state",
+        lambda: TailscaleState("example.com", "tail1234", ("100.64.0.1",), {}),
+    )
+    monkeypatch.setattr(cli_module, "_trust_marker", lambda: Path("/nonexistent"))
+    monkeypatch.setattr(cli_module, "_public_root_path", lambda: Path("/nonexistent"))
+    monkeypatch.setattr(
+        cli_module, "_state_directory", lambda: Path("/nonexistent-state")
+    )
+    downgrades: list = []
+    monkeypatch.setattr(
+        cli_module, "_run_proxy", lambda *args, **kwargs: downgrades.append(kwargs)
+    )
+
+    result = CliRunner().invoke(cli, ["trust", "--remove"])
+    assert result.exit_code == 0, result.output
+    assert downgrades == []
+    assert "tailnet" in result.output.lower()
+
+
+def test_proxy_origin_reports_https_when_the_tailnet_forces_it(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(cli_module, "_https_configured", lambda: False)
+    monkeypatch.setattr(
+        cli_module,
+        "load_tailscale_state",
+        lambda: TailscaleState("example.com", "tail1234", ("100.64.0.1",), {}),
+    )
+    assert cli_module._proxy_origin("shop") == "https://shop.localhost"
+
+
+def test_tailnet_origin_report_can_target_stderr(monkeypatch) -> None:
+    monkeypatch.setattr(
+        cli_module,
+        "load_tailscale_state",
+        lambda: TailscaleState("example.com", "tail1234", ("100.64.0.1",), {}),
+    )
+    calls: list = []
+    monkeypatch.setattr(
+        cli_module,
+        "info",
+        lambda message, **kwargs: calls.append(kwargs.get("err", False)),
+    )
+    cli_module._report_tailnet_origin("shop", err=True)
+    assert calls == [True]
+
+
+def test_dry_run_plan_reports_the_tailnet_origin_on_stderr(monkeypatch) -> None:
+    reported: list = []
+    monkeypatch.setattr(
+        cli_module,
+        "_report_tailnet_origin",
+        lambda hostname, err=False: reported.append(err),
+    )
+    monkeypatch.setattr(cli_module, "_proxy_origin", lambda name: "http://x.localhost")
+    plan = SimpleNamespace(
+        name="x",
+        type="vite",
+        command=("npm", "run", "dev"),
+        port=5173,
+        project_root=None,
+        working_directory=None,
+        bridge_yaml="services: {}\n",
+    )
+    cli_module._print_run_plan(plan, dry_run=True)
+    assert reported == [True]
+
+
+def test_up_tolerates_an_unready_gateway(monkeypatch) -> None:
+    state = TailscaleState("example.com", "tail1234", ("100.64.0.1",), {})
+    monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: state)
+    monkeypatch.setattr(cli_module, "_only_the_gateway_failed", lambda: True)
+
+    def run(command, **kwargs):
+        if command[:2] != ["docker", "compose"]:
+            return CompletedProcess(command, 0, "", "")
+        return CompletedProcess(command, 1, "", "gateway timed out")
+
+    monkeypatch.setattr(cli_module.subprocess, "run", run)
+
+    cli_module._run_proxy("up", https_enabled=True)
+
+
+def test_only_the_gateway_failed_checks_both_services(monkeypatch) -> None:
+    health = {"traefik": "healthy", "tailscale-gateway": "starting"}
+    monkeypatch.setattr(
+        cli_module, "_service_health", lambda service: health[service]
+    )
+    assert cli_module._only_the_gateway_failed() is True
+    health["traefik"] = "unhealthy"
+    assert cli_module._only_the_gateway_failed() is False
+    health.update({"traefik": "healthy", "tailscale-gateway": "healthy"})
+    assert cli_module._only_the_gateway_failed() is False
 
 
 def test_run_proxy_adds_tailnet_overlay(monkeypatch) -> None:

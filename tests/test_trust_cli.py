@@ -147,7 +147,7 @@ def test_start_checks_the_gateway_image_while_tailnet_hosting_is_on(
 ) -> None:
     state = TailscaleState(
         tailnet="example.com",
-        suffix="work",
+        suffix="tailwork",
         gateway_ips=("100.64.0.10",),
         previous_split_dns={},
     )
@@ -219,7 +219,7 @@ def test_trust_reports_existing_https_on_a_running_proxy(monkeypatch, tmp_path) 
 def test_trust_installs_active_tailnet_root(monkeypatch, tmp_path) -> None:
     state = TailscaleState(
         tailnet="example.com",
-        suffix="work",
+        suffix="tailwork",
         gateway_ips=("100.64.0.10",),
         previous_split_dns={},
     )
@@ -247,7 +247,7 @@ def test_trust_installs_active_tailnet_root(monkeypatch, tmp_path) -> None:
     )
 
     assert result.exit_code == 0, result.output
-    tailnet_root = tmp_path / "tailscale-work-rootCA.pem"
+    tailnet_root = tmp_path / "tailscale-tailwork-rootCA.pem"
     assert installed == [tailnet_root, tailnet_root]
     assert tailnet_root.read_bytes() == CERTIFICATE_PEM
 
@@ -255,7 +255,7 @@ def test_trust_installs_active_tailnet_root(monkeypatch, tmp_path) -> None:
 def test_trust_scopes_each_authority_for_zen(monkeypatch, tmp_path) -> None:
     state = TailscaleState(
         tailnet="example.com",
-        suffix="work",
+        suffix="tailwork",
         gateway_ips=("100.64.0.10",),
         previous_split_dns={},
     )
@@ -292,13 +292,13 @@ def test_trust_scopes_each_authority_for_zen(monkeypatch, tmp_path) -> None:
     assert result.exit_code == 0, result.output
     assert scopes == [
         ("rootCA.pem", "localhost"),
-        ("tailscale-work-rootCA.pem", "work"),
+        ("tailscale-tailwork-rootCA.pem", "tailwork"),
     ]
 
 
 def test_trust_remove_scopes_each_authority_for_zen(monkeypatch, tmp_path) -> None:
     (tmp_path / "rootCA.pem").write_bytes(CERTIFICATE_PEM)
-    (tmp_path / "tailscale-work-rootCA.pem").write_bytes(CERTIFICATE_PEM)
+    (tmp_path / "tailscale-tailwork-rootCA.pem").write_bytes(CERTIFICATE_PEM)
     scopes = []
 
     class Zen:
@@ -326,7 +326,7 @@ def test_trust_remove_scopes_each_authority_for_zen(monkeypatch, tmp_path) -> No
     assert result.exit_code == 0, result.output
     assert scopes == [
         ("rootCA.pem", "localhost"),
-        ("tailscale-work-rootCA.pem", "work"),
+        ("tailscale-tailwork-rootCA.pem", "tailwork"),
     ]
 
 

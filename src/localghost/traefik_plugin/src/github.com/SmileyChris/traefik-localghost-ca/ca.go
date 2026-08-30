@@ -271,10 +271,11 @@ func parseAndValidateRoot(pair *pairData, suffix string) (*x509.Certificate, *ec
 	return cert, key, nil
 }
 
-// validateRootCertificate accepts a root that is either unconstrained --
-// every root issued before tailnet hosting, and the .localhost root -- or
-// constrained to exactly the suffix it serves. Anything else is a foreign
-// authority.
+// validateRootCertificate pins a root to the suffix it serves. The
+// .localhost authority may be unconstrained -- every root issued before
+// tailnet hosting is -- but a tailnet root is installed on other people's
+// machines, so it must carry a critical name constraint for exactly its own
+// suffix; an unconstrained anchor here would be trusted for any domain.
 func validateRootCertificate(cert *x509.Certificate, suffix string) error {
 	now := time.Now()
 	if !cert.IsCA || cert.KeyUsage&x509.KeyUsageCertSign == 0 {
@@ -286,8 +287,12 @@ func validateRootCertificate(cert *x509.Certificate, suffix string) error {
 	if len(cert.ExcludedDNSDomains) != 0 {
 		return fmt.Errorf("root must not exclude DNS names")
 	}
-	if len(cert.PermittedDNSDomains) != 0 && !reflect.DeepEqual(cert.PermittedDNSDomains, []string{suffix}) {
-		return fmt.Errorf("root permits DNS names outside .%s", suffix)
+	if suffix == "localhost" {
+		if len(cert.PermittedDNSDomains) != 0 && !reflect.DeepEqual(cert.PermittedDNSDomains, []string{suffix}) {
+			return fmt.Errorf("root permits DNS names outside .%s", suffix)
+		}
+	} else if !cert.PermittedDNSDomainsCritical || !reflect.DeepEqual(cert.PermittedDNSDomains, []string{suffix}) {
+		return fmt.Errorf("root must be name-constrained to exactly .%s", suffix)
 	}
 	if err := cert.CheckSignatureFrom(cert); err != nil {
 		return fmt.Errorf("root is not self-signed: %w", err)

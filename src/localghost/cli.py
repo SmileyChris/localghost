@@ -167,7 +167,7 @@ def cli(ctx: click.Context, show_status: bool, rebuild: bool) -> None:
         was_running = proxy_is_running()
         first_launch = not _managed_image_is_available()
         title(welcome=first_launch)
-        https_enabled = _ensure_https_or_warn()
+        https_enabled = _ensure_https_or_warn() or _tailnet_forces_https()
         _run_proxy(
             "up",
             already_running=was_running,
@@ -343,7 +343,15 @@ def trust(remove: bool, show_status: bool) -> None:
     _enable_https()
     tailnet = load_tailscale_state()
     if tailnet is not None:
-        _install_tailnet_trust(tailnet.suffix, show_details=False)
+        # An unreachable gateway must not strand the localhost half of trust
+        # or skip the hub reconcile below.
+        try:
+            _install_tailnet_trust(tailnet.suffix, show_details=False)
+        except click.ClickException as exc:
+            warning("Tailnet trust was not installed", [str(exc)])
+            action(
+                "Retry once the gateway is reachable", "localghost tailscale trust"
+            )
     if was_running and not was_configured:
         _run_proxy("up", already_running=True, https_enabled=True)
         success("Trusted HTTPS is enabled for the running hub.")
@@ -358,7 +366,10 @@ def _remove_trust() -> None:
     """Disable HTTPS before removing the managed development roots."""
     was_configured = _https_configured()
     was_running = proxy_is_running()
-    if was_running and was_configured:
+    tailnet_active = _tailnet_forces_https()
+    if was_running and was_configured and not tailnet_active:
+        # With tailnet hosting on, the hub must keep serving HTTPS, so a
+        # downgrade recreate would be silently overridden anyway.
         _run_proxy(
             "up",
             already_running=True,
@@ -382,10 +393,15 @@ def _remove_trust() -> None:
         except TrustError as exc:
             raise click.ClickException(str(exc)) from exc
         tailnet_path.unlink(missing_ok=True)
-    if was_running and was_configured:
+    if was_running and was_configured and not tailnet_active:
         success("HTTPS is disabled and the local root was removed from managed stores.")
     else:
         success("The local root was removed from managed stores.")
+    if tailnet_active:
+        info(
+            "Tailnet hosting keeps the hub serving HTTPS; run "
+            "`localghost tailscale disable` to turn the mirror off."
+        )
 
 
 def _trust_status() -> None:
@@ -474,13 +490,26 @@ def _tailscale_status() -> None:
 
 def _tailscale_gateway_health() -> str:
     """The gateway container's observed state, from its Docker healthcheck."""
+    return _service_health("tailscale-gateway")
+
+
+def _only_the_gateway_failed() -> bool:
+    """After a failed up: the local hub is healthy, only the mirror is not."""
+    return (
+        _service_health("traefik") == "healthy"
+        and _service_health("tailscale-gateway") != "healthy"
+    )
+
+
+def _service_health(service: str) -> str:
+    """A hub service's observed state, from its Docker healthcheck."""
     command = [
         "docker",
         "ps",
         "--filter",
         "label=com.docker.compose.project=localghost",
         "--filter",
-        "label=com.docker.compose.service=tailscale-gateway",
+        f"label=com.docker.compose.service={service}",
         "--format",
         "{{.Status}}",
     ]
@@ -599,8 +628,6 @@ def tailscale_enable(
         )
         info("Authenticating with the Tailscale API…")
         api = TailscaleAPI.authenticate(client_id, client_secret)
-        info("Creating a single-use gateway auth key…")
-        auth_key = api.create_auth_key(tailnet, tag)
         info("Reading the existing split-DNS configuration…")
         previous = api.split_dns(tailnet)
         active = previous.get(chosen_suffix)
@@ -620,6 +647,12 @@ def tailscale_enable(
         # Keep the tailnet root beside the state so `tailscale status` can
         # repeat the share command without a running gateway.
         _write_public_root(_tailnet_root_path(chosen_suffix), certificate.pem)
+        # The auth key lives ten minutes; the first gateway image build can
+        # take longer, so build before minting the key rather than after.
+        info("Preparing the gateway image…")
+        _ensure_gateway_image(chosen_suffix)
+        info("Creating a single-use gateway auth key…")
+        auth_key = api.create_auth_key(tailnet, tag)
         info(f"Enrolling localghost-{chosen_suffix} in the tailnet…")
         gateway_ips = _bootstrap_tailscale_gateway(chosen_suffix, auth_key)
         state = TailscaleState(
@@ -1291,7 +1324,8 @@ def _print_run_plan(plan: RunPlan, dry_run: bool, detach: bool = False) -> None:
         project_root=plan.project_root,
         working_directory=plan.working_directory,
     )
-    _report_tailnet_origin(plan.name)
+    # In a dry run stdout carries only the bridge YAML.
+    _report_tailnet_origin(plan.name, err=dry_run)
     if dry_run:
         click.echo(plan.bridge_yaml, nl=False)
     elif detach:
@@ -1350,8 +1384,16 @@ def _reclaim_route(container_id: str, name: str) -> None:
         )
 
 
+def _tailnet_forces_https() -> bool:
+    """The hub serves HTTPS whenever tailnet hosting is enabled, even after
+    local trust is removed, because tailnet TLS terminates on Traefik."""
+    with suppress(TailscaleError):
+        return load_tailscale_state() is not None
+    return False
+
+
 def _proxy_origin(hostname: str) -> str:
-    https_enabled = _https_configured()
+    https_enabled = _https_configured() or _tailnet_forces_https()
     port = _proxy_https_port() if https_enabled else _proxy_http_port()
     default_port = 443 if https_enabled else 80
     suffix = "" if port == default_port else f":{port}"
@@ -1359,14 +1401,14 @@ def _proxy_origin(hostname: str) -> str:
     return f"{scheme}://{hostname}.localhost{suffix}"
 
 
-def _report_tailnet_origin(hostname: str) -> None:
+def _report_tailnet_origin(hostname: str, *, err: bool = False) -> None:
     try:
         state = load_tailscale_state()
     except TailscaleError as exc:
         warning("Tailnet URL unavailable", [str(exc)])
         return
     if state is not None:
-        info(f"Tailnet URL: https://{hostname}.{state.suffix}")
+        info(f"Tailnet URL: https://{hostname}.{state.suffix}", err=err)
 
 
 def _tailnet_origin(hostname: str) -> str | None:
@@ -1390,7 +1432,12 @@ def _run_proxy(
     try:
         tailscale_state = load_tailscale_state()
     except TailscaleError as exc:
-        raise click.ClickException(str(exc)) from exc
+        # Corrupt state must never block a teardown: the overlays are only
+        # needed to name services, and `down` removes orphans anyway.
+        if action != "down":
+            raise click.ClickException(str(exc)) from exc
+        warning("Ignoring unreadable tailnet state for teardown", [str(exc)])
+        tailscale_state = None
     if tailscale_state is not None:
         https_enabled = True
     with _proxy_resource_directory() as resource_root:
@@ -1452,6 +1499,22 @@ def _run_proxy(
             raise click.ClickException("docker is required") from exc
 
     if result.returncode:
+        if (
+            action == "up"
+            and tailscale_state is not None
+            and _only_the_gateway_failed()
+        ):
+            # An unreachable tailnet must not block local development: the
+            # gateway container keeps retrying in the background.
+            warning(
+                "The tailnet gateway is not ready",
+                [
+                    "local .localhost routes are up; the gateway keeps "
+                    "retrying in the background",
+                    "check progress with `localghost tailscale status`",
+                ],
+            )
+            return
         if (
             action == "up"
             and repair
@@ -1539,6 +1602,39 @@ def _bootstrap_tailnet_root(suffix: str) -> PublicCertificate:
         raise TailscaleError(
             f"tailnet CA bootstrap returned invalid data: {exc}"
         ) from exc
+
+
+def _ensure_gateway_image(suffix: str) -> None:
+    """Build the gateway image ahead of enrollment when it is missing."""
+    if _images_are_built(GATEWAY_IMAGE):
+        return
+    with _proxy_resource_directory() as resource_root:
+        command = [
+            "docker",
+            "compose",
+            "--project-name",
+            PROJECT_NAME,
+            "--file",
+            str(resource_root / "proxy_compose.yaml"),
+            "--file",
+            str(resource_root / "proxy_compose_https.yaml"),
+            "--file",
+            str(resource_root / "proxy_compose_tailscale.yaml"),
+            "build",
+            "tailscale-gateway",
+        ]
+        environment = os.environ.copy()
+        environment["LOCALGHOST_IMAGE_TAG"] = f"v{LOCALGHOST_VERSION}"
+        environment["LOCALGHOST_TAILSCALE_SUFFIX"] = suffix
+        try:
+            result = subprocess.run(
+                command, check=False, capture_output=True, env=environment
+            )
+        except FileNotFoundError as exc:
+            raise TailscaleError("docker is required") from exc
+    if result.returncode:
+        detail = (result.stderr or result.stdout).decode(errors="replace").strip()
+        raise TailscaleError(detail or "could not build the gateway image")
 
 
 def _bootstrap_tailscale_gateway(suffix: str, auth_key: str) -> tuple[str, ...]:
