@@ -1300,8 +1300,12 @@ def _run_proxy(
         if action == "down":
             # `bootstrap` sits behind a profile, so a plain `down` leaves its
             # exited container behind and Docker still reports the project as
-            # existing.
+            # existing. Orphans need naming too: the overlays are only passed
+            # when they apply, so a service that left the file set — the
+            # gateway, when saved tailnet state is gone — would survive the
+            # teardown and hold the project network open.
             command[-1:-1] = ["--profile", "bootstrap"]
+            command.append("--remove-orphans")
         if action == "up":
             command.extend(
                 ["--detach", "--wait", "--wait-timeout", "60", "--remove-orphans"]

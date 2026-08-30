@@ -62,6 +62,10 @@ uses [Semantic Versioning](https://semver.org/).
   could only ever be a cache hit; skipping it takes a reconcile of a running
   hub from about 2.6 seconds to 1.4. `localghost --rebuild` forces the build
   after editing the bundled Traefik plugin or gateway sources.
+- `localghost down` now removes containers the current compose files no longer
+  describe, matching how application teardown already worked. A lost tailnet
+  state file previously left the gateway running and, with it attached, the
+  hub network could not be removed either.
 - Trust setup now explains before installation that sudo may be requested for
   the system trust store.
 - Tailscale enable now offers automatic tailnet trust only when localhost trust

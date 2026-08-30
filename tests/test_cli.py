@@ -200,7 +200,7 @@ def test_down_stops_the_bundled_proxy(monkeypatch) -> None:
     result = runner.invoke(cli, ["down"])
 
     assert result.exit_code == 0, result.output
-    assert commands[0][0][-1] == "down"
+    assert "down" in commands[0][0]
     assert commands[0][0][:4] == ["docker", "compose", "--project-name", "localghost"]
     assert "Hub stopped and removed." in result.output
 
@@ -223,8 +223,32 @@ def test_down_also_removes_the_profiled_bootstrap_container(monkeypatch) -> None
     result = CliRunner().invoke(cli, ["down"])
 
     assert result.exit_code == 0, result.output
-    down = next(item for item in commands if item[-1] == "down")
+    down = next(item for item in commands if "down" in item)
     assert "--profile" in down and "bootstrap" in down
+
+
+def test_down_removes_containers_the_current_files_no_longer_describe(
+    monkeypatch,
+) -> None:
+    """`down` must clear services that left the compose file set.
+
+    The tailnet overlay is only passed while saved state names a suffix, so a
+    lost or unreadable state file would otherwise leave the gateway running —
+    and Docker cannot remove the project network while it stays attached.
+    """
+    commands = []
+
+    def run(command, **kwargs):
+        commands.append(command)
+        return CompletedProcess(command, 0)
+
+    monkeypatch.setattr("localghost.cli.subprocess.run", run)
+
+    result = CliRunner().invoke(cli, ["down"])
+
+    assert result.exit_code == 0, result.output
+    down = next(item for item in commands if "down" in item)
+    assert "--remove-orphans" in down
 
 
 def test_trust_configures_a_stopped_proxy_without_starting_it(
