@@ -161,6 +161,41 @@ def test_bootstrap_runs_a_prebuilt_binary_from_the_hub_image() -> None:
     }
 
 
+def test_bootstrap_prints_only_the_public_root(monkeypatch, tmp_path) -> None:
+    """The real invocation must not mix build output into the certificate."""
+    import localghost.cli as cli_module
+    from localghost.trust import PublicCertificate
+
+    project = "localghost-contract-test"
+    monkeypatch.setattr(cli_module, "PROJECT_NAME", project)
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    try:
+        certificate = cli_module._bootstrap_public_root()
+    finally:
+        subprocess.run(
+            [
+                "docker",
+                "compose",
+                "--project-name",
+                project,
+                "--file",
+                str(ROOT / "src" / "localghost" / "proxy_compose.yaml"),
+                "--file",
+                str(ROOT / "src" / "localghost" / "proxy_compose_https.yaml"),
+                "--profile",
+                "bootstrap",
+                "down",
+                "--volumes",
+            ],
+            check=False,
+            capture_output=True,
+            env={**os.environ, "LOCALGHOST_IMAGE_TAG": f"v{LOCALGHOST_VERSION}"},
+        )
+
+    assert PublicCertificate.parse(certificate.pem).pem == certificate.pem
+    assert (tmp_path / "rootCA.pem").read_bytes() == certificate.pem
+
+
 def test_hub_image_ships_a_working_bootstrap_binary(tmp_path) -> None:
     context = ROOT / "src" / "localghost"
     tag = "localghost-traefik:contract-test"

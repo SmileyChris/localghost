@@ -119,6 +119,7 @@ from .trust import MkcertInstaller, PublicCertificate, TrustError, ZenNssInstall
 LOCALGHOST_VERSION = importlib.metadata.version("localghost")
 TRAEFIK_IMAGE = f"localghost-traefik:v{LOCALGHOST_VERSION}"
 GATEWAY_IMAGE = f"localghost-tailscale-gateway:v{LOCALGHOST_VERSION}"
+PROJECT_NAME = "localghost"
 SAVE_TYPES = (*RUN_TYPES, "dockerfile")
 
 
@@ -1283,7 +1284,7 @@ def _run_proxy(
             "docker",
             "compose",
             "--project-name",
-            "localghost",
+            PROJECT_NAME,
             "--file",
             str(compose_file),
             action,
@@ -1345,7 +1346,15 @@ def _bootstrap_tailnet_root(suffix: str) -> PublicCertificate:
             resource_root / "proxy_compose_https.yaml",
             resource_root / "proxy_compose_tailscale.yaml",
         ]
-        command = ["docker", "compose", "--project-name", "localghost"]
+        # Build progress goes to stdout, which must carry only the public root.
+        command = [
+            "docker",
+            "compose",
+            "--progress",
+            "quiet",
+            "--project-name",
+            PROJECT_NAME,
+        ]
         for compose_file in files:
             command.extend(["--file", str(compose_file)])
         command.extend(
@@ -1385,7 +1394,7 @@ def _bootstrap_tailscale_gateway(suffix: str, auth_key: str) -> tuple[str, ...]:
             "docker",
             "compose",
             "--project-name",
-            "localghost",
+            PROJECT_NAME,
             "--file",
             str(resource_root / "proxy_compose.yaml"),
             "--file",
@@ -1553,8 +1562,11 @@ def _bootstrap_public_root() -> PublicCertificate:
         command = [
             "docker",
             "compose",
+            # Build progress goes to stdout, which must carry only the root.
+            "--progress",
+            "quiet",
             "--project-name",
-            "localghost",
+            PROJECT_NAME,
             "--file",
             str(resource_root / "proxy_compose.yaml"),
             "--file",
