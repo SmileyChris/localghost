@@ -14,6 +14,14 @@ idempotent: running it again reconciles the existing `localghost` Compose
 project rather than creating another hub, and waits for Traefik to become
 healthy.
 
+Hub images are tagged with the CLI's version, so a reconcile reuses the images
+it already has rather than re-checking their build. After editing the bundled
+Traefik plugin or gateway sources, ask for them to be rebuilt:
+
+```sh
+uvx localghost --rebuild
+```
+
 To inspect the current hub state and routes without starting or reconciling
 it, run:
 

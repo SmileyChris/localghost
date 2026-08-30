@@ -57,6 +57,11 @@ uses [Semantic Versioning](https://semver.org/).
   image instead of `go run` in a throwaway toolchain container, cutting a
   repeat `localghost trust` from about nine seconds to under two and removing
   the Go image download from a first-time setup.
+- Starting or reconciling the hub no longer re-checks the build of images that
+  already exist. Hub images are tagged with the CLI's version, so the check
+  could only ever be a cache hit; skipping it takes a reconcile of a running
+  hub from about 2.6 seconds to 1.4. `localghost --rebuild` forces the build
+  after editing the bundled Traefik plugin or gateway sources.
 - Trust setup now explains before installation that sudo may be requested for
   the system trust store.
 - Tailscale enable now offers automatic tailnet trust only when localhost trust

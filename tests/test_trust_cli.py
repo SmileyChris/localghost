@@ -83,8 +83,87 @@ def test_default_command_uses_configured_https_and_custom_port(
 
     assert result.exit_code == 0, result.output
     assert "https://traefik.localhost:8443" in result.output
-    assert any("proxy_compose_https.yaml" in item for item in commands[1])
-    assert "--force-recreate" not in commands[1]
+    compose = compose_command(commands)
+    assert any("proxy_compose_https.yaml" in item for item in compose)
+    assert "--force-recreate" not in compose
+
+
+def compose_command(commands: list[list[str]]) -> list[str]:
+    return next(command for command in commands if command[:2] == ["docker", "compose"])
+
+
+def start_recorder(monkeypatch, tmp_path, *, images_present: bool):
+    """Record the commands a plain `localghost` run issues."""
+    (tmp_path / "rootCA.pem").write_bytes(CERTIFICATE_PEM)
+    (tmp_path / "https-enabled").touch()
+    commands: list[list[str]] = []
+    monkeypatch.setattr(cli_module, "proxy_is_running", lambda: True)
+    monkeypatch.setattr(cli_module, "active_routes", lambda: [])
+
+    def run(command, **kwargs):
+        commands.append(command)
+        code = 0 if images_present or command[:2] != ["docker", "image"] else 1
+        return CompletedProcess(command, code, "", "")
+
+    monkeypatch.setattr(cli_module.subprocess, "run", run)
+    return commands
+
+
+def test_start_does_not_rebuild_images_that_already_exist(
+    monkeypatch, tmp_path
+) -> None:
+    commands = start_recorder(monkeypatch, tmp_path, images_present=True)
+
+    result = CliRunner().invoke(cli, env={"LOCALGHOST_STATE_DIR": str(tmp_path)})
+
+    assert result.exit_code == 0, result.output
+    # Hub images are tagged with the release version, so re-checking the build
+    # of an image that already exists is pure latency.
+    assert "--no-build" in compose_command(commands)
+
+
+def test_start_builds_when_a_hub_image_is_missing(monkeypatch, tmp_path) -> None:
+    commands = start_recorder(monkeypatch, tmp_path, images_present=False)
+
+    result = CliRunner().invoke(cli, env={"LOCALGHOST_STATE_DIR": str(tmp_path)})
+
+    assert result.exit_code == 0, result.output
+    assert "--no-build" not in compose_command(commands)
+
+
+def test_rebuild_forces_a_build_of_existing_images(monkeypatch, tmp_path) -> None:
+    commands = start_recorder(monkeypatch, tmp_path, images_present=True)
+
+    result = CliRunner().invoke(
+        cli, ["--rebuild"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "--no-build" not in compose_command(commands)
+
+
+def test_start_checks_the_gateway_image_while_tailnet_hosting_is_on(
+    monkeypatch, tmp_path
+) -> None:
+    state = TailscaleState(
+        tailnet="example.com",
+        suffix="work",
+        gateway_ips=("100.64.0.10",),
+        previous_split_dns={},
+    )
+    commands = start_recorder(monkeypatch, tmp_path, images_present=True)
+    monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: state)
+
+    result = CliRunner().invoke(cli, env={"LOCALGHOST_STATE_DIR": str(tmp_path)})
+
+    assert result.exit_code == 0, result.output
+    inspected = [
+        command for command in commands if command[:3] == ["docker", "image", "inspect"]
+    ]
+    assert any(
+        f"localghost-tailscale-gateway:v{cli_module.LOCALGHOST_VERSION}" in command
+        for command in inspected
+    )
 
 
 def test_interactive_start_can_enable_https(monkeypatch) -> None:

@@ -41,7 +41,9 @@ def test_default_command_starts_the_bundled_proxy(monkeypatch) -> None:
         ["docker", "image", "inspect", f"localghost-traefik:v{LOCALGHOST_VERSION}"],
         {"check": False, "capture_output": True},
     )
-    command, kwargs = commands[1]
+    command, kwargs = next(
+        entry for entry in commands if entry[0][:2] == ["docker", "compose"]
+    )
     assert command[:5] == [
         "docker",
         "compose",
@@ -59,6 +61,7 @@ def test_default_command_starts_the_bundled_proxy(monkeypatch) -> None:
         "--wait-timeout",
         "60",
         "--remove-orphans",
+        "--no-build",
     ]
     assert kwargs["check"] is False
     assert kwargs["capture_output"] is True
@@ -284,8 +287,11 @@ def test_trust_restarts_a_running_proxy_when_https_becomes_configured(
     )
 
     assert result.exit_code == 0, result.output
-    assert any("proxy_compose_https.yaml" in item for item in commands[0])
-    assert "--force-recreate" not in commands[0]
+    compose = next(
+        command for command in commands if command[:2] == ["docker", "compose"]
+    )
+    assert any("proxy_compose_https.yaml" in item for item in compose)
+    assert "--force-recreate" not in compose
 
 
 def test_trust_remove_disables_https_before_mutating_managed_stores(

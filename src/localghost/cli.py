@@ -118,6 +118,7 @@ from .trust import MkcertInstaller, PublicCertificate, TrustError, ZenNssInstall
 
 LOCALGHOST_VERSION = importlib.metadata.version("localghost")
 TRAEFIK_IMAGE = f"localghost-traefik:v{LOCALGHOST_VERSION}"
+GATEWAY_IMAGE = f"localghost-tailscale-gateway:v{LOCALGHOST_VERSION}"
 SAVE_TYPES = (*RUN_TYPES, "dockerfile")
 
 
@@ -145,8 +146,14 @@ class ResolvedApplication:
     is_flag=True,
     help="Report hub state without starting or changing anything.",
 )
+@click.option(
+    "rebuild",
+    "--rebuild",
+    is_flag=True,
+    help="Rebuild the hub images before starting, even when they exist.",
+)
 @click.pass_context
-def cli(ctx: click.Context, show_status: bool) -> None:
+def cli(ctx: click.Context, show_status: bool, rebuild: bool) -> None:
     """Give local applications friendly .localhost URLs."""
     if show_status:
         if ctx.invoked_subcommand is not None:
@@ -160,7 +167,12 @@ def cli(ctx: click.Context, show_status: bool) -> None:
         first_launch = not _managed_image_is_available()
         title(welcome=first_launch)
         https_enabled = _ensure_https_or_warn()
-        _run_proxy("up", already_running=was_running, https_enabled=https_enabled)
+        _run_proxy(
+            "up",
+            already_running=was_running,
+            https_enabled=https_enabled,
+            rebuild=rebuild,
+        )
         scheme = "https" if https_enabled else "http"
         port = _proxy_https_port() if https_enabled else _proxy_http_port()
         default_port = 443 if https_enabled else 80
@@ -1257,6 +1269,7 @@ def _run_proxy(
     already_running: bool = False,
     https_enabled: bool = False,
     force_recreate: bool = False,
+    rebuild: bool = False,
 ) -> None:
     try:
         tailscale_state = load_tailscale_state()
@@ -1294,6 +1307,14 @@ def _run_proxy(
             )
             if force_recreate:
                 command.append("--force-recreate")
+            # Hub images are tagged with the release version, so re-checking
+            # their build every time costs about a second and can change
+            # nothing. `--rebuild` covers editing the bundled sources.
+            required = [TRAEFIK_IMAGE]
+            if tailscale_state is not None:
+                required.append(GATEWAY_IMAGE)
+            if not rebuild and _images_are_built(*required):
+                command.append("--no-build")
 
         verb = "Reconciling" if already_running else "Starting"
         if action == "down":
@@ -1431,9 +1452,14 @@ def _https_configured() -> bool:
 
 def _managed_image_is_available() -> bool:
     """Use Docker's image cache as the first-launch cue for interactive feedback."""
+    return _images_are_built(TRAEFIK_IMAGE)
+
+
+def _images_are_built(*names: str) -> bool:
+    """Report whether every named image already exists locally."""
     try:
         result = subprocess.run(
-            ["docker", "image", "inspect", TRAEFIK_IMAGE],
+            ["docker", "image", "inspect", *names],
             check=False,
             capture_output=True,
         )

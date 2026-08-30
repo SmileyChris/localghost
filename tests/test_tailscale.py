@@ -504,7 +504,9 @@ def test_run_proxy_adds_tailnet_overlay(monkeypatch) -> None:
 
     cli_module._run_proxy("up")
 
-    command, kwargs = commands[0]
+    command, kwargs = next(
+        entry for entry in commands if entry[0][:2] == ["docker", "compose"]
+    )
     assert "proxy_compose_https.yaml" in " ".join(command)
     assert "proxy_compose_tailscale.yaml" in " ".join(command)
     assert kwargs["env"]["LOCALGHOST_TAILSCALE_SUFFIX"] == "tail1234"
