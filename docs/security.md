@@ -135,15 +135,21 @@ The tailnet suffix has its own CA and signer volumes. Each participating client
 explicitly installs that public root with `localghost trust` while tailnet
 hosting is enabled.
 This grants the development hub authority for names under that suffix on the
-client; it should not be used as a general organizational DNS suffix.
+client, so a suffix naming a public TLD or reserved zone (`dev`, `com`, any
+two-letter country code, `internal`, …) is refused at validation — a root
+scoped to a real TLD could impersonate real websites on every client — and it
+should not double as a general organizational DNS suffix either.
 
 A tailnet root is itself name-constrained to its suffix, not only the online
 signer beneath it, so the anchor a colleague installs cannot vouch for any
-other name even if the offline root key is stolen. Roots created before this
-constraint existed keep working; they gain it only when the CA volumes are
-purged and the suffix is enabled again, which every client must then trust
-afresh. The `.localhost` root stays unconstrained, and is installed only on
-the machine that hosts it.
+other name even if the offline root key is stolen. The signer refuses to
+operate from an unconstrained root posing as a tailnet authority; only the
+`.localhost` authority accepts its legacy unconstrained roots, and that root
+is installed only on the machine that hosts it.
+
+Clients should pin the download: enable and `localghost tailscale status`
+print a `--fingerprint` trust command that installs the root only when it
+matches, which removes the residual trust in tailnet DNS configuration.
 
 Trusting a tailnet root replaces any earlier root for the same suffix: the
 superseded certificate is removed from this client's trust stores before the

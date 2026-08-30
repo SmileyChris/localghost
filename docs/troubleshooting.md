@@ -166,6 +166,32 @@ environment variables. A stored credential lives under the keyring service
 name `localghost-tailscale` and can be inspected or removed with the system's
 own keyring tools; `localghost tailscale disable` also deletes it.
 
+## The tailnet gateway is not ready
+
+When the hub starts but only `tailscale-gateway` fails its healthcheck —
+typically because the machine is offline or Tailscale is unreachable —
+`localghost` warns and continues with the local `.localhost` routes. The
+gateway container keeps retrying in the background; `localghost tailscale
+status` shows its progress under `Gateway health`. No action is needed once
+connectivity returns.
+
+## Split DNS already points at another address
+
+`localghost tailscale enable` refuses to replace an existing split-DNS entry
+for the chosen suffix, naming the addresses it found. Usually another machine
+is already hosting that suffix: pick a distinct `--suffix`, or pass
+`--takeover` to replace the mapping deliberately — the other machine's routes
+for that suffix stop resolving when you do.
+
+## Hub start fails after pruning Docker volumes
+
+Removing the `localghost-*-ca-*` volumes deletes the certificate signers that
+Traefik's providers require. A failed HTTPS start now re-runs the idempotent
+CA bootstraps once and retries automatically. If the offline root volume was
+among those removed, the recreated tailnet authority is a new identity and
+every client must run `localghost tailscale trust` again; the fingerprint in
+`localghost tailscale status` shows whether it changed.
+
 ## Terminal only scrolls part of the screen
 
 After a `localghost run` was killed outright — `kill -9`, a crashed terminal

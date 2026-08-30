@@ -88,8 +88,11 @@ real websites on every machine that trusts it.
 
 Enable performs four bounded operations:
 
-1. creates a single-use, ten-minute auth key;
-2. enrolls a persistent tagged `localghost-tail1234` userspace node;
+1. bootstraps the localhost and tailnet HTTPS authorities and builds the
+   gateway image;
+2. creates a single-use, ten-minute auth key — after the build, so a slow
+   first build cannot outlive it — and enrolls a persistent tagged
+   `localghost-tail1234` userspace node;
 3. adds [split DNS](https://tailscale.com/docs/reference/dns-in-tailscale) for
    `tail1234`, preserving the previous suffix mapping; and
 4. starts the gateway and suffix-specific HTTPS provider with the hub.
@@ -172,7 +175,12 @@ localghost tailscale disable
 Disabling deliberately does not delete the offline machine record. Remove the
 tagged `localghost-<suffix>` device from the Tailscale admin console after you
 have confirmed it is the expected node. Trust installed on other clients is
-also left in place and must be removed with those clients' trust-store tooling.
+also left in place; run `localghost trust --remove` on each to revoke it.
+
+While tailnet hosting is enabled, `localghost trust --remove` on the hosting
+machine removes local trust but the hub keeps serving HTTPS — tailnet TLS
+terminates on Traefik — so a full downgrade needs `localghost tailscale
+disable` first.
 
 ## Scope and limitations
 
