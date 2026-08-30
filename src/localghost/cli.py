@@ -883,6 +883,8 @@ def _run_proxy(
         try:
             environment = os.environ.copy()
             environment["LOCALGHOST_IMAGE_TAG"] = f"v{LOCALGHOST_VERSION}"
+            registry.registry_dir().mkdir(parents=True, exist_ok=True)
+            environment["LOCALGHOST_REGISTRY_DIR"] = str(registry.registry_dir())
             result = subprocess.run(
                 command, check=False, capture_output=True, text=True, env=environment
             )

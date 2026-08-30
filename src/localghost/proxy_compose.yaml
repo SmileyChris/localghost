@@ -18,6 +18,7 @@ services:
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
       - --providers.docker.network=localghost
+      - --experimental.localplugins.localghostFallback.modulename=github.com/SmileyChris/traefik-localghost-fallback
     healthcheck:
       test: [CMD, traefik, healthcheck, --ping]
       interval: 10s
@@ -28,6 +29,8 @@ services:
       - 127.0.0.1:${LOCALGHOST_HTTP_PORT:-80}:80
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Ghost pages: remembered projects, written by the CLI on run/save.
+      - ${LOCALGHOST_REGISTRY_DIR:-/tmp/localghost-registry}:/var/lib/localghost-registry:ro
     networks:
       - localghost
     labels:
@@ -40,6 +43,12 @@ services:
       - traefik.http.middlewares.localghost-dashboard-redirect.redirectregex.permanent=true
       - traefik.http.middlewares.localghost-dashboard-redirect.redirectregex.regex=^http://([^/]+)/?$
       - traefik.http.middlewares.localghost-dashboard-redirect.redirectregex.replacement=http://$${1}/dashboard/
+      - traefik.http.routers.localghost-fallback.entrypoints=web
+      - traefik.http.routers.localghost-fallback.rule=HostRegexp(`.+`)
+      - traefik.http.routers.localghost-fallback.priority=1
+      - traefik.http.routers.localghost-fallback.middlewares=localghost-fallback
+      - traefik.http.routers.localghost-fallback.service=noop@internal
+      - traefik.http.middlewares.localghost-fallback.plugin.localghostFallback.registryPath=/var/lib/localghost-registry
 
 networks:
   localghost:

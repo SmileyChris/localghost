@@ -38,6 +38,7 @@ services:
       - --providers.plugin.localghostCA.renewbefore=6h
       - --experimental.abortonpluginfailure=true
       - --experimental.localplugins.localghostCA.modulename=github.com/SmileyChris/traefik-localghost-ca
+      - --experimental.localplugins.localghostFallback.modulename=github.com/SmileyChris/traefik-localghost-fallback
     ports:
       - 127.0.0.1:${LOCALGHOST_HTTPS_PORT:-443}:443
     volumes:
@@ -51,6 +52,12 @@ services:
       - traefik.http.middlewares.localghost-dashboard-secure-redirect.redirectregex.permanent=true
       - traefik.http.middlewares.localghost-dashboard-secure-redirect.redirectregex.regex=^https://([^/]+)/?$
       - traefik.http.middlewares.localghost-dashboard-secure-redirect.redirectregex.replacement=https://$${1}/dashboard/
+      - traefik.http.routers.localghost-fallback-secure.entrypoints=websecure
+      - traefik.http.routers.localghost-fallback-secure.rule=HostRegexp(`.+`)
+      - traefik.http.routers.localghost-fallback-secure.priority=1
+      - traefik.http.routers.localghost-fallback-secure.middlewares=localghost-fallback
+      - traefik.http.routers.localghost-fallback-secure.service=noop@internal
+      - traefik.http.routers.localghost-fallback-secure.tls=true
 
 volumes:
   localghost-ca-root:
