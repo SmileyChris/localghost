@@ -134,6 +134,64 @@ def test_https_proxy_adds_loopback_dashboard_with_secure_redirect() -> None:
     assert profiled_model["services"]["bootstrap"]["profiles"] == ["bootstrap"]
 
 
+def test_bootstrap_runs_a_prebuilt_binary_from_the_hub_image() -> None:
+    model = compose_model(
+        ROOT / "src" / "localghost" / "proxy_compose.yaml",
+        ROOT / "src" / "localghost" / "proxy_compose_https.yaml",
+        profiles=("bootstrap",),
+        LOCALGHOST_HTTP_PORT="18081",
+        LOCALGHOST_HTTPS_PORT="18443",
+        LOCALGHOST_IMAGE_TAG=f"v{LOCALGHOST_VERSION}",
+    )
+
+    bootstrap = model["services"]["bootstrap"]
+    # The authority is created by a binary compiled into the hub image, so no
+    # Go toolchain is pulled or run to trust a hub.
+    assert bootstrap["image"] == f"localghost-traefik:v{LOCALGHOST_VERSION}"
+    assert bootstrap["pull_policy"] == "build"
+    assert bootstrap["build"] == {
+        "context": str(ROOT / "src" / "localghost"),
+        "dockerfile": "Dockerfile",
+    }
+    assert bootstrap["entrypoint"] == ["/usr/local/bin/localghost-bootstrap"]
+    assert bootstrap["network_mode"] == "none"
+    assert {mount["target"] for mount in bootstrap["volumes"]} == {
+        "/var/lib/localghost-root",
+        "/var/lib/localghost-ca",
+    }
+
+
+def test_hub_image_ships_a_working_bootstrap_binary(tmp_path) -> None:
+    context = ROOT / "src" / "localghost"
+    tag = "localghost-traefik:contract-test"
+    subprocess.run(
+        ["docker", "build", "--tag", tag, "--file", str(context / "Dockerfile"), "."],
+        check=True,
+        capture_output=True,
+        cwd=context,
+    )
+    result = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--entrypoint",
+            "/usr/local/bin/localghost-bootstrap",
+            tag,
+            "--root-path=/tmp/root",
+            "--signer-path=/tmp/signer",
+            "--print-root",
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    assert result.stdout.startswith(b"-----BEGIN CERTIFICATE-----")
+    assert b"PRIVATE KEY" not in result.stdout
+
+
 def test_tailscale_overlay_adds_unpublished_gateway_and_suffix_provider() -> None:
     model = compose_model(
         ROOT / "src" / "localghost" / "proxy_compose.yaml",

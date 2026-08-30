@@ -2,18 +2,22 @@
 services:
   bootstrap:
     # This is an explicit one-shot job invoked by `docker compose run`; it is
-    # not part of the long-running proxy's `up --wait` service set.
+    # not part of the long-running proxy's `up --wait` service set. It runs the
+    # binary compiled into the hub image, so trusting a hub neither pulls a Go
+    # toolchain nor recompiles the authority on every invocation.
     profiles: [bootstrap]
-    image: golang:1.24.6-alpine
-    working_dir: /src
-    entrypoint: [go, run, ./cmd/bootstrap]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: localghost-traefik:${LOCALGHOST_IMAGE_TAG}
+    pull_policy: build
+    entrypoint: [/usr/local/bin/localghost-bootstrap]
     command:
       - --root-path=/var/lib/localghost-root
       - --signer-path=/var/lib/localghost-ca
     network_mode: none
     restart: "no"
     volumes:
-      - ./traefik_plugin/src/github.com/SmileyChris/traefik-localghost-ca:/src:ro
       - localghost-ca-root:/var/lib/localghost-root
       - localghost-ca-signer:/var/lib/localghost-ca
 

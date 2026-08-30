@@ -526,6 +526,27 @@ def test_bootstrap_writes_public_root_atomically(monkeypatch, tmp_path) -> None:
     assert command[-4:] == ["run", "--rm", "bootstrap", "--print-root"]
 
 
+def test_bootstrap_names_the_versioned_hub_image(monkeypatch, tmp_path) -> None:
+    captured = {}
+
+    def run(arguments, **kwargs):
+        captured["env"] = kwargs.get("env")
+        return CompletedProcess(arguments, 0, CERTIFICATE_PEM, b"")
+
+    monkeypatch.setattr("localghost.cli.subprocess.run", run)
+    monkeypatch.setattr(
+        "localghost.cli._proxy_resource_directory", lambda: nullcontext(tmp_path)
+    )
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path / "state"))
+
+    cli_module._bootstrap_public_root()
+
+    # The bootstrap job runs the hub image, so its tag has to be resolvable.
+    assert captured["env"]["LOCALGHOST_IMAGE_TAG"] == (
+        f"v{cli_module.LOCALGHOST_VERSION}"
+    )
+
+
 @pytest.mark.parametrize(
     ("result", "message"),
     [

@@ -53,6 +53,10 @@ uses [Semantic Versioning](https://semver.org/).
   against the downloaded root before anything is installed, so a client can
   pin the value shown by `localghost trust --status` on the hosting machine
   instead of trusting the tailnet path alone.
+- The certificate-authority bootstrap now runs a binary compiled into the hub
+  image instead of `go run` in a throwaway toolchain container, cutting a
+  repeat `localghost trust` from about nine seconds to under two and removing
+  the Go image download from a first-time setup.
 - Trust setup now explains before installation that sudo may be requested for
   the system trust store.
 - Tailscale enable now offers automatic tailnet trust only when localhost trust

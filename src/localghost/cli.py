@@ -1538,8 +1538,12 @@ def _bootstrap_public_root() -> PublicCertificate:
             "bootstrap",
             "--print-root",
         ]
+        environment = os.environ.copy()
+        environment["LOCALGHOST_IMAGE_TAG"] = f"v{LOCALGHOST_VERSION}"
         try:
-            result = subprocess.run(command, check=False, capture_output=True)
+            result = subprocess.run(
+                command, check=False, capture_output=True, env=environment
+            )
         except FileNotFoundError as exc:
             raise click.ClickException("docker is required") from exc
     if result.returncode:
