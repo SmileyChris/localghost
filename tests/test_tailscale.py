@@ -1245,6 +1245,23 @@ def test_bootstrap_gateway_passes_key_only_on_stdin(monkeypatch) -> None:
     assert kwargs["input"] == b"secret-key"
 
 
+def test_bootstrap_gateway_parses_only_labelled_addresses(monkeypatch) -> None:
+    monkeypatch.setattr(
+        cli_module.subprocess,
+        "run",
+        lambda command, **kwargs: CompletedProcess(
+            command,
+            0,
+            b"dialing 9.9.9.9 for control\n"
+            b"IPv4=100.64.0.1\n"
+            b"IPv6=invalid\n",
+            b"",
+        ),
+    )
+    addresses = cli_module._bootstrap_tailscale_gateway("tail1234", "key")
+    assert addresses == ("100.64.0.1",)
+
+
 def test_bootstrap_helpers_report_compose_failures(monkeypatch) -> None:
     monkeypatch.setattr(
         cli_module.subprocess,

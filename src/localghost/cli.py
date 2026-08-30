@@ -1677,8 +1677,12 @@ def _bootstrap_tailscale_gateway(suffix: str, auth_key: str) -> tuple[str, ...]:
         detail = (result.stderr or result.stdout).decode(errors="replace").strip()
         raise TailscaleError(detail or "could not enroll the Tailscale gateway")
     addresses = []
-    for value in result.stdout.decode(errors="replace").split():
-        value = value.rsplit("=", 1)[-1]
+    # tsnet logging can mention arbitrary addresses, so only the bootstrap
+    # binary's own IPv4=/IPv6= lines count.
+    for line in result.stdout.decode(errors="replace").splitlines():
+        label, separator, value = line.strip().partition("=")
+        if not separator or label not in {"IPv4", "IPv6"}:
+            continue
         try:
             addresses.append(str(ipaddress.ip_address(value)))
         except ValueError:
