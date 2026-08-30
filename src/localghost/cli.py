@@ -19,7 +19,7 @@ from pathlib import Path
 
 import click
 
-from . import statusbar
+from . import registry, statusbar
 from .compose import resolve_compose, routing_problem
 from .config import (
     CONFIG_NAME,
@@ -164,6 +164,24 @@ def down() -> None:
     title()
     _run_proxy("down", https_enabled=_https_configured())
     success("Hub stopped and removed.")
+
+
+@cli.command()
+@click.argument("name", required=False)
+@click.option("--all", "forget_everything", is_flag=True, help="Forget every project.")
+def forget(name: str | None, forget_everything: bool) -> None:
+    """Drop a project's ghost page entry."""
+    if forget_everything:
+        if name is not None:
+            raise click.UsageError("NAME and --all cannot both be given")
+        removed = registry.forget_all()
+        success(f"Forgot {removed} project(s).")
+        return
+    if name is None:
+        raise click.UsageError("provide NAME or --all")
+    if not registry.forget(name):
+        raise click.ClickException(f"no ghost page entry for '{name}'")
+    success(f"Forgot {name}.")
 
 
 @cli.group(invoke_without_command=True)
@@ -472,6 +490,7 @@ def run(
         if dry_run:
             compose_dry_run(project=project, url=_proxy_origin(project))
             return
+        _record_registry(resolved)
         _run_compose(
             resolved.root,
             resolved.name,
@@ -519,6 +538,7 @@ def run(
     if django_warnings:
         warning("Django settings", django_warnings)
     _print_run_plan(plan, dry_run=False, detach=detach)
+    _record_registry(resolved)
     if detach:
         _detach_host(plan, resolved.cwd)
         return
@@ -878,6 +898,18 @@ def _run_proxy(
 
 def _state_directory() -> Path:
     return state_directory()
+
+
+def _record_registry(resolved: ResolvedApplication) -> None:
+    """Remember this project so the hub can serve its ghost page later."""
+    if resolved.selected_type == "compose":
+        registry.record(
+            resolved.name or _local_project_name(resolved.root),
+            resolved.root,
+            "compose",
+        )
+    elif resolved.plan is not None:
+        registry.record(resolved.plan.name, resolved.cwd, resolved.plan.type)
 
 
 def _public_root_path() -> Path:
@@ -1250,6 +1282,8 @@ def save(
         dry_run=dry_run,
         interactive=interactive,
     )
+    if not dry_run:
+        _record_registry(resolved)
 
 
 def _save_compose_project(

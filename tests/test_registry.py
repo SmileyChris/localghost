@@ -1,6 +1,9 @@
 import json
 
+from click.testing import CliRunner
+
 from localghost import registry
+from localghost.cli import cli
 
 
 def test_record_writes_entry_file(tmp_path, monkeypatch):
@@ -58,3 +61,34 @@ def test_record_warns_instead_of_raising(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
     (tmp_path / "registry").write_text("a file, not a directory")
     registry.record("blog", tmp_path, "django")  # must not raise
+
+
+def test_forget_command_removes_entry(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    registry.record("blog", tmp_path, "django")
+    result = CliRunner().invoke(cli, ["forget", "blog"])
+    assert result.exit_code == 0
+    assert "blog" in result.output
+    assert registry.entries() == []
+
+
+def test_forget_unknown_name_fails(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    result = CliRunner().invoke(cli, ["forget", "nothing"])
+    assert result.exit_code != 0
+    assert "no ghost page entry" in result.output
+
+
+def test_forget_all_command(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    registry.record("a", tmp_path, "django")
+    registry.record("b", tmp_path, "vite")
+    result = CliRunner().invoke(cli, ["forget", "--all"])
+    assert result.exit_code == 0
+    assert registry.entries() == []
+
+
+def test_forget_requires_name_or_all(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    result = CliRunner().invoke(cli, ["forget"])
+    assert result.exit_code != 0
