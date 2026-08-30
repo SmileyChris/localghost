@@ -454,9 +454,22 @@ def _tailscale_status() -> None:
             ("Gateway", ", ".join(state.gateway_ips)),
             ("Gateway health", _tailscale_gateway_health()),
             ("Device tag", state.tag),
-        ],
+        ]
+        + (
+            [("Localhost-only routers", ", ".join(unmirrored))]
+            if (unmirrored := _unmirrored_router_names())
+            else []
+        ),
         title="Tailscale status",
     )
+    root_path = _tailnet_root_path(state.suffix)
+    if root_path.is_file():
+        with suppress(TrustError):
+            certificate = PublicCertificate.parse(root_path.read_bytes())
+            action(
+                "Trust on other tailnet machines",
+                _share_command(state.suffix, certificate),
+            )
 
 
 def _tailscale_gateway_health() -> str:
@@ -489,6 +502,48 @@ def _tailscale_gateway_health() -> str:
     return "running"
 
 
+_UNMIRRORED = re.compile(r"router (\S+) cannot be mirrored")
+
+
+def _unmirrored_router_names() -> list[str]:
+    """Router names the tailnet CA provider reported it could not mirror.
+
+    The provider can only log the routers it skips; reading Traefik's recent
+    logs is the one place that turns "works on localhost, 404 on the tailnet"
+    into a visible status row.
+    """
+    identify = [
+        "docker",
+        "ps",
+        "--filter",
+        "label=com.docker.compose.project=localghost",
+        "--filter",
+        "label=com.docker.compose.service=traefik",
+        "--format",
+        "{{.ID}}",
+    ]
+    try:
+        result = subprocess.run(identify, check=False, capture_output=True, text=True)
+    except FileNotFoundError:
+        return []
+    container = result.stdout.strip().splitlines()[0:1] if not result.returncode else []
+    if not container:
+        return []
+    logs = subprocess.run(
+        ["docker", "logs", "--tail", "500", container[0]],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if logs.returncode:
+        return []
+    names: list[str] = []
+    for match in _UNMIRRORED.finditer(logs.stderr + logs.stdout):
+        if match.group(1) not in names:
+            names.append(match.group(1))
+    return names
+
+
 @tailscale.command("enable")
 @click.option(
     "tailnet",
@@ -499,6 +554,12 @@ def _tailscale_gateway_health() -> str:
 )
 @click.option("suffix", "--suffix", help="One-label route suffix, such as tail1234.")
 @click.option("tag", "--tag", default="tag:localghost", show_default=True)
+@click.option(
+    "takeover",
+    "--takeover",
+    is_flag=True,
+    help="Replace an existing split-DNS mapping for the suffix.",
+)
 @click.option("client_id", "--client-id", envvar="TAILSCALE_CLIENT_ID")
 @click.option(
     "client_secret",
@@ -509,6 +570,7 @@ def tailscale_enable(
     tailnet: str,
     suffix: str | None,
     tag: str,
+    takeover: bool,
     client_id: str | None,
     client_secret: str | None,
 ) -> None:
@@ -541,12 +603,23 @@ def tailscale_enable(
         auth_key = api.create_auth_key(tailnet, tag)
         info("Reading the existing split-DNS configuration…")
         previous = api.split_dns(tailnet)
+        active = previous.get(chosen_suffix)
+        if active and not takeover:
+            raise click.ClickException(
+                f"split DNS for .{chosen_suffix} already points at "
+                f"{', '.join(active)} — another machine may be hosting this "
+                "suffix. Choose a different --suffix, or pass --takeover to "
+                "replace the mapping."
+            )
         # Tailnet TLS terminates on Traefik's websecure entrypoint. Bootstrap
         # its localhost signer as well, but do not install localhost trust as
         # an implicit side effect of enabling a remote route.
         info("Preparing the localhost and tailnet HTTPS authorities…")
         _bootstrap_public_root()
-        _bootstrap_tailnet_root(chosen_suffix)
+        certificate = _bootstrap_tailnet_root(chosen_suffix)
+        # Keep the tailnet root beside the state so `tailscale status` can
+        # repeat the share command without a running gateway.
+        _write_public_root(_tailnet_root_path(chosen_suffix), certificate.pem)
         info(f"Enrolling localghost-{chosen_suffix} in the tailnet…")
         gateway_ips = _bootstrap_tailscale_gateway(chosen_suffix, auth_key)
         state = TailscaleState(
@@ -557,10 +630,14 @@ def tailscale_enable(
             tag=tag,
         )
         save_tailscale_state(state)
-        info(f"Routing *.{chosen_suffix} DNS to the gateway…")
-        api.update_split_dns(tailnet, {chosen_suffix: list(gateway_ips)})
-        info("Starting the mirrored localhost and tailnet routes…")
-        _run_proxy("up", https_enabled=True, force_recreate=True)
+        try:
+            info(f"Routing *.{chosen_suffix} DNS to the gateway…")
+            api.update_split_dns(tailnet, {chosen_suffix: list(gateway_ips)})
+            info("Starting the mirrored localhost and tailnet routes…")
+            _run_proxy("up", https_enabled=True, force_recreate=True)
+        except Exception:
+            _rollback_enable(api, tailnet, chosen_suffix, previous)
+            raise
     except (TailscaleError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     if not store_tailscale_credential(client_id, client_secret):
@@ -569,6 +646,10 @@ def tailscale_enable(
             ["no usable system keyring; disable will ask for the credential again"],
         )
     success(f"Tailnet routes are enabled at https://<project>.{chosen_suffix}.")
+    action(
+        "Trust on other tailnet machines",
+        _share_command(chosen_suffix, certificate),
+    )
     if localhost_trusted:
         info("Installing the tailnet HTTPS root (sudo may be requested)…")
         try:
@@ -641,6 +722,10 @@ def tailscale_disable(client_id: str | None, client_secret: str | None) -> None:
     except TailscaleError as exc:
         raise click.ClickException(str(exc)) from exc
     success("Tailnet DNS was restored and the local gateway was removed.")
+    info(
+        f"Machines that trusted the .{state.suffix} root still trust it; run "
+        "`localghost trust --remove` on each to revoke."
+    )
     info("Remove the offline tagged localghost device in the Tailscale admin console.")
 
 
@@ -662,6 +747,35 @@ def tailscale_trust(suffix: str | None, fingerprint: str | None) -> None:
             raise click.ClickException("tailnet hosting is not enabled")
         suffix = state.suffix
     _install_tailnet_trust(suffix, expected_fingerprint=fingerprint)
+
+
+def _share_command(suffix: str, certificate: PublicCertificate) -> str:
+    """The pinned trust command another tailnet machine can paste."""
+    return (
+        f"localghost tailscale trust {suffix} "
+        f"--fingerprint {certificate.fingerprint}"
+    )
+
+
+def _rollback_enable(
+    api: TailscaleAPI, tailnet: str, suffix: str, previous: dict[str, list[str]]
+) -> None:
+    """Return to the pre-enable state after a late enable failure.
+
+    The suffix's split-DNS entry goes back to its previous value and the
+    saved state is removed so `enable` can simply be run again. The enrolled
+    gateway device stays: retrying reuses its persisted node state, and
+    giving up only needs the admin console.
+    """
+    try:
+        api.update_split_dns(tailnet, {suffix: previous.get(suffix)})
+    except TailscaleError as exc:
+        warning("Tailnet DNS was not restored", [str(exc)])
+    remove_tailscale_state()
+    warning(
+        "Enable failed and was rolled back",
+        [f"run `localghost tailscale enable` again to retry .{suffix}"],
+    )
 
 
 def _tailnet_root_path(suffix: str) -> Path:
@@ -1271,6 +1385,7 @@ def _run_proxy(
     https_enabled: bool = False,
     force_recreate: bool = False,
     rebuild: bool = False,
+    repair: bool = True,
 ) -> None:
     try:
         tailscale_state = load_tailscale_state()
@@ -1337,10 +1452,44 @@ def _run_proxy(
             raise click.ClickException("docker is required") from exc
 
     if result.returncode:
+        if (
+            action == "up"
+            and repair
+            and https_enabled
+            and _repair_authorities(tailscale_state)
+        ):
+            _run_proxy(
+                action,
+                already_running=already_running,
+                https_enabled=https_enabled,
+                force_recreate=force_recreate,
+                rebuild=rebuild,
+                repair=False,
+            )
+            return
         detail = (result.stderr or "").strip() or (result.stdout or "").strip()
         if detail:
             warning("Hub command failed", [detail])
         raise click.exceptions.Exit(result.returncode)
+
+
+def _repair_authorities(tailscale_state: TailscaleState | None) -> bool:
+    """Re-run the idempotent CA bootstraps after a failed HTTPS start.
+
+    A pruned or half-created signer volume aborts Traefik's CA plugins, and
+    nothing else recreates the material outside `trust` and `enable`.
+    Bootstrap validates a healthy authority untouched, so retrying is safe.
+    Returns False when repair itself fails so the original failure is the
+    one reported.
+    """
+    info("Hub start failed; repairing the certificate authorities…")
+    try:
+        _bootstrap_public_root()
+        if tailscale_state is not None:
+            _bootstrap_tailnet_root(tailscale_state.suffix)
+    except (TailscaleError, click.ClickException):
+        return False
+    return True
 
 
 def _bootstrap_tailnet_root(suffix: str) -> PublicCertificate:

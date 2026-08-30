@@ -64,7 +64,10 @@ def action(
             )
         )
         return
-    console.print(f"{label}: {command}{''.join(text for text, _ in detail_parts)}")
+    console.print(
+        f"{label}: {command}{''.join(text for text, _ in detail_parts)}",
+        soft_wrap=True,
+    )
 
 
 def details(
@@ -128,7 +131,7 @@ def warning(title: str, messages: Iterable[str]) -> None:
         _console(True).print(Panel(body, title=title, border_style="yellow"))
         return
     for message in items:
-        _console(True).print(f"Warning: {message}")
+        _console(True).print(f"Warning: {title}: {message}", soft_wrap=True)
 
 
 def _labeled_block(rows: list[tuple[str, str]], *, title: str, err: bool) -> None:
@@ -213,7 +216,7 @@ def _message(message: str, color: str, *, err: bool, symbol: str = "•") -> Non
     if _rich_terminal(err):
         console.print(Text.assemble((f"{symbol} ", color), message))
     else:
-        console.print(message)
+        console.print(message, soft_wrap=True)
 
 
 def _console(err: bool) -> Console:

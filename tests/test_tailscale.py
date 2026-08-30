@@ -5,6 +5,7 @@ from subprocess import CompletedProcess
 from types import SimpleNamespace
 from urllib.error import HTTPError, URLError
 
+import click
 import pytest
 from click.testing import CliRunner
 from keyring.errors import KeyringError
@@ -73,6 +74,68 @@ def test_detect_suffix_uses_short_search_domain(monkeypatch) -> None:
     assert detect_suffix() == "tail1234"
 
 
+def test_detect_suffix_survives_null_search_domains(monkeypatch) -> None:
+    monkeypatch.setattr(
+        tailscale_module.subprocess,
+        "run",
+        lambda *args, **kwargs: CompletedProcess(
+            args[0],
+            0,
+            json.dumps(
+                {
+                    "SearchDomains": None,
+                    "CurrentTailnet": {"MagicDNSSuffix": "taildc3ac3.ts.net"},
+                }
+            ),
+            "",
+        ),
+    )
+    assert detect_suffix() == "taildc3ac3"
+
+
+def test_detect_suffix_prefers_the_tailnet_label(monkeypatch) -> None:
+    monkeypatch.setattr(
+        tailscale_module.subprocess,
+        "run",
+        lambda *args, **kwargs: CompletedProcess(
+            args[0],
+            0,
+            json.dumps(
+                {
+                    "SearchDomains": ["taildc3ac3.ts.net."],
+                    "CurrentTailnet": {
+                        "MagicDNSSuffix": "taildc3ac3.ts.net",
+                        "SelfDNSName": "work.taildc3ac3.ts.net.",
+                    },
+                }
+            ),
+            "",
+        ),
+    )
+    assert detect_suffix() == "taildc3ac3"
+
+
+def test_detect_suffix_skips_an_unusable_tailnet_label(monkeypatch) -> None:
+    monkeypatch.setattr(
+        tailscale_module.subprocess,
+        "run",
+        lambda *args, **kwargs: CompletedProcess(
+            args[0],
+            0,
+            json.dumps(
+                {
+                    "CurrentTailnet": {
+                        "MagicDNSSuffix": "local.ts.net",
+                        "SelfDNSName": "work.example.ts.net.",
+                    },
+                }
+            ),
+            "",
+        ),
+    )
+    assert detect_suffix() == "work"
+
+
 def test_detect_suffix_falls_back_to_this_machine_name(monkeypatch) -> None:
     monkeypatch.setattr(
         tailscale_module.subprocess,
@@ -87,6 +150,12 @@ def test_detect_suffix_falls_back_to_this_machine_name(monkeypatch) -> None:
         ),
     )
     assert detect_suffix() == "work"
+
+
+def test_suffix_length_leaves_room_for_the_gateway_hostname() -> None:
+    assert validate_suffix("a" * 52) == "a" * 52
+    with pytest.raises(ValueError, match="52"):
+        validate_suffix("a" * 53)
 
 
 def test_detect_suffix_requests_explicit_value_without_cli(monkeypatch) -> None:
@@ -123,8 +192,8 @@ class Response:
     def __exit__(self, *args):
         return None
 
-    def read(self):
-        return self.payload
+    def read(self, size: int | None = None):
+        return self.payload if size is None else self.payload[:size]
 
 
 def test_api_auth_key_and_dns_calls(monkeypatch) -> None:
@@ -295,6 +364,32 @@ def test_fetch_public_root_success_and_failure(monkeypatch) -> None:
         tailscale_module.fetch_public_root("tail1234")
 
 
+def test_fetch_public_root_rejects_an_oversized_response(monkeypatch) -> None:
+    monkeypatch.setattr(
+        tailscale_module.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: Response(b"x" * (65536 + 1)),
+    )
+    with pytest.raises(TailscaleError, match="oversized"):
+        tailscale_module.fetch_public_root("tail1234", ("100.64.0.10",))
+
+
+def test_delete_credential_attempts_every_name(monkeypatch) -> None:
+    attempted: list = []
+
+    def delete(service, name):
+        attempted.append(name)
+        raise KeyringError("locked")
+
+    monkeypatch.setattr(
+        tailscale_module,
+        "keyring",
+        SimpleNamespace(delete_password=delete),
+    )
+    tailscale_module.delete_credential()
+    assert attempted == ["client-id", "client-secret"]
+
+
 @pytest.mark.parametrize("payload, message", [(b"", None), (b"bad", "invalid JSON")])
 def test_request_handles_empty_and_invalid_responses(
     monkeypatch, payload, message
@@ -329,12 +424,83 @@ def test_status_reports_enabled_state(monkeypatch) -> None:
         "load_tailscale_state",
         lambda: TailscaleState("example.com", "tail1234", ("100.64.0.1",), {}),
     )
+    monkeypatch.setattr(cli_module, "_unmirrored_router_names", lambda: [])
     result = CliRunner().invoke(cli, ["tailscale", "status"])
     assert result.exit_code == 0, result.output
     assert "Route suffix: .tail1234" in result.output
+    assert "Localhost-only routers" not in result.output
 
 
-def _patch_enable(monkeypatch, events, saved):
+def test_status_reports_unmirrored_routers(monkeypatch) -> None:
+    monkeypatch.setattr(
+        cli_module,
+        "load_tailscale_state",
+        lambda: TailscaleState("example.com", "tail1234", ("100.64.0.1",), {}),
+    )
+    monkeypatch.setattr(cli_module, "_tailscale_gateway_health", lambda: "healthy")
+    monkeypatch.setattr(
+        cli_module, "_unmirrored_router_names", lambda: ["shop-web", "api"]
+    )
+    result = CliRunner().invoke(cli, ["tailscale", "status"])
+    assert result.exit_code == 0, result.output
+    assert "Localhost-only routers: shop-web, api" in result.output
+
+
+def test_unmirrored_routers_are_read_from_traefik_logs(monkeypatch) -> None:
+    def run(command, **kwargs):
+        if command[:2] == ["docker", "ps"]:
+            return CompletedProcess(command, 0, "abc123\n", "")
+        assert command[:2] == ["docker", "logs"]
+        stderr = (
+            "localghostCA[x]: router shop-web cannot be mirrored without "
+            "explicit service and entrypoints\n"
+            "localghostCA[x]: router shop-web cannot be mirrored without "
+            "explicit service and entrypoints\n"
+            "localghostCA[x]: publishing complete snapshot (2 certificates, "
+            "1 routers)\n"
+        )
+        return CompletedProcess(command, 0, "", stderr)
+
+    monkeypatch.setattr(cli_module.subprocess, "run", run)
+    assert cli_module._unmirrored_router_names() == ["shop-web"]
+
+
+def test_unmirrored_routers_are_empty_without_docker(monkeypatch) -> None:
+    monkeypatch.setattr(
+        cli_module.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError()),
+    )
+    assert cli_module._unmirrored_router_names() == []
+
+
+def test_status_reports_disabled_state(monkeypatch) -> None:
+    monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: None)
+    result = CliRunner().invoke(cli, ["tailscale", "status"])
+    assert result.exit_code == 0, result.output
+    assert "disabled" in result.output
+
+
+def test_status_reports_invalid_state(monkeypatch) -> None:
+    def broken():
+        raise TailscaleError("invalid saved state")
+
+    monkeypatch.setattr(cli_module, "load_tailscale_state", broken)
+    result = CliRunner().invoke(cli, ["tailscale", "status"])
+    assert result.exit_code != 0
+    assert "invalid saved state" in result.output
+
+
+def test_gateway_health_is_unknown_when_docker_fails(monkeypatch) -> None:
+    monkeypatch.setattr(
+        cli_module.subprocess,
+        "run",
+        lambda *args, **kwargs: CompletedProcess([], 1, "", "denied"),
+    )
+    assert cli_module._tailscale_gateway_health() == "unknown"
+
+
+def _patch_enable(monkeypatch, events, saved, state_dir):
     class FakeAPI:
         @classmethod
         def authenticate(cls, client_id, client_secret):
@@ -352,11 +518,16 @@ def _patch_enable(monkeypatch, events, saved):
 
     monkeypatch.delenv("TAILSCALE_CLIENT_ID", raising=False)
     monkeypatch.delenv("TAILSCALE_CLIENT_SECRET", raising=False)
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(state_dir))
     monkeypatch.setattr(cli_module, "TailscaleAPI", FakeAPI)
     monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: None)
     monkeypatch.setattr(cli_module, "_https_configured", lambda: False)
     monkeypatch.setattr(cli_module, "_bootstrap_public_root", lambda: None)
-    monkeypatch.setattr(cli_module, "_bootstrap_tailnet_root", lambda suffix: None)
+    monkeypatch.setattr(
+        cli_module,
+        "_bootstrap_tailnet_root",
+        lambda suffix: PublicCertificate.parse(CERTIFICATE_PEM),
+    )
     monkeypatch.setattr(
         cli_module, "_bootstrap_tailscale_gateway", lambda suffix, key: ("100.64.0.1",)
     )
@@ -378,10 +549,12 @@ ENABLE_ARGS = [
 CREDENTIAL_ARGS = ["--client-id", "id", "--client-secret", "secret"]
 
 
-def test_enable_uses_ephemeral_credentials_and_saves_public_state(monkeypatch) -> None:
+def test_enable_uses_ephemeral_credentials_and_saves_public_state(
+    monkeypatch, tmp_path
+) -> None:
     events: list = []
     saved: list = []
-    _patch_enable(monkeypatch, events, saved)
+    _patch_enable(monkeypatch, events, saved, tmp_path)
 
     result = CliRunner().invoke(cli, ENABLE_ARGS + CREDENTIAL_ARGS)
     assert result.exit_code == 0, result.output
@@ -390,11 +563,11 @@ def test_enable_uses_ephemeral_credentials_and_saves_public_state(monkeypatch) -
     assert events[-1] == {"https_enabled": True, "force_recreate": True}
 
 
-def test_enable_stores_the_credential_in_the_keyring(monkeypatch) -> None:
+def test_enable_stores_the_credential_in_the_keyring(monkeypatch, tmp_path) -> None:
     events: list = []
     saved: list = []
     stored: list = []
-    _patch_enable(monkeypatch, events, saved)
+    _patch_enable(monkeypatch, events, saved, tmp_path)
     monkeypatch.setattr(
         cli_module,
         "store_tailscale_credential",
@@ -407,10 +580,10 @@ def test_enable_stores_the_credential_in_the_keyring(monkeypatch) -> None:
     assert stored == [("id", "secret")]
 
 
-def test_enable_warns_when_keyring_storage_fails(monkeypatch) -> None:
+def test_enable_warns_when_keyring_storage_fails(monkeypatch, tmp_path) -> None:
     events: list = []
     saved: list = []
-    _patch_enable(monkeypatch, events, saved)
+    _patch_enable(monkeypatch, events, saved, tmp_path)
     monkeypatch.setattr(
         cli_module, "store_tailscale_credential", lambda *args: False
     )
@@ -420,10 +593,10 @@ def test_enable_warns_when_keyring_storage_fails(monkeypatch) -> None:
     assert "keyring" in result.output
 
 
-def test_enable_uses_the_stored_credential(monkeypatch) -> None:
+def test_enable_uses_the_stored_credential(monkeypatch, tmp_path) -> None:
     events: list = []
     saved: list = []
-    _patch_enable(monkeypatch, events, saved)
+    _patch_enable(monkeypatch, events, saved, tmp_path)
     monkeypatch.setattr(
         cli_module,
         "load_tailscale_credential",
@@ -436,10 +609,12 @@ def test_enable_uses_the_stored_credential(monkeypatch) -> None:
     assert "keyring" in result.output
 
 
-def test_enable_without_credential_guides_setup_then_prompts(monkeypatch) -> None:
+def test_enable_without_credential_guides_setup_then_prompts(
+    monkeypatch, tmp_path
+) -> None:
     events: list = []
     saved: list = []
-    _patch_enable(monkeypatch, events, saved)
+    _patch_enable(monkeypatch, events, saved, tmp_path)
 
     result = CliRunner().invoke(cli, ENABLE_ARGS, input="typed-id\ntyped-secret\n")
     assert result.exit_code == 0, result.output
@@ -450,6 +625,192 @@ def test_enable_without_credential_guides_setup_then_prompts(monkeypatch) -> Non
     assert "admin/settings/oauth" in result.output
     assert "auth_keys" in result.output
     assert "dns:write" in result.output
+
+
+def test_enable_refuses_when_already_enabled(monkeypatch) -> None:
+    monkeypatch.setattr(
+        cli_module,
+        "load_tailscale_state",
+        lambda: TailscaleState("example.com", "tail1234", ("100.64.0.1",), {}),
+    )
+    result = CliRunner().invoke(cli, ["tailscale", "enable"])
+    assert result.exit_code != 0
+    assert "already enabled" in result.output
+
+
+def test_enable_requires_a_tag_prefix(monkeypatch, tmp_path) -> None:
+    events: list = []
+    saved: list = []
+    _patch_enable(monkeypatch, events, saved, tmp_path)
+
+    result = CliRunner().invoke(
+        cli, ENABLE_ARGS + ["--tag", "localghost"] + CREDENTIAL_ARGS
+    )
+    assert result.exit_code != 0
+    assert "tag:" in result.output
+
+
+def test_enable_installs_tailnet_trust_on_a_trusted_client(
+    monkeypatch, tmp_path
+) -> None:
+    events: list = []
+    saved: list = []
+    installed: list = []
+    _patch_enable(monkeypatch, events, saved, tmp_path)
+    monkeypatch.setattr(cli_module, "_https_configured", lambda: True)
+    monkeypatch.setattr(
+        cli_module,
+        "_install_tailnet_trust",
+        lambda suffix, **kwargs: installed.append(suffix),
+    )
+
+    result = CliRunner().invoke(cli, ENABLE_ARGS + CREDENTIAL_ARGS)
+    assert result.exit_code == 0, result.output
+    assert installed == ["tail1234"]
+    assert "trusted on this client" in result.output
+
+
+def test_enable_warns_when_tailnet_trust_installation_fails(
+    monkeypatch, tmp_path
+) -> None:
+    events: list = []
+    saved: list = []
+    _patch_enable(monkeypatch, events, saved, tmp_path)
+    monkeypatch.setattr(cli_module, "_https_configured", lambda: True)
+
+    def failing_install(suffix, **kwargs):
+        raise click.ClickException("mkcert is unavailable")
+
+    monkeypatch.setattr(cli_module, "_install_tailnet_trust", failing_install)
+
+    result = CliRunner().invoke(cli, ENABLE_ARGS + CREDENTIAL_ARGS)
+    assert result.exit_code == 0, result.output
+    assert "Tailnet trust was not installed" in result.output
+    assert "localghost trust" in result.output
+
+
+def test_enable_prints_the_share_command(monkeypatch, tmp_path) -> None:
+    events: list = []
+    saved: list = []
+    _patch_enable(monkeypatch, events, saved, tmp_path)
+
+    result = CliRunner().invoke(cli, ENABLE_ARGS + CREDENTIAL_ARGS)
+    assert result.exit_code == 0, result.output
+    fingerprint = PublicCertificate.parse(CERTIFICATE_PEM).fingerprint
+    assert (
+        f"localghost tailscale trust tail1234 --fingerprint {fingerprint}"
+        in result.output
+    )
+
+
+def test_enable_saves_the_tailnet_root_for_later_status(monkeypatch, tmp_path) -> None:
+    events: list = []
+    saved: list = []
+    _patch_enable(monkeypatch, events, saved, tmp_path)
+
+    result = CliRunner().invoke(cli, ENABLE_ARGS + CREDENTIAL_ARGS)
+    assert result.exit_code == 0, result.output
+    assert (
+        tmp_path / "tailscale-tail1234-rootCA.pem"
+    ).read_bytes() == PublicCertificate.parse(CERTIFICATE_PEM).pem
+
+
+def test_enable_refuses_an_actively_mapped_suffix(monkeypatch, tmp_path) -> None:
+    events: list = []
+    saved: list = []
+    _patch_enable(monkeypatch, events, saved, tmp_path)
+    monkeypatch.setattr(
+        cli_module.TailscaleAPI,
+        "split_dns",
+        lambda self, tailnet: {"tail1234": ["100.9.9.9"]},
+    )
+
+    result = CliRunner().invoke(cli, ENABLE_ARGS + CREDENTIAL_ARGS)
+    assert result.exit_code != 0
+    assert "100.9.9.9" in result.output
+    assert "--takeover" in result.output
+    assert saved == []
+
+
+def test_enable_takeover_replaces_an_active_mapping(monkeypatch, tmp_path) -> None:
+    events: list = []
+    saved: list = []
+    _patch_enable(monkeypatch, events, saved, tmp_path)
+    monkeypatch.setattr(
+        cli_module.TailscaleAPI,
+        "split_dns",
+        lambda self, tailnet: {"tail1234": ["100.9.9.9"]},
+    )
+
+    result = CliRunner().invoke(cli, ENABLE_ARGS + ["--takeover"] + CREDENTIAL_ARGS)
+    assert result.exit_code == 0, result.output
+    assert ("example.com", {"tail1234": ["100.64.0.1"]}) in events
+
+
+def test_enable_rolls_back_when_the_hub_fails_to_start(monkeypatch, tmp_path) -> None:
+    events: list = []
+    saved: list = []
+    _patch_enable(monkeypatch, events, saved, tmp_path)
+    monkeypatch.setattr(
+        cli_module,
+        "_run_proxy",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            click.ClickException("compose failed")
+        ),
+    )
+    monkeypatch.setattr(
+        cli_module, "remove_tailscale_state", lambda: events.append("state-removed")
+    )
+
+    result = CliRunner().invoke(cli, ENABLE_ARGS + CREDENTIAL_ARGS)
+    assert result.exit_code != 0
+    restore = ("example.com", {"tail1234": None})
+    assert restore in events
+    assert "state-removed" in events
+    assert events.index(restore) < events.index("state-removed")
+
+
+def test_enable_rollback_warns_when_dns_restore_fails(monkeypatch, tmp_path) -> None:
+    events: list = []
+    saved: list = []
+    _patch_enable(monkeypatch, events, saved, tmp_path)
+
+    calls = {"count": 0}
+
+    def failing_update(self, tailnet, value):
+        calls["count"] += 1
+        raise TailscaleError("api offline")
+
+    monkeypatch.setattr(cli_module.TailscaleAPI, "update_split_dns", failing_update)
+    monkeypatch.setattr(
+        cli_module, "remove_tailscale_state", lambda: events.append("state-removed")
+    )
+
+    result = CliRunner().invoke(cli, ENABLE_ARGS + CREDENTIAL_ARGS)
+    assert result.exit_code != 0
+    assert calls["count"] == 2
+    assert "Tailnet DNS was not restored" in result.output
+    assert "state-removed" in events
+
+
+def test_status_prints_the_share_command(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    (tmp_path / "tailscale-tail1234-rootCA.pem").write_bytes(CERTIFICATE_PEM)
+    monkeypatch.setattr(
+        cli_module,
+        "load_tailscale_state",
+        lambda: TailscaleState("example.com", "tail1234", ("100.64.0.1",), {}),
+    )
+    monkeypatch.setattr(cli_module, "_tailscale_gateway_health", lambda: "healthy")
+    monkeypatch.setattr(cli_module, "_unmirrored_router_names", lambda: [])
+
+    result = CliRunner().invoke(cli, ["tailscale", "status"])
+    assert result.exit_code == 0, result.output
+    fingerprint = PublicCertificate.parse(CERTIFICATE_PEM).fingerprint
+    assert (
+        f"localghost tailscale trust tail1234 --fingerprint {fingerprint}"
+        in result.output
+    )
 
 
 def test_disable_uses_the_stored_credential_and_deletes_it(monkeypatch) -> None:
@@ -489,6 +850,155 @@ def test_disable_uses_the_stored_credential_and_deletes_it(monkeypatch) -> None:
     assert events[0] == ("kid", "ksecret")
     assert "deleted" in events
     assert events.index("deleted") > events.index("removed")
+
+
+def test_disable_notes_that_other_machines_still_trust_the_root(monkeypatch) -> None:
+    state = TailscaleState("example.com", "tail1234", ("100.64.0.1",), {})
+
+    class FakeAPI:
+        @classmethod
+        def authenticate(cls, client_id, client_secret):
+            return cls()
+
+        def update_split_dns(self, tailnet, value):
+            return None
+
+    monkeypatch.delenv("TAILSCALE_CLIENT_ID", raising=False)
+    monkeypatch.delenv("TAILSCALE_CLIENT_SECRET", raising=False)
+    monkeypatch.setattr(cli_module, "TailscaleAPI", FakeAPI)
+    monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: state)
+    monkeypatch.setattr(cli_module, "remove_tailscale_state", lambda: None)
+    monkeypatch.setattr(cli_module, "proxy_is_running", lambda: False)
+    monkeypatch.setattr(
+        cli_module,
+        "load_tailscale_credential",
+        lambda: tailscale_module.Credential("kid", "ksecret"),
+    )
+    monkeypatch.setattr(cli_module, "delete_tailscale_credential", lambda: None)
+
+    result = CliRunner().invoke(cli, ["tailscale", "disable"])
+    assert result.exit_code == 0, result.output
+    assert "still trust" in result.output
+    assert "localghost trust --remove" in result.output
+
+
+def test_disable_requires_enabled_state(monkeypatch) -> None:
+    monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: None)
+    result = CliRunner().invoke(cli, ["tailscale", "disable"])
+    assert result.exit_code != 0
+    assert "not enabled" in result.output
+
+
+def test_disable_reports_invalid_state(monkeypatch) -> None:
+    def broken():
+        raise TailscaleError("invalid saved state")
+
+    monkeypatch.setattr(cli_module, "load_tailscale_state", broken)
+    result = CliRunner().invoke(cli, ["tailscale", "disable"])
+    assert result.exit_code != 0
+    assert "invalid saved state" in result.output
+
+
+def test_disable_reports_api_failure(monkeypatch) -> None:
+    class FailingAPI:
+        @classmethod
+        def authenticate(cls, client_id, client_secret):
+            raise TailscaleError("could not reach the Tailscale API")
+
+    monkeypatch.delenv("TAILSCALE_CLIENT_ID", raising=False)
+    monkeypatch.delenv("TAILSCALE_CLIENT_SECRET", raising=False)
+    monkeypatch.setattr(cli_module, "TailscaleAPI", FailingAPI)
+    monkeypatch.setattr(
+        cli_module,
+        "load_tailscale_state",
+        lambda: TailscaleState("example.com", "tail1234", ("100.64.0.1",), {}),
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "load_tailscale_credential",
+        lambda: tailscale_module.Credential("kid", "ksecret"),
+    )
+
+    result = CliRunner().invoke(cli, ["tailscale", "disable"])
+    assert result.exit_code != 0
+    assert "could not reach the Tailscale API" in result.output
+
+
+def test_trust_alias_defaults_to_the_active_suffix(monkeypatch) -> None:
+    installed: list = []
+    monkeypatch.setattr(
+        cli_module,
+        "load_tailscale_state",
+        lambda: TailscaleState("example.com", "tail1234", ("100.64.0.1",), {}),
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "_install_tailnet_trust",
+        lambda suffix, **kwargs: installed.append((suffix, kwargs)),
+    )
+
+    result = CliRunner().invoke(cli, ["tailscale", "trust"])
+    assert result.exit_code == 0, result.output
+    assert installed == [("tail1234", {"expected_fingerprint": None})]
+
+
+def test_trust_alias_requires_enabled_state(monkeypatch) -> None:
+    monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: None)
+    result = CliRunner().invoke(cli, ["tailscale", "trust"])
+    assert result.exit_code != 0
+    assert "not enabled" in result.output
+
+
+def test_run_proxy_repairs_authorities_after_a_failed_up(monkeypatch) -> None:
+    state = TailscaleState("example.com", "tail1234", ("100.64.0.1",), {})
+    monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: state)
+    repaired: list = []
+    monkeypatch.setattr(
+        cli_module, "_bootstrap_public_root", lambda: repaired.append("localhost")
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "_bootstrap_tailnet_root",
+        lambda suffix: repaired.append(suffix),
+    )
+    attempts = {"count": 0}
+
+    def run(command, **kwargs):
+        if command[:2] != ["docker", "compose"]:
+            return CompletedProcess(command, 0, "", "")
+        attempts["count"] += 1
+        code = 1 if attempts["count"] == 1 else 0
+        return CompletedProcess(command, code, "", "bootstrap public root is missing")
+
+    monkeypatch.setattr(cli_module.subprocess, "run", run)
+
+    cli_module._run_proxy("up", https_enabled=True)
+    assert repaired == ["localhost", "tail1234"]
+    assert attempts["count"] == 2
+
+
+def test_run_proxy_reports_the_original_failure_when_repair_fails(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: None)
+
+    def broken_bootstrap():
+        raise click.ClickException("docker is required")
+
+    monkeypatch.setattr(cli_module, "_bootstrap_public_root", broken_bootstrap)
+    attempts = {"count": 0}
+
+    def run(command, **kwargs):
+        if command[:2] != ["docker", "compose"]:
+            return CompletedProcess(command, 0, "", "")
+        attempts["count"] += 1
+        return CompletedProcess(command, 1, "", "original failure")
+
+    monkeypatch.setattr(cli_module.subprocess, "run", run)
+
+    with pytest.raises(click.exceptions.Exit):
+        cli_module._run_proxy("up", https_enabled=True)
+    assert attempts["count"] == 1
 
 
 def test_run_proxy_adds_tailnet_overlay(monkeypatch) -> None:

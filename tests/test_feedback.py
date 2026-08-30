@@ -27,7 +27,10 @@ def test_plain_feedback_is_stable(monkeypatch):
     )
 
     assert standard.items == ["Starting", "Done"]
-    assert errors.items[0:2] == ["Warning: First", "Warning: Second"]
+    assert errors.items[0:2] == [
+        "Warning: Settings: First",
+        "Warning: Settings: Second",
+    ]
     assert "Dry run:" in errors.items[2]
     assert "Command: npm run dev" in errors.items[2]
 

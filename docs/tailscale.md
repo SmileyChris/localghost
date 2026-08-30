@@ -69,10 +69,17 @@ re-entry; `disable` removes it again. Without a usable keyring, localghost
 warns and stores nothing.
 
 The OAuth client's own tailnet is the default. Localghost asks the installed
-`tailscale` CLI for a one-label search domain or derives one from the current
-machine's MagicDNS name (`work.example.ts.net` becomes `work`). Pass
-`--tailnet` or `--suffix` explicitly when those defaults are not
-the desired values.
+`tailscale` CLI for a suffix: an explicit one-label search domain wins, then
+the tailnet's own MagicDNS label (`taildc3ac3.ts.net` becomes `taildc3ac3`),
+and only as a last resort the current machine's name. Pass `--tailnet` or
+`--suffix` explicitly when those defaults are not the desired values.
+
+Because the detected suffix is shared by the whole tailnet, enable refuses to
+replace an existing split-DNS entry for it — most likely another machine
+already hosting that suffix. Choose a distinct `--suffix` per hosting
+machine, or pass `--takeover` to replace the mapping deliberately. When a
+later enable step fails, the split-DNS entry and saved state are rolled back
+so the command can simply be run again.
 
 Enable performs four bounded operations:
 
@@ -108,13 +115,18 @@ That download is plain HTTP, and the tailnet is what secures it: split DNS
 resolves the name to the tagged gateway, and the connection to it is
 WireGuard-encrypted and gated by tailnet policy. Whoever can rewrite the
 tailnet's DNS configuration can therefore answer for `trust.tail1234`. To close
-that gap, read `Tailnet .tail1234` from `localghost trust --status` on the
-hosting machine, pass it to the other device, and the download is installed
-only if it matches:
+that gap, pin the fingerprint: a successful enable — and `localghost
+tailscale status` afterwards — prints a ready-to-paste command for other
+machines, and the download is installed only if it matches:
 
 ```sh
 localghost tailscale trust tail1234 --fingerprint SHA256:1A2B…
 ```
+
+Devices without the localghost CLI (a phone, a colleague's untooled laptop)
+can open `http://trust.tail1234` in a browser instead: the gateway serves a
+small page with the pinned command, the expected fingerprint, and a direct
+link to the root certificate for manual installation.
 
 Trusting a root again replaces the one this client had for that suffix; the
 superseded certificate leaves the trust stores first, and the `.localhost`

@@ -12,6 +12,7 @@ import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -121,21 +122,35 @@ def load_credential() -> Credential | None:
 
 def delete_credential() -> None:
     for name in ("client-id", "client-secret"):
-        try:
+        with suppress(KeyringError):
             keyring.delete_password(KEYRING_SERVICE, name)
-        except KeyringError:
-            return
+
+
+# "localghost-" plus the suffix must still fit in one 63-character DNS label
+# when it becomes the gateway hostname.
+_SUFFIX_LIMIT = 63 - len("localghost-")
 
 
 def validate_suffix(value: str) -> str:
     value = value.removesuffix(".").lower()
     if not _SUFFIX.fullmatch(value) or value in {"localhost", "local"}:
         raise ValueError("suffix must be one DNS label (for example, tail1234)")
+    if len(value) > _SUFFIX_LIMIT:
+        raise ValueError(
+            f"suffix must be at most {_SUFFIX_LIMIT} characters so the "
+            f"localghost-{{suffix}} gateway hostname stays one DNS label"
+        )
     return value
 
 
 def detect_suffix() -> str:
-    """Use a one-label search domain advertised by the local Tailscale client."""
+    """Choose a suffix from the local Tailscale client's DNS view.
+
+    An explicit one-label search domain wins, then the tailnet's own MagicDNS
+    label (``taildc3ac3`` for ``taildc3ac3.ts.net``), which is stable and
+    collides with no device's short name. This machine's own hostname is the
+    last resort.
+    """
     try:
         result = subprocess.run(
             ["tailscale", "dns", "status", "--json"],
@@ -152,7 +167,7 @@ def detect_suffix() -> str:
             payload = json.loads(result.stdout)
         except json.JSONDecodeError:
             payload = {}
-        candidates = payload.get("SearchDomains", [])
+        candidates = payload.get("SearchDomains") or []
         for candidate in candidates:
             candidate = str(candidate).removesuffix(".")
             if "." not in candidate:
@@ -160,12 +175,12 @@ def detect_suffix() -> str:
                     return validate_suffix(candidate)
                 except ValueError:
                     pass
-        self_dns_name = (payload.get("CurrentTailnet") or {}).get(
-            "SelfDNSName", ""
-        )
-        if self_dns_name:
+        tailnet = payload.get("CurrentTailnet") or {}
+        for name in (tailnet.get("MagicDNSSuffix"), tailnet.get("SelfDNSName")):
+            if not name:
+                continue
             try:
-                return validate_suffix(str(self_dns_name).split(".", 1)[0])
+                return validate_suffix(str(name).split(".", 1)[0])
             except ValueError:
                 pass
     raise TailscaleError("could not detect a short tailnet suffix; pass --suffix")
@@ -285,6 +300,11 @@ class API:
             raise self._dns_scope_guidance(exc) from exc
 
 
+# A root certificate PEM is around a kilobyte; anything near this cap is not
+# one.
+_MAX_ROOT_BYTES = 65536
+
+
 def fetch_public_root(suffix: str, gateway_ips: tuple[str, ...] = ()) -> bytes:
     suffix = validate_suffix(suffix)
     host = f"trust.{suffix}"
@@ -301,9 +321,15 @@ def fetch_public_root(suffix: str, gateway_ips: tuple[str, ...] = ()) -> bytes:
         request = urllib.request.Request(url, headers={"Host": host})
         try:
             with urllib.request.urlopen(request, timeout=15) as response:
-                return response.read()
+                value = response.read(_MAX_ROOT_BYTES + 1)
         except urllib.error.URLError as exc:
             last_error = exc
+            continue
+        if len(value) > _MAX_ROOT_BYTES:
+            raise TailscaleError(
+                f"the .{suffix} gateway returned an oversized root certificate"
+            )
+        return value
     raise TailscaleError(
         f"could not download the localghost root from the .{suffix} gateway"
     ) from last_error
