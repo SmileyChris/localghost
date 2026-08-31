@@ -138,7 +138,7 @@ const pageTemplate = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}}</title>
-<link rel="icon" type="image/png" href="{{.Logo}}">
+<link rel="icon" type="image/png" href="{{.Icon}}">
 <style>
   @import url("https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800&display=swap");
   body { font-family: system-ui, sans-serif; margin: 0; min-height: 100vh;
@@ -148,7 +148,7 @@ const pageTemplate = `<!doctype html>
   h1 .quiet { color: #6b7a85; font-weight: 600; }
   .accent { color: #71d5a7; }
   .logo { display: block; height: auto; margin: 0 auto 1.5rem; max-width: min(360px, 80vw); }
-  .logo-small { max-width: min(240px, 60vw); }
+  .logo-small { max-width: min(120px, 40vw); }
   code { background: #f1faf5; border-radius: .3rem; padding: .15rem .45rem; }
   pre  { background: #f1faf5; border-radius: .5rem; padding: 1rem; overflow-x: auto; }
   ul { padding-left: 1.2rem; } li { margin: .4rem 0; }
@@ -178,7 +178,7 @@ const pageTemplate = `<!doctype html>
   <p class="muted"><a href="//traefik.localhost{{if .Port}}:{{.Port}}{{end}}">Traefik dashboard</a>
      · <a href="https://smileychris.github.io/localghost/">Documentation</a></p>
 {{else if .Ghost}}
-  <img class="logo logo-small" src="{{.Logo}}" alt="Localghost">
+  <img class="logo logo-small" src="{{.Icon}}" alt="Localghost">
   <h1>{{.Ghost.Name}} <span class="quiet">is offline</span></h1>
   <p>A {{.Ghost.Type}} project last started {{.Ghost.Relative}} from
      <code>{{.Ghost.Directory}}</code>.</p>
@@ -187,7 +187,7 @@ const pageTemplate = `<!doctype html>
 uvx localghost run</pre>
   <p class="muted">Forget this page with <code>localghost forget {{.Ghost.Name}}</code>.</p>
 {{else}}
-  <img class="logo logo-small" src="{{.Logo}}" alt="Localghost">
+  <img class="logo logo-small" src="{{.Icon}}" alt="Localghost">
   <h1>Nothing haunts <span class="quiet">{{.Host}}</span></h1>
   <p>No running application and no remembered project answers to this name.</p>
   {{if .Known}}
@@ -223,15 +223,19 @@ type pageData struct {
 	Port    string
 	Welcome bool
 	Logo    template.URL
+	Icon    template.URL
 	Ghost   *pageEntry
 	Known   []pageEntry
 }
 
 var page = template.Must(template.New("ghost").Parse(pageTemplate))
 
-// logoURL is typed template.URL so html/template does not neuter the
+// The URLs are typed template.URL so html/template does not neuter the
 // data: scheme in src/href attributes.
-var logoURL = template.URL("data:image/png;base64," + logoBase64)
+var (
+	logoURL  = template.URL("data:image/png;base64," + logoBase64)
+	ghostURL = template.URL("data:image/png;base64," + ghostBase64)
+)
 
 func pageEntries(entries []entry) []pageEntry {
 	known := make([]pageEntry, 0, len(entries))
@@ -262,6 +266,7 @@ func (f *Fallback) respondWelcome(rw http.ResponseWriter, port string, entries [
 		Port:    port,
 		Welcome: true,
 		Logo:    logoURL,
+		Icon:    ghostURL,
 		Known:   pageEntries(entries),
 	})
 }
@@ -280,7 +285,7 @@ func (f *Fallback) respondGhost(rw http.ResponseWriter, e entry, wantsHTML bool)
 	rw.WriteHeader(http.StatusServiceUnavailable)
 	_ = page.Execute(rw, pageData{
 		Title: e.Name + " is offline",
-		Logo:  logoURL,
+		Icon:  ghostURL,
 		Ghost: &pageEntry{
 			Hostname:        e.Hostname,
 			Name:            e.Name,
@@ -305,7 +310,7 @@ func (f *Fallback) respondUnknown(rw http.ResponseWriter, host, port string, ent
 		Title: "Nothing running here",
 		Host:  host,
 		Port:  port,
-		Logo:  logoURL,
+		Icon:  ghostURL,
 		Known: pageEntries(entries),
 	})
 }
