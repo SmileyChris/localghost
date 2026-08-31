@@ -63,10 +63,13 @@ func TestKnownHostServes503GhostPage(t *testing.T) {
 		t.Fatalf("status = %d, want 503", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"blog", "/home/dev/blog", "localghost run"} {
+	for _, want := range []string{"blog", "/home/dev/blog", "localghost run", "data:image/png;base64,"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("body missing %q:\n%s", want, body)
 		}
+	}
+	if strings.Contains(body, "\U0001F47B") {
+		t.Fatal("ghost page must use the logo image, not the ghost emoji")
 	}
 }
 
