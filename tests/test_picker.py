@@ -74,6 +74,6 @@ def test_render_lines_marks_selection():
     model.apply("down")
     lines = picker.render_lines(model)
     assert any("a.localhost" in line for line in lines)
-    selected = [line for line in lines if "\x1b[7m" in line]
+    selected = [line for line in lines if "\x1b[38;2;163;230;53m" in line]
     assert len(selected) == 1
     assert "b" in selected[0]

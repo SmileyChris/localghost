@@ -17,9 +17,21 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from .feedback import LIME, MINT
 from .registry import RegistryEntry
 
 QUIT = object()
+
+
+def _fg(hex_colour: str) -> str:
+    r, g, b = (int(hex_colour[i : i + 2], 16) for i in (1, 3, 5))
+    return f"\x1b[38;2;{r};{g};{b}m"
+
+
+_HIGHLIGHT = "\x1b[1m" + _fg(LIME)
+_NOTICE = _fg(MINT)
+_DIM = "\x1b[2m"
+_RESET = "\x1b[0m"
 
 
 @dataclass(frozen=True)
@@ -99,17 +111,17 @@ def _relative(stamp: str) -> str:
 
 
 def render_lines(model: PickerModel) -> list[str]:
-    lines = ["Remembered projects — Enter summon · Del forget · q quit"]
+    lines = [f"{_DIM}Remembered projects — Enter summon · Del forget · q quit{_RESET}"]
     for index, entry in enumerate(model.entries):
         row = (
             f"  {entry.name}  {entry.type}  {entry.hostname}  "
             f"{entry.directory}  ({_relative(entry.last_started)})"
         )
         if index == model.selected:
-            row = f"\x1b[7m» {row[2:]}\x1b[0m"
+            row = f"{_HIGHLIGHT}» {row[2:]}{_RESET}"
         lines.append(row)
     if model.notice:
-        lines.append(model.notice)
+        lines.append(f"{_NOTICE}{model.notice}{_RESET}")
     return lines
 
 
