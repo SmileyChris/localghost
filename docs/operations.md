@@ -84,6 +84,26 @@ The dashboard at `http://traefik.localhost` shows discovered routers, services,
 and middleware. It is useful for confirming label discovery, but it does not
 replace application logs when a backend itself is failing.
 
+## Ghost pages
+
+The hub remembers every project it has routed. Visiting a remembered
+hostname whose application is stopped returns **503 Service Unavailable**
+with a page naming the project, its directory, when it last started, and
+the command to start it again. Hostnames the hub has never routed return
+**404 Not Found** with a page listing the remembered projects.
+
+Entries are JSON files under the state directory's `registry/` folder,
+written on every `run` and `save` and mounted read-only into the hub.
+Remove one with:
+
+```sh
+uvx localghost forget <name>
+```
+
+or clear them all with `uvx localghost forget --all`. Status codes are
+unchanged from a hub without ghost pages, so scripts and health checks
+keep working; only response bodies differ.
+
 ## Stop and remove
 
 ```sh

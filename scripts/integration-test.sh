@@ -21,6 +21,7 @@ DOCKERFILE_DIR=''
 HOST_SERVER_PID=''
 HOST_RUN_PID=''
 PUBLIC_ROOT_FILE=''
+GHOST_REGISTRY_FILE=''
 LOCALGHOST_IMAGE_TAG="v$(uv run --frozen localghost --version)"
 export LOCALGHOST_IMAGE_TAG
 
@@ -98,6 +99,9 @@ cleanup() {
   fi
   if [[ -n ${PUBLIC_ROOT_FILE} ]]; then
     rm -f "${PUBLIC_ROOT_FILE}"
+  fi
+  if [[ -n ${GHOST_REGISTRY_FILE} ]]; then
+    rm -f "${GHOST_REGISTRY_FILE}"
   fi
   exit "${exit_code}"
 }
@@ -211,6 +215,14 @@ if [[ -f "$(localghost_state_dir)/https-enabled" && -z ${LOCALGHOST_ACCEPT_CA_RE
   anyway, or point LOCALGHOST_STATE_DIR at a scratch directory to leave your
   own trust configuration untouched"
 fi
+
+# Ghost pages: the packaged hub compose mounts this directory read-only into
+# Traefik's fallback plugin (see src/localghost/proxy_compose.yaml), the same
+# way `_run_proxy` sets it from `registry.registry_dir()` for real runs. It
+# must be exported before the first `proxy … up` so every hub start in this
+# suite sees it.
+export LOCALGHOST_REGISTRY_DIR="$(localghost_state_dir)/registry"
+mkdir -p "${LOCALGHOST_REGISTRY_DIR}"
 
 for project in localghost "${PROJECT_A}" "${PROJECT_B}" "${HOST_PROJECT}" \
   "${DOCKERFILE_PROJECT}"; do
@@ -402,6 +414,39 @@ secure_dashboard_headers=$(
 secure_dashboard_location="https://traefik.localhost:${HTTPS_PORT}/dashboard/"
 [[ ${secure_dashboard_headers} == *$'Location: '"${secure_dashboard_location}"$'\r'* ]] || \
   fail "HTTPS dashboard root did not redirect to ${secure_dashboard_location}"
+
+log 'Ghost pages: a remembered but stopped project answers 503'
+# Unlike the public compose.yaml (state-free by design; see
+# test_compose_contract.py), this packaged hub mounts LOCALGHOST_REGISTRY_DIR
+# into the fallback plugin, so this is the first point in the suite where a
+# registry entry is actually visible to Traefik. A previously routed project
+# has already been taken down twice by now (the foreground host bridge, and
+# ${PROJECT_A}); this exercises the same "hub remembers a stopped project"
+# path with a synthetic entry rather than racing real container teardown.
+GHOST_REGISTRY_FILE="${LOCALGHOST_REGISTRY_DIR}/ghosttest.json"
+cat > "${GHOST_REGISTRY_FILE}" <<'JSON'
+{
+  "hostname": "ghosttest.localhost",
+  "name": "ghosttest",
+  "directory": "/tmp/ghosttest",
+  "type": "django",
+  "last_started": "2026-08-30T12:00:00+00:00"
+}
+JSON
+
+ghost_status=$(curl --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' \
+  --max-time 5 --header 'Accept: text/html' "http://ghosttest.localhost:${ACTIVE_PORT}/")
+assert_equal 503 "${ghost_status}" 'Ghost page status for remembered project'
+
+ghost_body=$(curl --noproxy '*' --silent --max-time 5 --header 'Accept: text/html' \
+  "http://ghosttest.localhost:${ACTIVE_PORT}/")
+case "${ghost_body}" in
+  *ghosttest*localghost\ run*) ;;
+  *) fail 'Ghost page body missing project name or restart hint' ;;
+esac
+
+rm -f "${GHOST_REGISTRY_FILE}"
+GHOST_REGISTRY_FILE=''
 
 log 'Recreate the proxy on a non-default loopback port'
 proxy_https stop traefik
