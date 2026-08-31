@@ -13,10 +13,15 @@ import (
 
 func writeEntry(t *testing.T, dir, name, hostname string) {
 	t.Helper()
+	writeEntryDir(t, dir, name, hostname, "/home/dev/"+name)
+}
+
+func writeEntryDir(t *testing.T, dir, name, hostname, directory string) {
+	t.Helper()
 	payload := `{
   "hostname": "` + hostname + `",
   "name": "` + name + `",
-  "directory": "/home/dev/` + name + `",
+  "directory": "` + directory + `",
   "type": "django",
   "last_started": "` + time.Now().Add(-26*time.Hour).Format(time.RFC3339) + `"
 }`
@@ -86,6 +91,27 @@ func TestUnknownHostServes404WithProjectList(t *testing.T) {
 	}
 }
 
+func TestUnknownHostProjectLinksCarryHubPort(t *testing.T) {
+	dir := t.TempDir()
+	writeEntry(t, dir, "blog", "blog.localhost")
+	rec := get(handler(t, dir), "mystery.localhost:18080", "text/html")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `href="//blog.localhost:18080"`) {
+		t.Fatalf("404 page project link should carry the hub's port:\n%s", rec.Body.String())
+	}
+}
+
+func TestUnknownHostProjectLinksOmitDefaultPort(t *testing.T) {
+	dir := t.TempDir()
+	writeEntry(t, dir, "blog", "blog.localhost")
+	rec := get(handler(t, dir), "mystery.localhost", "text/html")
+	if !strings.Contains(rec.Body.String(), `href="//blog.localhost"`) {
+		t.Fatalf("404 page project link should not append a port when the request had none:\n%s", rec.Body.String())
+	}
+}
+
 func TestMissingRegistryDirDegradesToGeneric404(t *testing.T) {
 	rec := get(handler(t, filepath.Join(t.TempDir(), "absent")), "x.localhost", "text/html")
 	if rec.Code != http.StatusNotFound {
@@ -102,6 +128,23 @@ func TestMalformedEntryIsSkipped(t *testing.T) {
 	rec := get(handler(t, dir), "blog.localhost", "text/html")
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+}
+
+func TestResurrectCommandQuotesDirectoryWithSpaces(t *testing.T) {
+	dir := t.TempDir()
+	writeEntryDir(t, dir, "blog", "blog.localhost", "/home/dev/my blog")
+
+	rec := get(handler(t, dir), "blog.localhost", "text/html")
+	// html/template HTML-escapes the quotes it renders into body text, so a
+	// literal `'` comes out as `&#39;`.
+	if !strings.Contains(rec.Body.String(), `cd &#39;/home/dev/my blog&#39;`) {
+		t.Fatalf("HTML resurrect command should quote the directory:\n%s", rec.Body.String())
+	}
+
+	plain := get(handler(t, dir), "blog.localhost", "application/json")
+	if !strings.Contains(plain.Body.String(), `Run: cd '/home/dev/my blog' && uvx localghost run`) {
+		t.Fatalf("plain-text resurrect command should quote the directory:\n%s", plain.Body.String())
 	}
 }
 

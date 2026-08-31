@@ -46,8 +46,12 @@ func New(_ context.Context, _ http.Handler, config *Config, name string) (http.H
 }
 
 func (f *Fallback) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	host := requestHost(req)
+	host, port := requestHostPort(req)
 	entries := f.entries()
+	// Deliberate deviation from the Accept spec's letter: curl and scripts
+	// send `Accept: */*` by default and get plain text; only a request that
+	// literally asks for text/html (browsers, or `curl -H 'Accept: text/html'`)
+	// gets the styled ghost page.
 	wantsHTML := strings.Contains(req.Header.Get("Accept"), "text/html")
 	for _, e := range entries {
 		if e.Hostname == host {
@@ -55,15 +59,26 @@ func (f *Fallback) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 			return
 		}
 	}
-	f.respondUnknown(rw, host, entries, wantsHTML)
+	f.respondUnknown(rw, host, port, entries, wantsHTML)
 }
 
-func requestHost(req *http.Request) string {
-	host := req.Host
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
+// requestHostPort splits the request's Host header into the hostname used
+// for registry lookups and the port the hub is actually published on (if
+// the client's request included one), so links rendered back to the client
+// can carry that port forward instead of dead-ending on :80.
+func requestHostPort(req *http.Request) (host, port string) {
+	host = req.Host
+	if h, p, err := net.SplitHostPort(host); err == nil {
+		host, port = h, p
 	}
-	return strings.ToLower(host)
+	return strings.ToLower(host), port
+}
+
+// shellQuote renders s as a single-quoted POSIX shell argument, so a
+// resurrect command copy-pastes safely even when the directory contains
+// spaces. Directories containing single quotes are out of scope.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // entries reads the registry fresh per request; hub traffic is a developer
@@ -133,7 +148,7 @@ const pageTemplate = `<!doctype html>
   <p>A {{.Ghost.Type}} project last started {{.Ghost.Relative}} from
      <code>{{.Ghost.Directory}}</code>.</p>
   <p>Bring it back:</p>
-  <pre>cd {{.Ghost.Directory}}
+  <pre>cd {{.Ghost.QuotedDirectory}}
 uvx localghost run</pre>
   <p class="muted">Forget this page with <code>localghost forget {{.Ghost.Name}}</code>.</p>
 {{else}}
@@ -143,7 +158,7 @@ uvx localghost run</pre>
   <p>Localghost does remember:</p>
   <ul>
   {{range .Known}}
-    <li><a href="//{{.Hostname}}">{{.Hostname}}</a>
+    <li><a href="//{{.Hostname}}{{if $.Port}}:{{$.Port}}{{end}}">{{.Hostname}}</a>
         <span class="muted">— {{.Type}} in {{.Directory}}, last started {{.Relative}}</span></li>
   {{end}}
   </ul>
@@ -155,16 +170,18 @@ uvx localghost run</pre>
 `
 
 type pageEntry struct {
-	Hostname  string
-	Name      string
-	Directory string
-	Type      string
-	Relative  string
+	Hostname        string
+	Name            string
+	Directory       string
+	QuotedDirectory string
+	Type            string
+	Relative        string
 }
 
 type pageData struct {
 	Title string
 	Host  string
+	Port  string
 	Ghost *pageEntry
 	Known []pageEntry
 }
@@ -173,11 +190,12 @@ var page = template.Must(template.New("ghost").Parse(pageTemplate))
 
 func (f *Fallback) respondGhost(rw http.ResponseWriter, e entry, wantsHTML bool) {
 	relative := relativeTime(e.LastStarted)
+	quotedDirectory := shellQuote(e.Directory)
 	if !wantsHTML {
 		rw.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		rw.WriteHeader(http.StatusServiceUnavailable)
 		fmt.Fprintf(rw, "%s is offline. Last started %s from %s.\nRun: cd %s && uvx localghost run\n",
-			e.Name, relative, e.Directory, e.Directory)
+			e.Name, relative, e.Directory, quotedDirectory)
 		return
 	}
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -185,16 +203,17 @@ func (f *Fallback) respondGhost(rw http.ResponseWriter, e entry, wantsHTML bool)
 	_ = page.Execute(rw, pageData{
 		Title: e.Name + " is offline",
 		Ghost: &pageEntry{
-			Hostname:  e.Hostname,
-			Name:      e.Name,
-			Directory: e.Directory,
-			Type:      e.Type,
-			Relative:  relative,
+			Hostname:        e.Hostname,
+			Name:            e.Name,
+			Directory:       e.Directory,
+			QuotedDirectory: quotedDirectory,
+			Type:            e.Type,
+			Relative:        relative,
 		},
 	})
 }
 
-func (f *Fallback) respondUnknown(rw http.ResponseWriter, host string, entries []entry, wantsHTML bool) {
+func (f *Fallback) respondUnknown(rw http.ResponseWriter, host, port string, entries []entry, wantsHTML bool) {
 	if !wantsHTML {
 		rw.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		rw.WriteHeader(http.StatusNotFound)
@@ -213,5 +232,5 @@ func (f *Fallback) respondUnknown(rw http.ResponseWriter, host string, entries [
 	}
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 	rw.WriteHeader(http.StatusNotFound)
-	_ = page.Execute(rw, pageData{Title: "Nothing running here", Host: host, Known: known})
+	_ = page.Execute(rw, pageData{Title: "Nothing running here", Host: host, Port: port, Known: known})
 }

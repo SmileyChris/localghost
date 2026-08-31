@@ -448,6 +448,18 @@ esac
 rm -f "${GHOST_REGISTRY_FILE}"
 GHOST_REGISTRY_FILE=''
 
+log 'Ghost pages: a never-seen host answers 404 with a generic notice'
+unknown_status=$(curl --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' \
+  --max-time 5 --header 'Accept: text/html' "http://never-seen.localhost:${ACTIVE_PORT}/")
+assert_equal 404 "${unknown_status}" 'Unknown host ghost page status'
+
+unknown_body=$(curl --noproxy '*' --silent --max-time 5 --header 'Accept: text/html' \
+  "http://never-seen.localhost:${ACTIVE_PORT}/")
+case "${unknown_body}" in
+  *'No running application'*) ;;
+  *) fail 'Unknown host 404 body missing generic not-found marker' ;;
+esac
+
 log 'Recreate the proxy on a non-default loopback port'
 proxy_https stop traefik
 proxy_https rm -f traefik bootstrap
