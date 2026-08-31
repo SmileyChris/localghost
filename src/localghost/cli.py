@@ -19,7 +19,7 @@ from pathlib import Path
 
 import click
 
-from . import registry, statusbar
+from . import picker, registry, statusbar
 from .compose import resolve_compose, routing_problem
 from .config import (
     CONFIG_NAME,
@@ -184,15 +184,34 @@ def forget(name: str | None, forget_everything: bool) -> None:
     success(f"Forgot {name}.")
 
 
+def _summon_interactive() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _summon_entry(ctx: click.Context, entry: registry.RegistryEntry) -> None:
+    directory = Path(entry.directory)
+    if not directory.is_dir():
+        raise click.ClickException(
+            f"remembered directory '{directory}' no longer exists; "
+            f"forget it with: localghost forget {entry.name}"
+        )
+    ctx.invoke(run, working_directory=directory)
+
+
 @cli.command()
 @click.argument("name", required=False)
 @click.pass_context
 def summon(ctx: click.Context, name: str | None) -> None:
-    """Run a remembered project by name; with no name, list what is remembered."""
+    """Run a remembered project by name; with no name, pick from the list."""
     entries = registry.entries()
     if name is None:
         if not entries:
             click.echo("Nothing remembered yet; run a project to give it a ghost.")
+            return
+        if _summon_interactive():
+            chosen = picker.pick(entries, forget=registry.forget)
+            if chosen is not None:
+                _summon_entry(ctx, chosen)
             return
         for entry in entries:
             click.echo(
@@ -205,13 +224,7 @@ def summon(ctx: click.Context, name: str | None) -> None:
         raise click.ClickException(
             f"no remembered project '{name}' (remembered: {known})"
         )
-    directory = Path(match.directory)
-    if not directory.is_dir():
-        raise click.ClickException(
-            f"remembered directory '{directory}' no longer exists; "
-            f"forget it with: localghost forget {name}"
-        )
-    ctx.invoke(run, working_directory=directory)
+    _summon_entry(ctx, match)
 
 
 @cli.group(invoke_without_command=True)

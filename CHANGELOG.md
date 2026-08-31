@@ -21,8 +21,10 @@ uses [Semantic Versioning](https://semver.org/).
   for remembered hostnames, so ghost pages serve over `https://` without
   browser warnings after a project stops.
 - New `localghost summon <name>` runs a remembered project from its recorded
-  directory, from anywhere; bare `summon` lists remembered projects. Ghost
-  pages now offer `summon`/`forget` as click-to-copy command chips.
+  directory, from anywhere; bare `summon` opens an interactive picker on a
+  terminal (Enter summons, Delete forgets) and prints a plain listing when
+  piped. Ghost pages now offer `summon`/`forget` as click-to-copy command
+  chips.
 
 ### Changed
 

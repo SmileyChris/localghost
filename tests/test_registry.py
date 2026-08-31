@@ -290,3 +290,44 @@ def test_summon_runs_project_from_remembered_directory(tmp_path, monkeypatch):
     result = CliRunner().invoke(cli, ["summon", "blog"])
     assert result.exit_code == 0, result.output
     assert captured["working_directory"] == project
+
+
+def test_summon_bare_uses_picker_on_tty(tmp_path, monkeypatch):
+    from localghost import cli as cli_module
+
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    project = tmp_path / "blog"
+    project.mkdir()
+    registry.record("blog", project, "django")
+    entry = registry.entries()[0]
+    monkeypatch.setattr(cli_module, "_summon_interactive", lambda: True)
+    picked = {}
+    monkeypatch.setattr(
+        cli_module.picker,
+        "pick",
+        lambda entries, forget: picked.setdefault("entries", entries) and entry
+        or entry,
+    )
+    captured = {}
+    monkeypatch.setattr(
+        cli_module.run, "callback", lambda **kwargs: captured.update(kwargs)
+    )
+    result = CliRunner().invoke(cli, ["summon"])
+    assert result.exit_code == 0, result.output
+    assert captured["working_directory"] == project
+
+
+def test_summon_bare_picker_cancelled_runs_nothing(tmp_path, monkeypatch):
+    from localghost import cli as cli_module
+
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    registry.record("blog", tmp_path / "blog", "django")
+    monkeypatch.setattr(cli_module, "_summon_interactive", lambda: True)
+    monkeypatch.setattr(cli_module.picker, "pick", lambda entries, forget: None)
+    captured = {}
+    monkeypatch.setattr(
+        cli_module.run, "callback", lambda **kwargs: captured.update(kwargs)
+    )
+    result = CliRunner().invoke(cli, ["summon"])
+    assert result.exit_code == 0, result.output
+    assert captured == {}
