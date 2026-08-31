@@ -80,13 +80,6 @@ func requestHostPort(req *http.Request) (host, port string) {
 	return strings.ToLower(host), port
 }
 
-// shellQuote renders s as a single-quoted POSIX shell argument, so a
-// resurrect command copy-pastes safely even when the directory contains
-// spaces. Directories containing single quotes are out of scope.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
-
 // entries reads the registry fresh per request; hub traffic is a developer
 // clicking a link, so simplicity beats caching.
 func (f *Fallback) entries() []entry {
@@ -157,6 +150,12 @@ const pageTemplate = `<!doctype html>
   .wordmark { font-family: "Nunito", system-ui, sans-serif; font-weight: 700;
               margin-top: 2.5rem; }
   .wordmark a { color: #1f2933; text-decoration: none; }
+  .cmd { font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+         background: #f1faf5; border: 1px solid #71d5a7; border-radius: .4rem;
+         padding: .4rem .8rem; cursor: pointer; color: #21654d; font-size: .95rem; }
+  .cmd:hover { background: #e3f5eb; }
+  .cmd.copied::after { content: " ✓ copied"; color: #2f8b69; }
+  .cmd-quiet { border-color: #d3dce2; color: #6b7a85; background: #f7f9fa; }
 </style>
 </head>
 <body>
@@ -182,9 +181,9 @@ const pageTemplate = `<!doctype html>
   <p>A {{.Ghost.Type}} project last started {{.Ghost.Relative}} from
      <code>{{.Ghost.Directory}}</code>.</p>
   <p>Bring it back:</p>
-  <pre>cd {{.Ghost.QuotedDirectory}}
-uvx localghost run</pre>
-  <p class="muted">Forget this page with <code>localghost forget {{.Ghost.Name}}</code>.</p>
+  <p><button class="cmd" data-cmd="uvx localghost summon {{.Ghost.Name}}">uvx localghost summon {{.Ghost.Name}}</button></p>
+  <p class="muted">Or lay it to rest:
+     <button class="cmd cmd-quiet" data-cmd="uvx localghost forget {{.Ghost.Name}}">uvx localghost forget {{.Ghost.Name}}</button></p>
 {{else}}
   <h1><img class="ghost-inline" src="{{.Icon}}" alt="">Nothing haunts <span class="quiet">{{.Host}}</span></h1>
   <p>No running application and no remembered project answers to this name.</p>
@@ -202,17 +201,29 @@ uvx localghost run</pre>
   <p class="wordmark"><a href="//localhost{{if .Port}}:{{.Port}}{{end}}">local<span class="accent">ghost</span></a></p>
 {{end}}
 </main>
+<script>
+for (const chip of document.querySelectorAll(".cmd")) {
+  chip.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(chip.dataset.cmd);
+    } catch (err) {
+      return;
+    }
+    chip.classList.add("copied");
+    setTimeout(() => chip.classList.remove("copied"), 1200);
+  });
+}
+</script>
 </body>
 </html>
 `
 
 type pageEntry struct {
-	Hostname        string
-	Name            string
-	Directory       string
-	QuotedDirectory string
-	Type            string
-	Relative        string
+	Hostname  string
+	Name      string
+	Directory string
+	Type      string
+	Relative  string
 }
 
 type pageData struct {
@@ -271,12 +282,11 @@ func (f *Fallback) respondWelcome(rw http.ResponseWriter, port string, entries [
 
 func (f *Fallback) respondGhost(rw http.ResponseWriter, e entry, wantsHTML bool) {
 	relative := relativeTime(e.LastStarted)
-	quotedDirectory := shellQuote(e.Directory)
 	if !wantsHTML {
 		rw.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		rw.WriteHeader(http.StatusServiceUnavailable)
-		fmt.Fprintf(rw, "%s is offline. Last started %s from %s.\nRun: cd %s && uvx localghost run\n",
-			e.Name, relative, e.Directory, quotedDirectory)
+		fmt.Fprintf(rw, "%s is offline. Last started %s from %s.\nRun: uvx localghost summon %s\n",
+			e.Name, relative, e.Directory, e.Name)
 		return
 	}
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -285,12 +295,11 @@ func (f *Fallback) respondGhost(rw http.ResponseWriter, e entry, wantsHTML bool)
 		Title: e.Name + " is offline",
 		Icon:  ghostURL,
 		Ghost: &pageEntry{
-			Hostname:        e.Hostname,
-			Name:            e.Name,
-			Directory:       e.Directory,
-			QuotedDirectory: quotedDirectory,
-			Type:            e.Type,
-			Relative:        relative,
+			Hostname:  e.Hostname,
+			Name:      e.Name,
+			Directory: e.Directory,
+			Type:      e.Type,
+			Relative:  relative,
 		},
 	})
 }

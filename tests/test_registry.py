@@ -240,3 +240,53 @@ def test_run_compose_records_registry_entry(tmp_path, monkeypatch):
     assert len(saved) == 1
     assert saved[0].name == "demo"
     assert saved[0].type == "compose"
+
+
+def test_summon_lists_remembered_projects(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    registry.record("blog", tmp_path / "blog", "django")
+    result = CliRunner().invoke(cli, ["summon"])
+    assert result.exit_code == 0
+    assert "blog.localhost" in result.output
+    assert "django" in result.output
+
+
+def test_summon_with_nothing_remembered(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    result = CliRunner().invoke(cli, ["summon"])
+    assert result.exit_code == 0
+    assert "Nothing remembered" in result.output
+
+
+def test_summon_unknown_name_fails_and_hints(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    registry.record("blog", tmp_path / "blog", "django")
+    result = CliRunner().invoke(cli, ["summon", "shop"])
+    assert result.exit_code != 0
+    assert "no remembered project 'shop'" in result.output
+    assert "blog" in result.output
+
+
+def test_summon_missing_directory_fails(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    registry.record("gone", tmp_path / "nope", "vite")
+    result = CliRunner().invoke(cli, ["summon", "gone"])
+    assert result.exit_code != 0
+    assert "no longer exists" in result.output
+    assert "localghost forget gone" in result.output
+
+
+def test_summon_runs_project_from_remembered_directory(tmp_path, monkeypatch):
+    from localghost import cli as cli_module
+
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    project = tmp_path / "blog"
+    project.mkdir()
+    registry.record("blog", project, "django")
+    captured = {}
+    monkeypatch.setattr(
+        cli_module.run, "callback", lambda **kwargs: captured.update(kwargs)
+    )
+    result = CliRunner().invoke(cli, ["summon", "blog"])
+    assert result.exit_code == 0, result.output
+    assert captured["working_directory"] == project

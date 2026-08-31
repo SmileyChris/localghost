@@ -184,6 +184,36 @@ def forget(name: str | None, forget_everything: bool) -> None:
     success(f"Forgot {name}.")
 
 
+@cli.command()
+@click.argument("name", required=False)
+@click.pass_context
+def summon(ctx: click.Context, name: str | None) -> None:
+    """Run a remembered project by name; with no name, list what is remembered."""
+    entries = registry.entries()
+    if name is None:
+        if not entries:
+            click.echo("Nothing remembered yet; run a project to give it a ghost.")
+            return
+        for entry in entries:
+            click.echo(
+                f"{entry.name}  {entry.type}  {entry.hostname}  {entry.directory}"
+            )
+        return
+    match = next((entry for entry in entries if entry.name == name), None)
+    if match is None:
+        known = ", ".join(entry.name for entry in entries) or "nothing"
+        raise click.ClickException(
+            f"no remembered project '{name}' (remembered: {known})"
+        )
+    directory = Path(match.directory)
+    if not directory.is_dir():
+        raise click.ClickException(
+            f"remembered directory '{directory}' no longer exists; "
+            f"forget it with: localghost forget {name}"
+        )
+    ctx.invoke(run, working_directory=directory)
+
+
 @cli.group(invoke_without_command=True)
 @click.pass_context
 def manage(ctx: click.Context) -> None:

@@ -20,6 +20,9 @@ uses [Semantic Versioning](https://semver.org/).
 - On an HTTPS hub, the certificate authority now keeps issuing certificates
   for remembered hostnames, so ghost pages serve over `https://` without
   browser warnings after a project stops.
+- New `localghost summon <name>` runs a remembered project from its recorded
+  directory, from anywhere; bare `summon` lists remembered projects. Ghost
+  pages now offer `summon`/`forget` as click-to-copy command chips.
 
 ### Changed
 

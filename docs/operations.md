@@ -97,6 +97,16 @@ with a page naming the project, its directory, when it last started, and
 the command to start it again. Hostnames the hub has never routed return
 **404 Not Found** with a page listing the remembered projects.
 
+Bring a remembered project back from anywhere — no need to find its
+directory first:
+
+```sh
+uvx localghost summon <name>
+```
+
+Bare `uvx localghost summon` lists everything localghost remembers. The
+commands on a ghost page are click-to-copy.
+
 Entries are JSON files under the state directory's `registry/` folder,
 written on every `run` and `save` and mounted read-only into the hub.
 Remove one with:

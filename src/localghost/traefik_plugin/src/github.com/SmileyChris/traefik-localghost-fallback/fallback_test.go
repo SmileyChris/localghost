@@ -63,7 +63,7 @@ func TestKnownHostServes503GhostPage(t *testing.T) {
 		t.Fatalf("status = %d, want 503", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"blog", "/home/dev/blog", "localghost run", "data:image/png;base64,"} {
+	for _, want := range []string{"blog", "/home/dev/blog", "uvx localghost summon blog", "uvx localghost forget blog", "data:image/png;base64,"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("body missing %q:\n%s", want, body)
 		}
@@ -134,20 +134,12 @@ func TestMalformedEntryIsSkipped(t *testing.T) {
 	}
 }
 
-func TestResurrectCommandQuotesDirectoryWithSpaces(t *testing.T) {
+func TestPlainTextGhostSuggestsSummon(t *testing.T) {
 	dir := t.TempDir()
-	writeEntryDir(t, dir, "blog", "blog.localhost", "/home/dev/my blog")
-
-	rec := get(handler(t, dir), "blog.localhost", "text/html")
-	// html/template HTML-escapes the quotes it renders into body text, so a
-	// literal `'` comes out as `&#39;`.
-	if !strings.Contains(rec.Body.String(), `cd &#39;/home/dev/my blog&#39;`) {
-		t.Fatalf("HTML resurrect command should quote the directory:\n%s", rec.Body.String())
-	}
-
-	plain := get(handler(t, dir), "blog.localhost", "application/json")
-	if !strings.Contains(plain.Body.String(), `Run: cd '/home/dev/my blog' && uvx localghost run`) {
-		t.Fatalf("plain-text resurrect command should quote the directory:\n%s", plain.Body.String())
+	writeEntry(t, dir, "blog", "blog.localhost")
+	rec := get(handler(t, dir), "blog.localhost", "application/json")
+	if !strings.Contains(rec.Body.String(), "uvx localghost summon blog") {
+		t.Fatalf("plain-text ghost should suggest summon: %q", rec.Body.String())
 	}
 }
 
