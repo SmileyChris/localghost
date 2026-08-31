@@ -10,12 +10,14 @@ raw-terminal handling at the edge.
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 import termios
 import tty
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 
 from .feedback import LIME, MINT
 from .registry import RegistryEntry
@@ -51,8 +53,10 @@ def decode_key(data: bytes) -> str:
         return "down"
     if data in (b"\r", b"\n"):
         return "enter"
-    if data == b"\x1b[3~":
+    if data in (b"\x1b[3~", b"\x7f", b"\x08"):
         return "delete"
+    if data == b"u":
+        return "undo"
     if data in (b"q", b"\x1b"):
         return "quit"
     if data == b"\x03":
@@ -60,11 +64,17 @@ def decode_key(data: bytes) -> str:
     return "other"
 
 
+@dataclass(frozen=True)
+class Restored:
+    entry: RegistryEntry
+
+
 @dataclass
 class PickerModel:
     entries: list[RegistryEntry]
     selected: int = 0
     notice: str = ""
+    last_forgotten: tuple[int, RegistryEntry] | None = None
 
     def current(self) -> RegistryEntry | None:
         if not self.entries:
@@ -85,10 +95,22 @@ class PickerModel:
             entry = self.current()
             if entry is None:
                 return None
+            index = self.selected
             self.entries.remove(entry)
             self.selected = min(self.selected, max(len(self.entries) - 1, 0))
-            self.notice = f"Forgot {entry.name}."
+            self.last_forgotten = (index, entry)
+            self.notice = f"Forgot {entry.name}. (u to undo)"
             return Forgot(entry)
+        if key == "undo":
+            if self.last_forgotten is None:
+                return None
+            index, entry = self.last_forgotten
+            self.last_forgotten = None
+            index = min(index, len(self.entries))
+            self.entries.insert(index, entry)
+            self.selected = index
+            self.notice = f"Remembered {entry.name} again."
+            return Restored(entry)
         if key == "quit":
             return QUIT
         return None
@@ -110,23 +132,44 @@ def _relative(stamp: str) -> str:
     return f"{minutes // (24 * 60)} days ago"
 
 
-def render_lines(model: PickerModel) -> list[str]:
+def _tilde(directory: str) -> str:
+    home = str(Path.home())
+    if directory == home or directory.startswith(home + "/"):
+        return "~" + directory[len(home) :]
+    return directory
+
+
+def render_lines(model: PickerModel, width: int = 80) -> list[str]:
     lines = [f"{_DIM}Remembered projects — Enter summon · Del forget · q quit{_RESET}"]
+    host_width = max((len(e.hostname) for e in model.entries), default=0)
+    type_width = max((len(e.type) for e in model.entries), default=0)
     for index, entry in enumerate(model.entries):
         row = (
-            f"  {entry.hostname}  {entry.type}  "
-            f"{entry.directory}  ({_relative(entry.last_started)})"
+            f"  {entry.hostname:<{host_width}}  {entry.type:<{type_width}}  "
+            f"{_tilde(entry.directory)}  ({_relative(entry.last_started)})"
         )
+        # Clip before styling so a wrapped line never breaks the redraw's
+        # cursor arithmetic, and style by index so the clip stays honest.
+        if len(row) > width:
+            row = row[: max(width - 1, 1)] + "…"
         if index == model.selected:
             row = f"{_HIGHLIGHT}» {row[2:]}{_RESET}"
+        else:
+            split = min(2 + host_width, len(row))
+            row = f"{row[:split]}{_DIM}{row[split:]}{_RESET}"
         lines.append(row)
+    if not model.entries:
+        lines.append(f"{_DIM}Nothing remembered any more.{_RESET}")
     if model.notice:
         lines.append(f"{_NOTICE}{model.notice}{_RESET}")
     return lines
 
 
 def pick(
-    entries: list[RegistryEntry], *, forget: Callable[[str], bool]
+    entries: list[RegistryEntry],
+    *,
+    forget: Callable[[str], bool],
+    restore: Callable[[RegistryEntry], None],
 ) -> RegistryEntry | None:
     """Run the picker; return the entry to summon, or None."""
     model = PickerModel(list(entries))
@@ -139,7 +182,7 @@ def pick(
         nonlocal drawn
         if drawn:
             out.write(f"\x1b[{drawn}A")
-        lines = render_lines(model)
+        lines = render_lines(model, width=shutil.get_terminal_size().columns)
         for line in lines:
             out.write(f"\x1b[2K{line}\r\n")
         # A shrinking list (after Delete) leaves a stale line behind.
@@ -164,10 +207,9 @@ def pick(
                 return None
             if isinstance(outcome, Forgot):
                 forget(outcome.entry.name)
-                if not model.entries:
-                    redraw()
-                    return None
-            if isinstance(outcome, Summon):
+            elif isinstance(outcome, Restored):
+                restore(outcome.entry)
+            elif isinstance(outcome, Summon):
                 return outcome.entry
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, saved)

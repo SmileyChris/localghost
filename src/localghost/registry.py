@@ -46,15 +46,27 @@ def record(name: str, directory: Path, run_type: str) -> None:
         .isoformat(timespec="seconds"),
     )
     try:
-        registry_dir().mkdir(parents=True, exist_ok=True)
-        path = registry_dir() / f"{name}.json"
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(
-            json.dumps(entry.__dict__, indent=2) + "\n", encoding="utf-8"
-        )
-        temporary.replace(path)
+        _write(entry)
     except OSError as exc:
         warning("Could not record project for ghost pages", [str(exc)])
+
+
+def restore(entry: RegistryEntry) -> None:
+    """Re-write a previously read entry verbatim (undo for `forget`)."""
+    try:
+        _write(entry)
+    except OSError as exc:
+        warning("Could not restore project for ghost pages", [str(exc)])
+
+
+def _write(entry: RegistryEntry) -> None:
+    registry_dir().mkdir(parents=True, exist_ok=True)
+    path = registry_dir() / f"{entry.name}.json"
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(
+        json.dumps(entry.__dict__, indent=2) + "\n", encoding="utf-8"
+    )
+    temporary.replace(path)
 
 
 def entries() -> list[RegistryEntry]:

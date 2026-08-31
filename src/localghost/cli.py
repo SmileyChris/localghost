@@ -209,7 +209,9 @@ def summon(ctx: click.Context, name: str | None) -> None:
             click.echo("Nothing remembered yet; run a project to give it a ghost.")
             return
         if _summon_interactive():
-            chosen = picker.pick(entries, forget=registry.forget)
+            chosen = picker.pick(
+                entries, forget=registry.forget, restore=registry.restore
+            )
             if chosen is not None:
                 _summon_entry(ctx, chosen)
             return

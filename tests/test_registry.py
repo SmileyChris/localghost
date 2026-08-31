@@ -305,7 +305,7 @@ def test_summon_bare_uses_picker_on_tty(tmp_path, monkeypatch):
     monkeypatch.setattr(
         cli_module.picker,
         "pick",
-        lambda entries, forget: picked.setdefault("entries", entries) and entry
+        lambda entries, **callbacks: picked.setdefault("entries", entries) and entry
         or entry,
     )
     captured = {}
@@ -323,7 +323,7 @@ def test_summon_bare_picker_cancelled_runs_nothing(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
     registry.record("blog", tmp_path / "blog", "django")
     monkeypatch.setattr(cli_module, "_summon_interactive", lambda: True)
-    monkeypatch.setattr(cli_module.picker, "pick", lambda entries, forget: None)
+    monkeypatch.setattr(cli_module.picker, "pick", lambda entries, **callbacks: None)
     captured = {}
     monkeypatch.setattr(
         cli_module.run, "callback", lambda **kwargs: captured.update(kwargs)
@@ -331,3 +331,12 @@ def test_summon_bare_picker_cancelled_runs_nothing(tmp_path, monkeypatch):
     result = CliRunner().invoke(cli, ["summon"])
     assert result.exit_code == 0, result.output
     assert captured == {}
+
+
+def test_restore_preserves_original_entry(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    registry.record("blog", tmp_path / "blog", "django")
+    original = registry.entries()[0]
+    assert registry.forget("blog")
+    registry.restore(original)
+    assert registry.entries() == [original]

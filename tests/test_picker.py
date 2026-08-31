@@ -77,3 +77,82 @@ def test_render_lines_marks_selection():
     selected = [line for line in lines if "\x1b[38;2;163;230;53m" in line]
     assert len(selected) == 1
     assert "b" in selected[0]
+
+
+def test_decode_undo_and_backspace():
+    assert picker.decode_key(b"u") == "undo"
+    assert picker.decode_key(b"\x7f") == "delete"
+    assert picker.decode_key(b"\x08") == "delete"
+
+
+def test_undo_restores_forgotten_entry_at_its_place():
+    model = picker.PickerModel([entry("a"), entry("b"), entry("c")])
+    model.apply("down")
+    model.apply("delete")
+    assert [e.name for e in model.entries] == ["a", "c"]
+    outcome = model.apply("undo")
+    assert isinstance(outcome, picker.Restored)
+    assert outcome.entry.name == "b"
+    assert [e.name for e in model.entries] == ["a", "b", "c"]
+    assert model.selected == 1
+    assert "Remembered b" in model.notice
+
+
+def test_undo_without_forget_is_noop():
+    model = picker.PickerModel([entry("a")])
+    assert model.apply("undo") is None
+
+
+def test_undo_only_restores_once():
+    model = picker.PickerModel([entry("a")])
+    model.apply("delete")
+    assert isinstance(model.apply("undo"), picker.Restored)
+    assert model.apply("undo") is None
+    assert len(model.entries) == 1
+
+
+def test_forget_notice_teaches_undo():
+    model = picker.PickerModel([entry("a")])
+    model.apply("delete")
+    assert "(u to undo)" in model.notice
+
+
+def test_render_aligns_columns():
+    import re
+
+    model = picker.PickerModel([entry("a"), entry("longername")])
+    lines = [
+        re.sub(r"\x1b\[[0-9;]*m", "", line)
+        for line in picker.render_lines(model, width=120)
+    ]
+    assert lines[1].index("django") == lines[2].index("django")
+
+
+def test_render_truncates_to_width():
+    model = picker.PickerModel([entry("averyveryverylongprojectname")])
+    lines = picker.render_lines(model, width=40)
+    for line in lines[1:]:
+        stripped = line
+        for code in ("\x1b[7m", "\x1b[0m", "\x1b[1m", "\x1b[2m"):
+            stripped = stripped.replace(code, "")
+        while "\x1b[38;2;" in stripped:
+            start = stripped.index("\x1b[38;2;")
+            end = stripped.index("m", start) + 1
+            stripped = stripped[:start] + stripped[end:]
+        assert len(stripped) <= 40
+    assert any("…" in line for line in lines)
+
+
+def test_render_abbreviates_home_directory(monkeypatch):
+    monkeypatch.setenv("HOME", "/tmp")
+    model = picker.PickerModel([entry("a")])
+    lines = picker.render_lines(model, width=120)
+    assert "~/a" in lines[1]
+    assert "/tmp/a" not in lines[1]
+
+
+def test_render_empty_list_explains_itself():
+    model = picker.PickerModel([entry("a")])
+    model.apply("delete")
+    lines = picker.render_lines(model, width=120)
+    assert any("Nothing remembered" in line for line in lines)

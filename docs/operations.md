@@ -106,8 +106,8 @@ uvx localghost summon <name>
 
 Bare `uvx localghost summon` on a terminal opens an interactive picker:
 arrow keys (or `j`/`k`) move, Enter summons the selected project, Delete
-forgets it, and `q` leaves. When output is piped it prints a plain
-listing instead. The commands on a ghost page are click-to-copy.
+(or Backspace) forgets it, `u` undoes the last forget, and `q` leaves.
+When output is piped it prints a plain listing instead. The commands on a ghost page are click-to-copy.
 
 Entries are JSON files under the state directory's `registry/` folder,
 written on every `run` and `save` and mounted read-only into the hub.
