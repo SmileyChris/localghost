@@ -166,3 +166,51 @@ func TestMissingRegistryPathConfigIsAnError(t *testing.T) {
 		t.Fatal("expected configuration error")
 	}
 }
+
+func TestLocalhostServesWelcomePage(t *testing.T) {
+	dir := t.TempDir()
+	writeEntry(t, dir, "blog", "blog.localhost")
+	rec := get(handler(t, dir), "localhost", "text/html")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"localghost", "blog.localhost", "data:image/png;base64,", "traefik.localhost"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("welcome body missing %q", want)
+		}
+	}
+}
+
+func TestLoopbackIPWelcomeCarriesPortInLinks(t *testing.T) {
+	dir := t.TempDir()
+	writeEntry(t, dir, "blog", "blog.localhost")
+	rec := get(handler(t, dir), "127.0.0.1:18080", "text/html")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "//blog.localhost:18080") {
+		t.Fatalf("welcome links should carry the hub port:\n%s", rec.Body.String())
+	}
+}
+
+func TestLocalhostPlainTextWelcome(t *testing.T) {
+	dir := t.TempDir()
+	rec := get(handler(t, dir), "localhost", "application/json")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/plain") {
+		t.Fatalf("Content-Type = %q, want text/plain", got)
+	}
+	if !strings.Contains(rec.Body.String(), "hub is running") {
+		t.Fatalf("plain welcome missing status line: %q", rec.Body.String())
+	}
+}
+
+func TestWelcomeWithoutRegistryStillRenders(t *testing.T) {
+	rec := get(handler(t, filepath.Join(t.TempDir(), "absent")), "localhost", "text/html")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+}

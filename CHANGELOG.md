@@ -14,6 +14,9 @@ uses [Semantic Versioning](https://semver.org/).
   `localghost forget` command drops entries. A hub started from the
   self-contained `compose.yaml` is recreated once by the first CLI
   reconcile, which adds the registry mount.
+- The bare `http://localhost` hostname now serves the hub's welcome page —
+  logo, remembered projects, and links to the Traefik dashboard and
+  documentation. Ghost pages share the documentation site's styling.
 
 ### Changed
 
