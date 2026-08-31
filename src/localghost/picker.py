@@ -140,7 +140,9 @@ def _tilde(directory: str) -> str:
 
 
 def render_lines(model: PickerModel, width: int = 80) -> list[str]:
-    lines = [f"{_DIM}Remembered projects — Enter summon · Del forget · q quit{_RESET}"]
+    lines = [
+        f"{_DIM}Remembered projects — Enter summon · Del forget · q or Esc quit{_RESET}"
+    ]
     host_width = max((len(e.hostname) for e in model.entries), default=0)
     type_width = max((len(e.type) for e in model.entries), default=0)
     for index, entry in enumerate(model.entries):
