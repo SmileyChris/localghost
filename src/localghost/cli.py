@@ -883,8 +883,15 @@ def _run_proxy(
         try:
             environment = os.environ.copy()
             environment["LOCALGHOST_IMAGE_TAG"] = f"v{LOCALGHOST_VERSION}"
-            registry.registry_dir().mkdir(parents=True, exist_ok=True)
-            environment["LOCALGHOST_REGISTRY_DIR"] = str(registry.registry_dir())
+            try:
+                registry.registry_dir().mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                # Registry failures must never break a run: leave
+                # LOCALGHOST_REGISTRY_DIR unset so compose falls back to its
+                # default mount (/tmp/localghost-registry), which stays valid.
+                warning("Could not prepare ghost page registry", [str(exc)])
+            else:
+                environment["LOCALGHOST_REGISTRY_DIR"] = str(registry.registry_dir())
             result = subprocess.run(
                 command, check=False, capture_output=True, text=True, env=environment
             )

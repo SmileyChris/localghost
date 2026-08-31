@@ -51,6 +51,14 @@ def test_forget_removes_entry(tmp_path, monkeypatch):
     assert registry.entries() == []
 
 
+def test_forget_rejects_path_traversal(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    escape_target = tmp_path / "escape.json"
+    escape_target.write_text("not a registry entry")
+    assert registry.forget("../escape") is False
+    assert escape_target.exists()
+
+
 def test_forget_all(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
     registry.record("a", tmp_path, "django")

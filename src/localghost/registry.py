@@ -81,6 +81,14 @@ def entries() -> list[RegistryEntry]:
 
 
 def forget(name: str) -> bool:
+    if (
+        not name
+        or "/" in name
+        or "\\" in name
+        or Path(name).name != name
+        or name in {".", ".."}
+    ):
+        return False
     path = registry_dir() / f"{name}.json"
     try:
         path.unlink()
