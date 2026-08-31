@@ -350,3 +350,71 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { retu
 func dockerResponse(body string) *http.Response {
 	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}
 }
+
+func writeRegistryEntry(t *testing.T, dir, name, hostname string) {
+	t.Helper()
+	payload := fmt.Sprintf(
+		`{"hostname":%q,"name":%q,"directory":"/tmp/x","type":"django","last_started":"2026-08-30T12:00:00+00:00"}`,
+		hostname, name)
+	if err := os.WriteFile(filepath.Join(dir, name+".json"), []byte(payload), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDesiredSpecsIncludeRegistryHostnames(t *testing.T) {
+	p := newTestProvider(t)
+	dir := t.TempDir()
+	writeRegistryEntry(t, dir, "blog", "blog.localhost")
+	p.registryPath = dir
+	specs, err := p.desiredSpecs(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(specs) != 1 || specs[0].kind != "metadata" || specs[0].name != "blog.localhost" {
+		t.Fatalf("unexpected specs: %#v", specs)
+	}
+}
+
+func TestRegistryHostnamesDeduplicateAgainstRunningContainers(t *testing.T) {
+	p := newTestProvider(t)
+	dir := t.TempDir()
+	writeRegistryEntry(t, dir, "host", "host.localhost")
+	p.registryPath = dir
+	specs, err := p.desiredSpecs([]ContainerInfo{{MetadataDomains: []string{"host.localhost"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(specs) != 1 {
+		t.Fatalf("expected single deduplicated spec: %#v", specs)
+	}
+}
+
+func TestRegistrySkipsInvalidAndUnreadableEntries(t *testing.T) {
+	p := newTestProvider(t)
+	dir := t.TempDir()
+	writeRegistryEntry(t, dir, "evil", "evil.example.com")
+	if err := os.WriteFile(filepath.Join(dir, "bad.json"), []byte("{nope"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeRegistryEntry(t, dir, "good", "good.localhost")
+	p.registryPath = dir
+	specs, err := p.desiredSpecs(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(specs) != 1 || specs[0].name != "good.localhost" {
+		t.Fatalf("unexpected specs: %#v", specs)
+	}
+}
+
+func TestMissingRegistryPathIsIgnored(t *testing.T) {
+	p := newTestProvider(t)
+	p.registryPath = filepath.Join(t.TempDir(), "absent")
+	specs, err := p.desiredSpecs(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(specs) != 0 {
+		t.Fatalf("unexpected specs: %#v", specs)
+	}
+}

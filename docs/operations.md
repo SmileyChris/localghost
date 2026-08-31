@@ -109,6 +109,11 @@ or clear them all with `uvx localghost forget --all`. Status codes are
 unchanged from a hub without ghost pages, so scripts and health checks
 keep working; only response bodies differ.
 
+On an HTTPS hub, remembered hostnames keep their certificates after their
+applications stop, so ghost pages serve over `https://` without browser
+warnings. Hostnames the hub has never routed still present Traefik's
+default self-signed certificate.
+
 A hub started manually from the repository's self-contained `compose.yaml`
 carries no registry mount, so it serves only the generic not-found page.
 The first CLI command that reconciles such a hub recreates its container

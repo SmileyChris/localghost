@@ -174,6 +174,12 @@ def test_https_proxy_adds_secure_fallback_router(tmp_path) -> None:
         "--experimental.localplugins.localghostFallback.modulename="
         "github.com/SmileyChris/traefik-localghost-fallback" in command
     )
+    # The CA provider reads the same registry so remembered hostnames keep
+    # certificates after their containers stop.
+    assert (
+        "--providers.plugin.localghostCA.registrypath=/var/lib/localghost-registry"
+        in command
+    )
 
 
 def test_https_proxy_adds_loopback_dashboard_with_secure_redirect() -> None:

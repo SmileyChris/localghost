@@ -17,6 +17,9 @@ uses [Semantic Versioning](https://semver.org/).
 - The bare `http://localhost` hostname now serves the hub's welcome page —
   logo, remembered projects, and links to the Traefik dashboard and
   documentation. Ghost pages share the documentation site's styling.
+- On an HTTPS hub, the certificate authority now keeps issuing certificates
+  for remembered hostnames, so ghost pages serve over `https://` without
+  browser warnings after a project stops.
 
 ### Changed
 

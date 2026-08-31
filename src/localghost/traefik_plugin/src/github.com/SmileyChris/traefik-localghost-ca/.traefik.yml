@@ -10,3 +10,4 @@ testData:
   pollInterval: 500ms
   domainSuffix: localhost
   leafLifetime: 24h
+  registryPath: /var/lib/localghost-registry

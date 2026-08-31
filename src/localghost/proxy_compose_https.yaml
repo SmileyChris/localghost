@@ -36,6 +36,9 @@ services:
       - --providers.plugin.localghostCA.domainsuffix=localhost
       - --providers.plugin.localghostCA.leaflifetime=24h
       - --providers.plugin.localghostCA.renewbefore=6h
+      # Ghost pages: remembered hostnames keep certificates after their
+      # containers stop, so offline pages serve without TLS warnings.
+      - --providers.plugin.localghostCA.registrypath=/var/lib/localghost-registry
       - --experimental.abortonpluginfailure=true
       - --experimental.localplugins.localghostCA.modulename=github.com/SmileyChris/traefik-localghost-ca
       - --experimental.localplugins.localghostFallback.modulename=github.com/SmileyChris/traefik-localghost-fallback
