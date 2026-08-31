@@ -11,7 +11,9 @@ uses [Semantic Versioning](https://semver.org/).
   friendly offline page (HTTP 503) for stopped projects instead of a bare
   404, including the directory and command needed to start them again.
   Unknown hostnames get a page listing remembered projects. New
-  `localghost forget` command drops entries.
+  `localghost forget` command drops entries. A hub started from the
+  self-contained `compose.yaml` is recreated once by the first CLI
+  reconcile, which adds the registry mount.
 
 ### Changed
 

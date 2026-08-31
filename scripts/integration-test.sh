@@ -317,8 +317,20 @@ for attempt in $(seq 1 20); do
   fi
   sleep 1
 done
-assert_equal "${second_proxy_id}" "$(proxy ps -q traefik)" \
-  'Proxy ID after foreground bridge removal'
+# The foreground run reconciles the hub with the packaged Compose file,
+# which carries the ghost-page registry mount the self-contained
+# compose.yaml deliberately omits, so the first CLI reconcile of a
+# root-compose hub recreates it once. Adopt the upgraded container as the
+# baseline and prove the upgrade actually delivered the registry mount.
+cli_proxy_id=$(proxy ps -q traefik)
+assert_equal 1 "$(proxy ps -q traefik | wc -l | tr -d ' ')" \
+  'Proxy container count after foreground bridge'
+docker inspect --format \
+  '{{range .Mounts}}{{.Destination}}{{"\n"}}{{end}}' "${cli_proxy_id}" \
+  | grep -qx '/var/lib/localghost-registry' || \
+  fail 'CLI-reconciled hub is missing the ghost-page registry mount'
+wait_for_healthy_proxy
+assert_loopback_publication "${cli_proxy_id}" "${DEFAULT_PORT}"
 wait_for_body "${PROJECT_B}.localhost" "Hostname: ${b_web_hostname}" >/dev/null
 
 log 'Save, build, and route an application from a Dockerfile'
@@ -371,7 +383,7 @@ assert_equal 200 "${dashboard_status}" 'Traefik dashboard response status'
 
 log 'Remove one consumer without affecting the proxy or the other consumer'
 app "${PROJECT_A}" down --remove-orphans
-assert_equal "${second_proxy_id}" "$(proxy ps -q traefik)" 'Proxy ID after consumer removal'
+assert_equal "${cli_proxy_id}" "$(proxy ps -q traefik)" 'Proxy ID after consumer removal'
 wait_for_body "${PROJECT_B}.localhost" "Hostname: ${b_web_hostname}" >/dev/null
 
 log 'Restart and reconcile the proxy without restarting consumers'

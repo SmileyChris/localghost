@@ -104,6 +104,11 @@ or clear them all with `uvx localghost forget --all`. Status codes are
 unchanged from a hub without ghost pages, so scripts and health checks
 keep working; only response bodies differ.
 
+A hub started manually from the repository's self-contained `compose.yaml`
+carries no registry mount, so it serves only the generic not-found page.
+The first CLI command that reconciles such a hub recreates its container
+once to add the mount; after that the container is stable across runs.
+
 ## Stop and remove
 
 ```sh
