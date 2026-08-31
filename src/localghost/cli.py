@@ -214,9 +214,7 @@ def summon(ctx: click.Context, name: str | None) -> None:
                 _summon_entry(ctx, chosen)
             return
         for entry in entries:
-            click.echo(
-                f"{entry.name}  {entry.type}  {entry.hostname}  {entry.directory}"
-            )
+            click.echo(f"{entry.hostname}  {entry.type}  {entry.directory}")
         return
     match = next((entry for entry in entries if entry.name == name), None)
     if match is None:

@@ -114,7 +114,7 @@ def render_lines(model: PickerModel) -> list[str]:
     lines = [f"{_DIM}Remembered projects — Enter summon · Del forget · q quit{_RESET}"]
     for index, entry in enumerate(model.entries):
         row = (
-            f"  {entry.name}  {entry.type}  {entry.hostname}  "
+            f"  {entry.hostname}  {entry.type}  "
             f"{entry.directory}  ({_relative(entry.last_started)})"
         )
         if index == model.selected:
