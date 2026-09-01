@@ -1203,12 +1203,17 @@ def _save_subcommand_hint(detected_type: str) -> str:
 @click.option(
     "--no-input", is_flag=True, help="Use detected defaults and never prompt."
 )
+@click.option(
+    "run_after", "--run", is_flag=True,
+    help="Start the application after saving.",
+)
 @click.pass_context
 def save(
     ctx: click.Context,
     working_directory: Path | None,
     dry_run: bool,
     no_input: bool,
+    run_after: bool,
 ) -> None:
     """Save Localghost setup for the current application."""
     ctx.ensure_object(dict)
@@ -1216,6 +1221,7 @@ def save(
         "working_directory": working_directory,
         "dry_run": dry_run,
         "no_input": no_input,
+        "run_after": run_after,
     }
     if ctx.invoked_subcommand is not None:
         return
@@ -1304,6 +1310,10 @@ def save(
 @click.option(
     "--no-input", is_flag=True, help="Use detected defaults and never prompt."
 )
+@click.option(
+    "run_after", "--run", is_flag=True,
+    help="Start the application after saving.",
+)
 @click.pass_context
 def save_compose(
     ctx: click.Context,
@@ -1315,12 +1325,14 @@ def save_compose(
     extend: bool,
     dry_run: bool,
     no_input: bool,
+    run_after: bool,
 ) -> None:
     """Save Compose integration to compose.override.yaml."""
     shared = ctx.obj or {}
     cwd = working_directory or shared.get("working_directory") or Path.cwd()
     dry_run = dry_run or shared.get("dry_run", False)
     no_input = no_input or shared.get("no_input", False)
+    run_after = run_after or shared.get("run_after", False)
     if not dry_run:
         title()
     _save_compose_project(
@@ -1335,6 +1347,8 @@ def save_compose(
     )
     if not dry_run:
         registry.record(_local_project_name(cwd), cwd, "compose")
+    if run_after and not dry_run:
+        ctx.invoke(run, working_directory=cwd)
 
 
 @save.command("host")
@@ -1378,6 +1392,10 @@ def save_compose(
 @click.option(
     "--no-input", is_flag=True, help="Use detected defaults and never prompt."
 )
+@click.option(
+    "run_after", "--run", is_flag=True,
+    help="Start the application after saving.",
+)
 @click.argument("command", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def save_host(
@@ -1391,6 +1409,7 @@ def save_host(
     extend: bool,
     dry_run: bool,
     no_input: bool,
+    run_after: bool,
     command: tuple[str, ...],
 ) -> None:
     """Save a host run to .localghost.toml."""
@@ -1398,6 +1417,7 @@ def save_host(
     working_directory = working_directory or shared.get("working_directory")
     dry_run = dry_run or shared.get("dry_run", False)
     no_input = no_input or shared.get("no_input", False)
+    run_after = run_after or shared.get("run_after", False)
     if not dry_run:
         title()
     resolved = _resolve_application(
@@ -1430,6 +1450,8 @@ def save_host(
     )
     if not dry_run:
         _record_registry(resolved)
+    if run_after and not dry_run:
+        ctx.invoke(run, working_directory=working_directory)
 
 
 @save.command("dockerfile")
@@ -1463,6 +1485,10 @@ def save_host(
 @click.option(
     "--no-input", is_flag=True, help="Use detected defaults and never prompt."
 )
+@click.option(
+    "run_after", "--run", is_flag=True,
+    help="Start the application after saving.",
+)
 @click.pass_context
 def save_dockerfile(
     ctx: click.Context,
@@ -1473,11 +1499,13 @@ def save_dockerfile(
     output: Path | None,
     dry_run: bool,
     no_input: bool,
+    run_after: bool,
 ) -> None:
     """Save a Dockerfile-only project as a new compose.yaml."""
     shared = ctx.obj or {}
     working_directory = working_directory or shared.get("working_directory")
     dry_run = dry_run or shared.get("dry_run", False)
+    run_after = run_after or shared.get("run_after", False)
     if not dry_run:
         title()
     _save_dockerfile_project(
@@ -1488,6 +1516,8 @@ def save_dockerfile(
         output=output,
         dry_run=dry_run,
     )
+    if run_after and not dry_run:
+        ctx.invoke(run, working_directory=working_directory)
 
 
 def _save_compose_project(

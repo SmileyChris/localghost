@@ -119,6 +119,27 @@ def test_save_host_writes_run_config() -> None:
         assert "8080" in config
 
 
+def test_save_host_run_starts_the_application(monkeypatch) -> None:
+    started: list[str] = []
+    monkeypatch.setattr(
+        "localghost.cli.execute",
+        lambda plan, *args, **kwargs: started.append(plan.name) or 0,
+    )
+    monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli,
+            ["save", "host", "--no-input", "--run", "--port", "8080", "--", "./server"],
+            env={"COMPOSE_PROJECT_NAME": "sample-host"},
+        )
+
+        assert result.exit_code == 0, result.output
+        assert Path(".localghost.toml").exists()
+        assert started, "save --run must start the application after saving"
+
+
 def test_save_host_help_omits_compose_options() -> None:
     result = CliRunner().invoke(cli, ["save", "host", "--help"])
 
