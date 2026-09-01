@@ -91,7 +91,7 @@ HOST_TYPES = tuple(item for item in RUN_TYPES if item != "compose")
 
 @dataclass(frozen=True)
 class ResolvedApplication:
-    """One resolution shared by run, save, and run --save."""
+    """One resolution shared by run and save."""
 
     cwd: Path
     config_file: Path | None
@@ -452,17 +452,6 @@ def _trust_status() -> None:
     help="Run in the background and manage it later.",
 )
 @click.option(
-    "save_setup",
-    "--save",
-    is_flag=True,
-    help="Save this project's Localghost setup before running.",
-)
-@click.option(
-    "service_name",
-    "--service",
-    help="Compose service to expose when saving its integration.",
-)
-@click.option(
     "config",
     "--config",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -489,8 +478,6 @@ def run(
     root: Path | None,
     port: int | None,
     detach: bool,
-    save_setup: bool,
-    service_name: str | None,
     config: Path | None,
     dry_run: bool,
     no_status_bar: bool,
@@ -512,29 +499,15 @@ def run(
         command=command,
     )
     if resolved.selected_type == "compose":
-        # Compose owns the application's configuration, so host-only
-        # settings are rejected; --root is orthogonal and stays allowed.
-        if resolved.command or (resolved.port is not None and not save_setup):
+        # Compose owns the application's configuration; --root is
+        # orthogonal and stays allowed.
+        if resolved.command or resolved.port is not None:
             raise click.ClickException(
                 "compose does not accept a host command or --port; Compose "
                 "owns them"
             )
         project = resolved.name or _local_project_name(resolved.root)
-        if save_setup:
-            _persist_resolved_application(
-                resolved,
-                service_name=service_name,
-                port=resolved.port,
-                output=None,
-                extend=True,
-                dry_run=dry_run,
-                interactive=_is_interactive(False),
-                final_hint=False,
-            )
-            if dry_run:
-                return
-        else:
-            _check_compose_routing(resolved.root, project)
+        _check_compose_routing(resolved.root, project)
         if dry_run:
             compose_dry_run(project=project, url=_proxy_origin(project))
             return
@@ -548,19 +521,6 @@ def run(
         return
     plan = resolved.plan
     assert plan is not None
-    if save_setup:
-        _persist_resolved_application(
-            resolved,
-            service_name=service_name,
-            port=resolved.port,
-            output=None,
-            extend=True,
-            dry_run=dry_run,
-            interactive=_is_interactive(False),
-            final_hint=False,
-        )
-        if dry_run:
-            return
     matching = find_matching(name=plan.name, cwd=plan.project_root or resolved.cwd)
     if matching:
         message = (
@@ -753,8 +713,8 @@ def _check_compose_routing(compose_root: Path, project: str) -> None:
     label = compose_file.name if compose_file else "the Compose project"
     raise click.ClickException(
         f"found {label} but {problem}, so nothing would be reachable at "
-        f"{_proxy_origin(project)}; run localghost run --save to save the "
-        "routing setup and start the application"
+        f"{_proxy_origin(project)}; run localghost save to save the routing "
+        "setup, then localghost run to start it"
     )
 
 
@@ -1532,7 +1492,7 @@ def _save_compose_project(
     interactive: bool,
     final_hint: bool = True,
 ) -> None:
-    """Persist the Compose setup shared by ``save`` and ``run --save``."""
+    """Persist the Compose setup for a Compose project."""
     output = output or cwd / "compose.override.yaml"
     output_exists = output.exists()
 

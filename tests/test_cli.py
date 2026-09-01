@@ -396,6 +396,20 @@ def test_run_rejects_the_removed_mode_flag(tmp_path) -> None:
     assert "no such option" in result.output.lower()
 
 
+def test_run_no_longer_accepts_save() -> None:
+    result = CliRunner().invoke(cli, ["run", "--save"])
+
+    assert result.exit_code != 0
+    assert "no such option" in result.output.lower()
+
+
+def test_run_no_longer_accepts_service() -> None:
+    result = CliRunner().invoke(cli, ["run", "--service", "web"])
+
+    assert result.exit_code != 0
+    assert "no such option" in result.output.lower()
+
+
 def test_save_rejects_the_removed_mode_flag() -> None:
     runner_ = CliRunner()
     with runner_.isolated_filesystem():
@@ -1343,6 +1357,20 @@ def test_run_dry_run_detects_compose_over_a_coexisting_dockerfile(
     assert "Type: compose" in result.output
 
 
+def test_unconfigured_compose_run_points_at_save() -> None:
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        Path("compose.yaml").write_text(
+            "services:\n  web:\n    image: nginx\n", encoding="utf-8"
+        )
+        result = runner.invoke(cli, ["run"])
+
+        assert result.exit_code != 0
+        assert "localghost save" in result.output
+        assert "--save" not in result.output
+
+
 def test_compose_run_refuses_an_unrouted_project(monkeypatch, tmp_path) -> None:
     (tmp_path / "compose.yaml").write_text("services:\n  web:\n    image: nginx\n")
     monkeypatch.setattr(
@@ -1358,7 +1386,7 @@ def test_compose_run_refuses_an_unrouted_project(monkeypatch, tmp_path) -> None:
 
     assert result.exit_code != 0
     assert "compose.yaml" in result.output
-    assert "localghost run --save" in result.output
+    assert "localghost save" in result.output
     # The failure names the URL nothing would answer at, but must never
     # present it as a working destination.
     assert "Public URL" not in result.output
@@ -1417,7 +1445,7 @@ def test_compose_run_routes_after_save_fixes_an_override() -> None:
             cli, ["run", "--type", "compose", "--dry-run"], env=environment
         )
         assert refused.exit_code != 0, refused.output
-        assert "localghost run --save" in refused.output
+        assert "localghost save" in refused.output
 
         saved = runner.invoke(
             cli, ["save", "compose", "--no-input", "--port", "80"], env=environment
@@ -1445,7 +1473,7 @@ def test_a_configured_compose_type_still_validates_routing(
     result = CliRunner().invoke(cli, ["run", "-C", str(tmp_path), "--name", "demo"])
 
     assert result.exit_code != 0
-    assert "localghost run --save" in result.output
+    assert "localghost save" in result.output
 
 
 def test_a_pinned_root_with_only_a_configured_name_still_detects_compose(
@@ -1823,7 +1851,7 @@ def test_save_command_dry_run_prints_without_writing() -> None:
         assert "port = 3000" in result.output
 
 
-def test_run_save_persists_a_custom_command_before_running(
+def test_save_host_run_persists_a_custom_command_before_running(
     monkeypatch, tmp_path
 ) -> None:
     (tmp_path / ".git").mkdir()
@@ -1836,10 +1864,11 @@ def test_run_save_persists_a_custom_command_before_running(
     result = CliRunner().invoke(
         cli,
         [
-            "run",
+            "save",
+            "host",
             "-C",
             str(tmp_path),
-            "--save",
+            "--run",
             "--name",
             "custom-save",
             "--port",
@@ -1856,11 +1885,20 @@ def test_run_save_persists_a_custom_command_before_running(
     assert 'command = ["./server"]' in config
 
 
-def test_run_save_writes_compose_integration_and_starts(
+def test_save_compose_run_writes_compose_integration_and_starts(
     monkeypatch, tmp_path
 ) -> None:
+    """`save compose --run` saves and then invokes the full `run` command,
+    which -- unlike the old `run --save` -- always re-validates routing
+    (see test_compose_run_refuses_an_unrouted_project). The mocked model
+    must therefore already look routed, the way a real `docker compose
+    config` would once the override this test just wrote is on disk."""
     (tmp_path / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
-    install_compose(monkeypatch, compose_model())
+    model = compose_model()
+    model["networks"]["localghost"] = {"external": True}
+    model["services"]["web"]["labels"] = {"traefik.enable": "true"}
+    model["services"]["web"]["networks"]["localghost"] = None
+    install_compose(monkeypatch, model)
     monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
     commands = []
     monkeypatch.setattr(
@@ -1872,12 +1910,11 @@ def test_run_save_writes_compose_integration_and_starts(
     result = CliRunner().invoke(
         cli,
         [
-            "run",
+            "save",
+            "compose",
             "-C",
             str(tmp_path),
-            "--type",
-            "compose",
-            "--save",
+            "--run",
             "--service",
             "web",
             "--port",
@@ -1890,7 +1927,7 @@ def test_run_save_writes_compose_integration_and_starts(
     assert any(command[:2] == ["docker", "compose"] for command in commands)
 
 
-def test_save_and_run_save_write_the_same_host_configuration(
+def test_save_and_save_host_run_write_the_same_host_configuration(
     monkeypatch, tmp_path
 ) -> None:
     save_root = tmp_path / "save-only"
@@ -1913,8 +1950,9 @@ def test_save_and_run_save_write_the_same_host_configuration(
     run = runner.invoke(
         cli,
         [
-            "run",
-            "--save",
+            "save",
+            "host",
+            "--run",
             "--type",
             "django",
             "--name",
