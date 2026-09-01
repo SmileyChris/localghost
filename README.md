@@ -82,8 +82,9 @@ Run it in the background with `--detach` and manage it afterwards:
 
 ```sh
 uvx localghost run --detach
-uvx localghost manage list
-uvx localghost manage stop SESSION_ID
+uvx localghost sessions list
+uvx localghost sessions logs SESSION_ID -f
+uvx localghost sessions stop SESSION_ID
 ```
 
 See [Saving project setup](docs/saving-setup.md) for `.localghost.toml`, Compose

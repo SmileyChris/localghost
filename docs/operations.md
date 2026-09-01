@@ -134,6 +134,19 @@ carries no registry mount, so it serves only the generic not-found page.
 The first CLI command that reconciles such a hub recreates its container
 once to add the mount; after that the container is stable across runs.
 
+## Shell completion
+
+Enable Click's standard completion script for your shell so `summon` and
+`forget` can complete remembered project names. For zsh:
+
+```sh
+eval "$(_LOCALGHOST_COMPLETE=zsh_source localghost)"
+```
+
+Add that line to your shell startup file to keep completion enabled in future
+sessions. Replace `zsh_source` with `bash_source` or `fish_source` for those
+shells.
+
 ## Stop and remove
 
 ```sh

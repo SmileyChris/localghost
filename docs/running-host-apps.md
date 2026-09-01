@@ -210,23 +210,25 @@ output in Localghost's state directory:
 
 ```sh
 localghost run --detach
-localghost manage list
-localghost manage list --json
-localghost manage attach SESSION_ID
-localghost manage stop SESSION_ID
-localghost manage stop --all
+localghost sessions list
+localghost sessions list --json
+localghost sessions logs SESSION_ID
+localghost sessions logs SESSION_ID -f
+localghost sessions stop SESSION_ID
+localghost sessions stop --all
 ```
 
-`localghost manage` on its own lists sessions, the same as `manage list`.
 Session records live in `${XDG_STATE_HOME:-$HOME/.local/state}/localghost/sessions`
 (or `$LOCALGHOST_STATE_DIR` when set). A host session's liveness is probed by
 its recorded process ID and a Compose session's by `docker compose ps`.
+`sessions logs` reads a host run's captured file and delegates Compose runs to
+`docker compose logs`; add `-f` to keep following either kind of session.
 
-`manage stop` asks a host process to exit with `SIGTERM`, then force-quits it
+`sessions stop` asks a host process to exit with `SIGTERM`, then force-quits it
 with `SIGKILL` after a two second grace period; it reports an error and keeps
-the record if the process somehow survives. `localghost manage clean` removes
-records and bridges left by sessions that already exited, leaving running
-ones alone. `localghost hub down` continues to control only the hub.
+the record if the process somehow survives. `localghost sessions clean`
+removes records and bridges left by sessions that already exited, leaving
+running ones alone. `localghost hub down` continues to control only the hub.
 
 The app is available at `https://my-django-project.localhost`. Press Ctrl+C to
 stop it.

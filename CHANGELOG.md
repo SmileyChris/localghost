@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## [3.0.0] - 2026-09-01
 
 ### Added
 
@@ -31,6 +31,11 @@ uses [Semantic Versioning](https://semver.org/).
 - `localghost status` reports hub state, HTTPS, active routes, and remembered
   projects, with `--json` for scripts.
 - `localghost trust` gained `install`, `remove`, and `status` subcommands.
+- `localghost sessions logs` follows a detached session's output with `-f`, and
+  reads Compose sessions' logs from Compose, which `manage attach` never could.
+- `summon` now forwards run options (`--port`, `--detach`, `--dry-run`, and the
+  rest) instead of ignoring them, and both `summon` and `forget` complete
+  remembered project names in the shell.
 
 ### Changed
 
@@ -81,12 +86,16 @@ uses [Semantic Versioning](https://semver.org/).
 ### Removed
 
 - `run --save`, `run --service`, and the deprecated `--framework` alias.
+- The `localghost generate` command; use `localghost save`.
+- The `--root` spelling; use `--project-root`.
 - Bare `localghost save` no longer accepts `--type`, `--file`, `--service`,
   `--output`, `--name`, `--config`, or `--project-root`. Each now lives on the
   `save host`, `save compose`, or `save dockerfile` subcommand that actually
   accepts it, which is what makes `save --help` truthful per project type.
 - `localghost --status`, `trust --status`, and `trust --remove`.
 - Top-level `localghost down`; use `localghost hub down`.
+- The `localghost manage` group; use `localghost sessions`. Its `attach`
+  subcommand is now `sessions logs`.
 
 ## [2.1.0] - 2026-08-26
 

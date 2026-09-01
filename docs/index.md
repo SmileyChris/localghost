@@ -52,7 +52,7 @@ detects the type and dispatches to the right one.
 
 The project type is auto-detected, searching upward to the nearest project
 root. `--detach` runs the application in the background and
-`localghost manage` inspects and stops those sessions. See
+`localghost sessions` inspects, follows, and stops those sessions. See
 [Running host applications](running-host-apps.md) for the full workflow, custom
 ports, explicit type selection, `.localghost.toml` settings, detached
 sessions, and Django runner resolution.
