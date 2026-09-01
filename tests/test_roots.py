@@ -103,8 +103,8 @@ def test_the_root_flag_resolves_against_the_process_working_directory(
     tmp_path, monkeypatch
 ):
     # `start` points somewhere else entirely, so a regression that resolves
-    # --root against `start` instead of Path.cwd() changes the result and
-    # this test catches it.
+    # --project-root against `start` instead of Path.cwd() changes the
+    # result and this test catches it.
     start = tmp_path / "elsewhere"
     start.mkdir()
     cwd = tmp_path / "cwd"

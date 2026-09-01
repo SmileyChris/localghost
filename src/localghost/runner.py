@@ -131,8 +131,8 @@ def resolve_pinned_type(
     logic rather than two independently maintained copies.
 
     `from_flag` controls whether the mismatch error may suggest dropping
-    `--root`: that advice is only true when the pin actually came from the
-    flag, not from `[run].root` or a discovered `.localghost.toml`.
+    `--project-root`: that advice is only true when the pin actually came
+    from the flag, not from `[run].root` or a discovered `.localghost.toml`.
     """
     detected = [item for item in _types_at(pinned) if item in allowed]
     if requested is not None:
@@ -140,7 +140,9 @@ def resolve_pinned_type(
             available = ", ".join(detected) if detected else "nothing"
             hint = "drop --type to auto-detect"
             if from_flag:
-                hint += ", or drop --root to search from the current directory"
+                hint += (
+                    ", or drop --project-root to search from the current directory"
+                )
             raise click.ClickException(
                 f"no {requested} project at '{pinned}'; detected "
                 f"{available} there; {hint}"

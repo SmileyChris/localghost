@@ -369,24 +369,6 @@ def test_run_reports_the_type_not_the_framework(monkeypatch, tmp_path) -> None:
     assert "Framework:" not in result.output
 
 
-def test_run_rejects_both_type_and_framework(tmp_path) -> None:
-    result = CliRunner().invoke(
-        cli,
-        [
-            "run",
-            "--type",
-            "django",
-            "--framework",
-            "vite",
-            "-C",
-            str(tmp_path),
-        ],
-    )
-
-    assert result.exit_code != 0
-    assert "cannot both be given" in result.output
-
-
 def test_run_rejects_the_removed_mode_flag(tmp_path) -> None:
     result = CliRunner().invoke(
         cli, ["run", "--mode", "host", "-C", str(tmp_path)]
@@ -405,6 +387,27 @@ def test_run_no_longer_accepts_save() -> None:
 
 def test_run_no_longer_accepts_service() -> None:
     result = CliRunner().invoke(cli, ["run", "--service", "web"])
+
+    assert result.exit_code != 0
+    assert "no such option" in result.output.lower()
+
+
+def test_run_accepts_short_port_flag(tmp_path) -> None:
+    # COMPOSE_PROJECT_NAME sidesteps deriving the project name from
+    # tmp_path's own directory name, which (built from this test's name)
+    # contains underscores and isn't DNS-safe -- unrelated to -p itself.
+    result = CliRunner().invoke(
+        cli,
+        ["run", "-C", str(tmp_path), "--dry-run", "-p", "8080", "--", "./server"],
+        env={"COMPOSE_PROJECT_NAME": "short-port-flag"},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "8080" in result.output
+
+
+def test_run_rejects_the_removed_framework_alias() -> None:
+    result = CliRunner().invoke(cli, ["run", "--framework", "django"])
 
     assert result.exit_code != 0
     assert "no such option" in result.output.lower()
@@ -506,39 +509,6 @@ def test_save_uses_run_detection_when_dockerfile_and_django_are_present() -> Non
         assert 'type = "django"' in result.output
 
 
-def test_run_accepts_the_deprecated_framework_alias(monkeypatch, tmp_path) -> None:
-    (tmp_path / ".git").mkdir()
-    (tmp_path / "manage.py").touch()
-    monkeypatch.setattr(
-        "localghost.cli.execute", lambda *args, **kwargs: pytest.fail("ran")
-    )
-
-    result = CliRunner().invoke(
-        cli,
-        [
-            "run",
-            "--dry-run",
-            "--framework",
-            "django",
-            "--name",
-            "demo",
-            "-C",
-            str(tmp_path),
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert "deprecated" in result.output.lower()
-
-
-def test_the_framework_alias_is_hidden_from_help() -> None:
-    result = CliRunner().invoke(cli, ["run", "--help"])
-
-    assert result.exit_code == 0, result.output
-    assert "--type" in result.output
-    assert "--framework" not in result.output
-
-
 def test_run_pins_the_root_with_the_flag(monkeypatch, tmp_path) -> None:
     root = tmp_path / "backend"
     root.mkdir()
@@ -549,7 +519,7 @@ def test_run_pins_the_root_with_the_flag(monkeypatch, tmp_path) -> None:
     )
 
     result = CliRunner().invoke(
-        cli, ["run", "--dry-run", "--root", str(root), "-C", str(tmp_path)]
+        cli, ["run", "--dry-run", "--project-root", str(root), "-C", str(tmp_path)]
     )
 
     assert result.exit_code == 0, result.output
@@ -562,7 +532,7 @@ def test_a_pinned_root_without_a_type_errors(tmp_path) -> None:
     (tmp_path / ".git").mkdir()
 
     result = CliRunner().invoke(
-        cli, ["run", "--root", str(root), "-C", str(tmp_path)]
+        cli, ["run", "--project-root", str(root), "-C", str(tmp_path)]
     )
 
     assert result.exit_code != 0
@@ -570,8 +540,9 @@ def test_a_pinned_root_without_a_type_errors(tmp_path) -> None:
 
 
 def test_a_pinned_root_rejects_a_type_not_present_there(monkeypatch, tmp_path) -> None:
-    """--root must never walk: an ancestor holding the requested type must
-    not be silently adopted just because the pin itself doesn't match."""
+    """--project-root must never walk: an ancestor holding the requested
+    type must not be silently adopted just because the pin itself doesn't
+    match."""
     (tmp_path / ".git").mkdir()
     (tmp_path / "package.json").write_text(
         json.dumps({"scripts": {"dev": "vite"}, "dependencies": {"vite": "x"}})
@@ -588,7 +559,7 @@ def test_a_pinned_root_rejects_a_type_not_present_there(monkeypatch, tmp_path) -
         [
             "run",
             "--dry-run",
-            "--root",
+            "--project-root",
             str(root),
             "--type",
             "vite",
@@ -602,8 +573,9 @@ def test_a_pinned_root_rejects_a_type_not_present_there(monkeypatch, tmp_path) -
     assert str(root) in result.output
     assert "detected django there" in result.output
     assert "Project root:" not in result.output
-    # --root was actually used here, so the hint to drop it is accurate.
-    assert "drop --root" in result.output
+    # --project-root was actually used here, so the hint to drop it is
+    # accurate.
+    assert "drop --project-root" in result.output
 
 
 def test_a_pinned_root_from_config_rejects_a_mismatched_type(
@@ -639,12 +611,22 @@ def test_a_pinned_empty_root_rejects_an_explicit_type(tmp_path) -> None:
 
     result = CliRunner().invoke(
         cli,
-        ["run", "--root", str(root), "--type", "django", "-C", str(tmp_path)],
+        ["run", "--project-root", str(root), "--type", "django", "-C", str(tmp_path)],
     )
 
     assert result.exit_code != 0
     assert "no django project at" in result.output
     assert "detected nothing there" in result.output
+
+
+def test_run_uses_project_root(tmp_path) -> None:
+    result = CliRunner().invoke(cli, ["run", "--project-root", str(tmp_path), "--help"])
+
+    assert result.exit_code == 0, result.output
+    assert "--project-root" in result.output
+    # Click wraps help text, so a naive "--root " substring check could miss
+    # a line break landing right after --root; check tokens instead.
+    assert not any("--root" in line.split() for line in result.output.splitlines())
 
 
 def test_run_dry_run_prints_plan_without_starting(monkeypatch) -> None:
@@ -1400,7 +1382,8 @@ def test_compose_routing_check_never_pins_an_explicit_file(
     compose.override.yaml merge, so a project `save` just fixed would
     still be refused with the identical error. The check must therefore let
     Compose's own discovery run, against compose_root -- not the process's
-    own cwd, for -C/--root runs -- rather than pinning an explicit file."""
+    own cwd, for -C/--project-root runs -- rather than pinning an explicit
+    file."""
     (tmp_path / "compose.yaml").write_text("services: {}\n")
     recorded: dict[str, object] = {}
 
@@ -1507,7 +1490,7 @@ def test_a_root_flag_pinned_compose_project_is_still_detected(
     install_compose(monkeypatch, routed_compose_model(project="app"))
     monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
 
-    result = CliRunner().invoke(cli, ["run", "--root", str(root), "--dry-run"])
+    result = CliRunner().invoke(cli, ["run", "--project-root", str(root), "--dry-run"])
 
     assert result.exit_code == 0, result.output
     assert "Type: compose" in result.output
@@ -1601,33 +1584,12 @@ def test_compose_run_with_explicit_type_from_a_subdirectory_uses_the_project_roo
     assert "site.localhost" in result.output
 
 
-def test_run_accepts_the_deprecated_framework_alias_for_compose(
-    monkeypatch, tmp_path
-) -> None:
-    """--framework's choice spans every RUN_TYPES value, including compose,
-    and the CHANGELOG says --framework 'keeps working'; before the fix, the
-    compose host-only-settings guard tested the alias variable itself
-    (still set to 'compose') rather than the actual host-only settings it
-    means to guard, so this hard-errored."""
-    (tmp_path / "compose.yaml").write_text("services: {}\n")
-    install_compose(monkeypatch, routed_compose_model())
-    monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
-
-    result = CliRunner().invoke(
-        cli, ["run", "-C", str(tmp_path), "--framework", "compose", "--dry-run"]
-    )
-
-    assert result.exit_code == 0, result.output
-    assert "deprecated" in result.output.lower()
-    assert "Type: compose" in result.output
-
-
 def test_pinned_root_from_discovered_config_does_not_claim_a_root_flag(
     tmp_path,
 ) -> None:
-    """The pin here comes from a discovered .localghost.toml, not --root, so
-    the mismatch error must not tell the user to drop a flag they never
-    used."""
+    """The pin here comes from a discovered .localghost.toml, not
+    --project-root, so the mismatch error must not tell the user to drop a
+    flag they never used."""
     (tmp_path / ".git").mkdir()
     (tmp_path / ".localghost.toml").write_text("[run]\n")
     (tmp_path / "package.json").write_text(
@@ -1638,7 +1600,7 @@ def test_pinned_root_from_discovered_config_does_not_claim_a_root_flag(
 
     assert result.exit_code != 0
     assert "no django project at" in result.output
-    assert "--root" not in result.output
+    assert "--project-root" not in result.output
 
 
 def test_save_command_requires_a_port() -> None:

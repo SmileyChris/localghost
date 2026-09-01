@@ -432,19 +432,14 @@ def _trust_status() -> None:
     help="Project type; detected from the directory when omitted.",
 )
 @click.option(
-    "framework",
-    "--framework",
-    type=click.Choice(RUN_TYPES),
-    hidden=True,
-    help="Deprecated alias for --type.",
-)
-@click.option(
     "root",
-    "--root",
+    "--project-root",
     type=click.Path(file_okay=False, path_type=Path),
     help="Treat this directory as the project root instead of searching.",
 )
-@click.option("port", "--port", type=click.IntRange(1, 65535), help="Host HTTP port.")
+@click.option(
+    "port", "--port", "-p", type=click.IntRange(1, 65535), help="Host HTTP port."
+)
 @click.option(
     "detach",
     "--detach",
@@ -474,7 +469,6 @@ def run(
     name: str | None,
     working_directory: Path | None,
     selected_type: str | None,
-    framework: str | None,
     root: Path | None,
     port: int | None,
     detach: bool,
@@ -484,11 +478,6 @@ def run(
     command: tuple[str, ...],
 ) -> None:
     """Run a configured host or Compose application behind the hub."""
-    if framework is not None:
-        if selected_type is not None:
-            raise click.UsageError("--type and --framework cannot both be given")
-        warning("Deprecated option", ["--framework is deprecated; use --type"])
-        selected_type = framework
     resolved = _resolve_application(
         working_directory=working_directory,
         name=name,
@@ -499,7 +488,7 @@ def run(
         command=command,
     )
     if resolved.selected_type == "compose":
-        # Compose owns the application's configuration; --root is
+        # Compose owns the application's configuration; --project-root is
         # orthogonal and stays allowed.
         if resolved.command or resolved.port is not None:
             raise click.ClickException(
@@ -704,7 +693,7 @@ def _check_compose_routing(compose_root: Path, project: str) -> None:
     still be refused. `_run_compose`'s real `docker compose up` also passes
     no `--file`, relying on Compose's own discovery against `cwd`, so this
     matches it exactly -- including running against `compose_root` rather
-    than the process's own working directory, for `-C`/`--root` runs.
+    than the process's own working directory, for `-C`/`--project-root` runs.
     """
     compose_file = _compose_file(compose_root)
     problem = routing_problem(resolve_compose((), cwd=compose_root))
