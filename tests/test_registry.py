@@ -301,6 +301,36 @@ def test_summon_runs_project_from_remembered_directory(tmp_path, monkeypatch):
     assert captured["working_directory"] == project
 
 
+def test_summon_forwards_flags_to_run(tmp_path, monkeypatch):
+    from localghost import cli as cli_module
+
+    project = tmp_path / "blog"
+    project.mkdir()
+    registry.record("blog", project, "django")
+    captured = {}
+    monkeypatch.setattr(
+        cli_module.run, "callback", lambda **kwargs: captured.update(kwargs)
+    )
+
+    result = CliRunner().invoke(
+        cli, ["summon", "blog", "--detach", "-p", "9000"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["working_directory"] == project
+    assert captured["detach"] is True
+    assert captured["port"] == 9000
+
+
+def test_summon_rejects_directory_override(tmp_path):
+    registry.record("blog", tmp_path, "django")
+
+    result = CliRunner().invoke(cli, ["summon", "blog", "-C", str(tmp_path)])
+
+    assert result.exit_code != 0
+    assert "no such option" in result.output.lower()
+
+
 def test_summon_bare_uses_picker_on_tty(tmp_path, monkeypatch):
     from localghost import cli as cli_module
 
@@ -321,9 +351,10 @@ def test_summon_bare_uses_picker_on_tty(tmp_path, monkeypatch):
     monkeypatch.setattr(
         cli_module.run, "callback", lambda **kwargs: captured.update(kwargs)
     )
-    result = CliRunner().invoke(cli, ["summon"])
+    result = CliRunner().invoke(cli, ["summon", "--detach"])
     assert result.exit_code == 0, result.output
     assert captured["working_directory"] == project
+    assert captured["detach"] is True
 
 
 def test_summon_bare_picker_cancelled_runs_nothing(tmp_path, monkeypatch):

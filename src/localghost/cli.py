@@ -271,21 +271,64 @@ def _summon_interactive() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
-def _summon_entry(ctx: click.Context, entry: registry.RegistryEntry) -> None:
+def _summon_entry(
+    ctx: click.Context, entry: registry.RegistryEntry, **overrides: object
+) -> None:
     directory = Path(entry.directory)
     if not directory.is_dir():
         raise click.ClickException(
             f"remembered directory '{directory}' no longer exists; "
             f"forget it with: localghost forget {entry.name}"
         )
-    ctx.invoke(run, working_directory=directory)
+    ctx.invoke(run, working_directory=directory, **overrides)
 
 
 @cli.command()
 @click.argument("name", required=False)
+@click.option("app_name", "--name", help="Public project name used for NAME.localhost.")
+@click.option(
+    "selected_type",
+    "--type",
+    type=click.Choice(RUN_TYPES),
+    help="Project type; detected from the remembered directory when omitted.",
+)
+@click.option(
+    "root",
+    "--project-root",
+    type=click.Path(file_okay=False, path_type=Path),
+    help="Treat this directory as the project root instead of searching.",
+)
+@click.option(
+    "port", "--port", "-p", type=click.IntRange(1, 65535), help="Host HTTP port."
+)
+@click.option(
+    "config",
+    "--config",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Run configuration TOML path.",
+)
+@click.option(
+    "detach",
+    "--detach",
+    is_flag=True,
+    help="Run in the background and manage it later.",
+)
+@click.option(
+    "dry_run",
+    "--dry-run",
+    is_flag=True,
+    help="Print the plan without starting anything.",
+)
+@click.option(
+    "no_status_bar",
+    "--no-status-bar",
+    is_flag=True,
+    help="Do not pin the public URL to the bottom of the terminal.",
+)
 @click.pass_context
-def summon(ctx: click.Context, name: str | None) -> None:
+def summon(ctx: click.Context, name: str | None, **overrides: object) -> None:
     """Run a remembered project by name; with no name, pick from the list."""
+    overrides["name"] = overrides.pop("app_name")
     entries = registry.entries()
     if name is None:
         if not entries:
@@ -296,7 +339,7 @@ def summon(ctx: click.Context, name: str | None) -> None:
                 entries, forget=registry.forget, restore=registry.restore
             )
             if chosen is not None:
-                _summon_entry(ctx, chosen)
+                _summon_entry(ctx, chosen, **overrides)
             return
         for entry in entries:
             click.echo(f"{entry.hostname}  {entry.type}  {entry.directory}")
@@ -307,7 +350,7 @@ def summon(ctx: click.Context, name: str | None) -> None:
         raise click.ClickException(
             f"no remembered project '{name}' (remembered: {known})"
         )
-    _summon_entry(ctx, match)
+    _summon_entry(ctx, match, **overrides)
 
 
 @cli.group("sessions", invoke_without_command=True)
