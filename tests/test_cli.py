@@ -217,18 +217,20 @@ def test_hub_up_starts_the_hub(monkeypatch) -> None:
 
 
 def test_hub_logs_streams_the_traefik_container(monkeypatch) -> None:
-    argv = []
+    calls = []
     monkeypatch.setattr(
         "localghost.cli.subprocess.run",
-        lambda command, **kwargs: argv.append(command)
+        lambda command, **kwargs: calls.append((command, kwargs))
         or CompletedProcess(command, 0),
     )
 
     result = CliRunner().invoke(cli, ["hub", "logs", "-f", "--tail", "50"])
 
     assert result.exit_code == 0, result.output
-    assert argv[0][:4] == ["docker", "compose", "--project-name", "localghost"]
-    assert argv[0][-4:] == ["--follow", "--tail", "50", "traefik"]
+    command, kwargs = calls[0]
+    assert command[:4] == ["docker", "compose", "--project-name", "localghost"]
+    assert command[-4:] == ["--follow", "--tail", "50", "traefik"]
+    assert kwargs["env"]["LOCALGHOST_IMAGE_TAG"] == f"v{LOCALGHOST_VERSION}"
 
 
 def test_top_level_down_is_gone() -> None:

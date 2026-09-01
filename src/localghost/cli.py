@@ -215,7 +215,9 @@ def hub_logs(follow: bool, tail: str) -> None:
             command.append("--follow")
         command.extend(["--tail", tail, "traefik"])
         try:
-            result = subprocess.run(command, check=False)
+            environment = os.environ.copy()
+            environment["LOCALGHOST_IMAGE_TAG"] = f"v{LOCALGHOST_VERSION}"
+            result = subprocess.run(command, check=False, env=environment)
         except FileNotFoundError as exc:
             raise click.ClickException("docker is required") from exc
     if result.returncode:
