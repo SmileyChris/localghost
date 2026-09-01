@@ -115,7 +115,7 @@ def test_save_host_type_records_registry_entry(tmp_path, monkeypatch):
         Path("index.php").touch()
         result = runner.invoke(
             cli,
-            ["save", "--no-input", "--type", "php", "--port", "3000"],
+            ["save", "host", "--no-input", "--type", "php", "--port", "3000"],
             env={"COMPOSE_PROJECT_NAME": "sample-project"},
         )
         assert result.exit_code == 0, result.output
@@ -132,7 +132,16 @@ def test_save_dry_run_records_nothing(tmp_path, monkeypatch):
         Path("index.php").touch()
         result = runner.invoke(
             cli,
-            ["save", "--no-input", "--dry-run", "--type", "php", "--port", "3000"],
+            [
+                "save",
+                "host",
+                "--no-input",
+                "--dry-run",
+                "--type",
+                "php",
+                "--port",
+                "3000",
+            ],
             env={"COMPOSE_PROJECT_NAME": "sample-project"},
         )
         assert result.exit_code == 0, result.output
@@ -154,7 +163,7 @@ def test_save_compose_via_files_records_registry_entry(tmp_path, monkeypatch):
         Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
         result = runner.invoke(
             cli,
-            ["save", "--no-input", "--file", "compose.yaml"],
+            ["save", "compose", "--no-input", "--file", "compose.yaml"],
             env={"COMPOSE_PROJECT_NAME": "sample-project"},
         )
         assert result.exit_code == 0, result.output
@@ -171,7 +180,7 @@ def test_save_dockerfile_records_registry_entry(tmp_path, monkeypatch):
         Path("Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
         result = runner.invoke(
             cli,
-            ["save", "--no-input", "--port", "8000"],
+            ["save", "dockerfile", "--no-input", "--port", "8000"],
             env={"COMPOSE_PROJECT_NAME": "sample-project"},
         )
         assert result.exit_code == 0, result.output

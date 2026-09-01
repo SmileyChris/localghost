@@ -82,6 +82,11 @@ from .trust import MkcertInstaller, PublicCertificate, TrustError, ZenNssInstall
 LOCALGHOST_VERSION = importlib.metadata.version("localghost")
 TRAEFIK_IMAGE = f"localghost-traefik:v{LOCALGHOST_VERSION}"
 SAVE_TYPES = (*RUN_TYPES, "dockerfile")
+# `save host --type` must not offer `compose` — Compose projects are saved
+# via `save compose`, and offering it here would contradict the subcommand
+# split (`run --type` legitimately keeps the full `RUN_TYPES`; `run` isn't
+# split).
+HOST_TYPES = tuple(item for item in RUN_TYPES if item != "compose")
 
 
 @dataclass(frozen=True)
@@ -1171,7 +1176,61 @@ def _environment_port(name: str, default: int) -> int:
     return port
 
 
-@cli.command()
+@cli.group(invoke_without_command=True)
+@click.option(
+    "working_directory",
+    "--directory",
+    "-C",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Application directory to save (defaults to the current directory).",
+)
+@click.option(
+    "--dry-run", is_flag=True, help="Print the configuration without writing it."
+)
+@click.option(
+    "--no-input", is_flag=True, help="Use detected defaults and never prompt."
+)
+@click.pass_context
+def save(
+    ctx: click.Context,
+    working_directory: Path | None,
+    dry_run: bool,
+    no_input: bool,
+) -> None:
+    """Save Localghost setup for the current application."""
+    ctx.ensure_object(dict)
+    ctx.obj = {
+        "working_directory": working_directory,
+        "dry_run": dry_run,
+        "no_input": no_input,
+    }
+    if ctx.invoked_subcommand is not None:
+        return
+    start = working_directory or Path.cwd()
+    if os.environ.get("COMPOSE_FILE"):
+        # Matches `_resolve_application`'s `compose_from_environment` check:
+        # COMPOSE_FILE alone selects Compose even with no compose.yaml on
+        # disk for `discover_type`'s filesystem scan to find.
+        ctx.invoke(save_compose)
+        return
+    # Match `run`/`_resolve_application`'s detection priority: prefer a
+    # host or Compose type over a coexisting Dockerfile (e.g. a Django app
+    # that also ships a Dockerfile), and only consider "dockerfile" when
+    # nothing else resolves. A single `discover_type(..., allowed=SAVE_TYPES)`
+    # call would instead raise an ambiguity error whenever both are present.
+    try:
+        detected, _ = discover_type(start, None, allowed=RUN_TYPES)
+    except click.ClickException:
+        detected, _ = discover_type(start, None, allowed=SAVE_TYPES)
+    if detected == "compose":
+        ctx.invoke(save_compose)
+    elif detected == "dockerfile":
+        ctx.invoke(save_dockerfile)
+    else:
+        ctx.invoke(save_host)
+
+
+@save.command("compose")
 @click.option(
     "files",
     "--file",
@@ -1187,16 +1246,84 @@ def _environment_port(name: str, default: int) -> int:
     "--directory",
     "-C",
     type=click.Path(exists=True, file_okay=False, path_type=Path),
-    help=(
-        "Application directory to detect and save "
-        "(defaults to the current directory)."
-    ),
+    help="Application directory to save (defaults to the current directory).",
+)
+@click.option(
+    "port", "--port", "-p", type=click.IntRange(1, 65535),
+    help="HTTP port on which the selected service listens.",
+)
+@click.option(
+    "output", "--output", "-o", type=click.Path(path_type=Path, dir_okay=False),
+    help="Compose output path.",
+)
+@click.option(
+    "--extend",
+    is_flag=True,
+    help="Safely update an existing saved setup without prompting.",
+)
+@click.option(
+    "--dry-run", is_flag=True, help="Print the configuration without writing it."
+)
+@click.option(
+    "--no-input", is_flag=True, help="Use detected defaults and never prompt."
+)
+@click.pass_context
+def save_compose(
+    ctx: click.Context,
+    files: tuple[Path, ...],
+    service_name: str | None,
+    name: str | None,
+    working_directory: Path | None,
+    port: int | None,
+    output: Path | None,
+    extend: bool,
+    dry_run: bool,
+    no_input: bool,
+) -> None:
+    """Save Compose integration to compose.override.yaml."""
+    shared = ctx.obj or {}
+    cwd = working_directory or shared.get("working_directory") or Path.cwd()
+    dry_run = dry_run or shared.get("dry_run", False)
+    no_input = no_input or shared.get("no_input", False)
+    if not dry_run:
+        title()
+    _save_compose_project(
+        cwd=cwd,
+        files=files,
+        service_name=service_name,
+        port=port,
+        output=output,
+        extend=extend,
+        dry_run=dry_run,
+        interactive=_is_interactive(no_input),
+    )
+    if not dry_run:
+        registry.record(name or _local_project_name(cwd), cwd, "compose")
+
+
+@save.command("host")
+@click.option("name", "--name", help="Public project name used for NAME.localhost.")
+@click.option(
+    "working_directory",
+    "--directory",
+    "-C",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Application directory to save (defaults to the current directory).",
+)
+@click.option(
+    "selected_type",
+    "--type",
+    type=click.Choice(HOST_TYPES),
+    help="Project type; detected from the directory when omitted.",
 )
 @click.option(
     "root",
-    "--root",
+    "--project-root",
     type=click.Path(file_okay=False, path_type=Path),
     help="Treat this directory as the project root instead of searching.",
+)
+@click.option(
+    "port", "--port", "-p", type=click.IntRange(1, 65535), help="Host HTTP port."
 )
 @click.option(
     "config",
@@ -1205,143 +1332,116 @@ def _environment_port(name: str, default: int) -> int:
     help="Run configuration TOML path.",
 )
 @click.option(
-    "port",
-    "--port",
-    "-p",
-    type=click.IntRange(1, 65535),
-    help="HTTP port on which the selected application listens.",
+    "--extend",
+    is_flag=True,
+    help="Safely update an existing saved setup without prompting.",
+)
+@click.option(
+    "--dry-run", is_flag=True, help="Print the configuration without writing it."
+)
+@click.option(
+    "--no-input", is_flag=True, help="Use detected defaults and never prompt."
+)
+@click.argument("command", nargs=-1, type=click.UNPROCESSED)
+@click.pass_context
+def save_host(
+    ctx: click.Context,
+    name: str | None,
+    working_directory: Path | None,
+    selected_type: str | None,
+    root: Path | None,
+    port: int | None,
+    config: Path | None,
+    extend: bool,
+    dry_run: bool,
+    no_input: bool,
+    command: tuple[str, ...],
+) -> None:
+    """Save a host run to .localghost.toml."""
+    shared = ctx.obj or {}
+    working_directory = working_directory or shared.get("working_directory")
+    dry_run = dry_run or shared.get("dry_run", False)
+    no_input = no_input or shared.get("no_input", False)
+    if not dry_run:
+        title()
+    resolved = _resolve_application(
+        working_directory=working_directory,
+        name=name,
+        selected_type=selected_type,
+        root=root,
+        port=port,
+        config=config,
+        command=command,
+    )
+    _persist_resolved_application(
+        resolved,
+        service_name=None,
+        port=resolved.port,
+        output=None,
+        extend=extend,
+        dry_run=dry_run,
+        interactive=_is_interactive(no_input),
+    )
+    if not dry_run:
+        _record_registry(resolved)
+
+
+@save.command("dockerfile")
+@click.option(
+    "working_directory",
+    "--directory",
+    "-C",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Application directory to save (defaults to the current directory).",
+)
+@click.option(
+    "root",
+    "--project-root",
+    type=click.Path(file_okay=False, path_type=Path),
+    help="Treat this directory as the project root instead of searching.",
+)
+@click.option("service_name", "--service", "-s", help="Service to expose.")
+@click.option(
+    "port", "--port", "-p", type=click.IntRange(1, 65535), help="Container HTTP port."
 )
 @click.option(
     "output",
     "--output",
     "-o",
     type=click.Path(path_type=Path, dir_okay=False),
-    default=None,
-    help="Compose output path when saving Compose or a Dockerfile.",
+    help="Compose output path.",
 )
 @click.option(
-    "selected_type",
-    "--type",
-    type=click.Choice(SAVE_TYPES),
-    help="Project type; detected from the directory when omitted.",
+    "--dry-run", is_flag=True, help="Print the configuration without writing it."
 )
 @click.option(
-    "--extend",
-    is_flag=True,
-    help="Safely update an existing saved setup without prompting.",
+    "--no-input", is_flag=True, help="Use detected defaults and never prompt."
 )
-@click.option(
-    "--dry-run",
-    is_flag=True,
-    help="Print the saved configuration without writing it.",
-)
-@click.option(
-    "--no-input",
-    is_flag=True,
-    help="Use detected defaults and never prompt.",
-)
-@click.argument("command", nargs=-1, type=click.UNPROCESSED)
-def save(
-    files: tuple[Path, ...],
-    service_name: str | None,
-    name: str | None,
+@click.pass_context
+def save_dockerfile(
+    ctx: click.Context,
     working_directory: Path | None,
     root: Path | None,
-    config: Path | None,
+    service_name: str | None,
     port: int | None,
     output: Path | None,
-    selected_type: str | None,
-    extend: bool,
     dry_run: bool,
     no_input: bool,
-    command: tuple[str, ...],
 ) -> None:
-    """Save Localghost setup for the current application."""
+    """Save a Dockerfile-only project as a new compose.yaml."""
+    shared = ctx.obj or {}
+    working_directory = working_directory or shared.get("working_directory")
+    dry_run = dry_run or shared.get("dry_run", False)
     if not dry_run:
         title()
-    interactive = _is_interactive(no_input)
-    if files:
-        if selected_type not in (None, "compose"):
-            raise click.ClickException("--file can only be used with --type compose")
-        if command or name is not None or root is not None or config is not None:
-            raise click.ClickException(
-                "--file cannot be combined with host run settings"
-            )
-        cwd = working_directory or Path.cwd()
-        _save_compose_project(
-            cwd=cwd,
-            files=files,
-            service_name=service_name,
-            port=port,
-            output=output,
-            extend=extend,
-            dry_run=dry_run,
-            interactive=interactive,
-        )
-        if not dry_run:
-            # `name` is always None here (rejected above), so this matches
-            # `_record_registry`'s compose formula and, in turn, the
-            # `--project-name` `_run_compose` forces at run time.
-            registry.record(_local_project_name(cwd), cwd, "compose")
-        return
-    if selected_type == "dockerfile":
-        if command:
-            raise click.ClickException(
-                "a command cannot be combined with --type dockerfile"
-            )
-        _save_dockerfile_project(
-            working_directory=working_directory,
-            root=root,
-            service_name=service_name,
-            port=port,
-            output=output,
-            dry_run=dry_run,
-        )
-        return
-    try:
-        resolved = _resolve_application(
-            working_directory=working_directory,
-            name=name,
-            selected_type=selected_type,
-            root=root,
-            port=port,
-            config=config,
-            command=command,
-        )
-    except click.ClickException as run_error:
-        if selected_type is not None or command:
-            raise
-        start = working_directory or Path.cwd()
-        try:
-            fallback_type, fallback_root = discover_type(
-                start,
-                None,
-                allowed=SAVE_TYPES,
-            )
-        except click.ClickException:
-            raise run_error from None
-        if fallback_type != "dockerfile":
-            raise run_error from None
-        _save_dockerfile_project(
-            working_directory=fallback_root,
-            root=fallback_root,
-            service_name=service_name,
-            port=port,
-            output=output,
-            dry_run=dry_run,
-        )
-        return
-    _persist_resolved_application(
-        resolved,
+    _save_dockerfile_project(
+        working_directory=working_directory,
+        root=root,
         service_name=service_name,
-        port=resolved.port,
+        port=port,
         output=output,
-        extend=extend,
         dry_run=dry_run,
-        interactive=interactive,
     )
-    if not dry_run:
-        _record_registry(resolved)
 
 
 def _save_compose_project(
@@ -1460,12 +1560,6 @@ def _persist_resolved_application(
                     target=resolved.config_file,
                 )
         return
-    if service_name is not None:
-        raise click.ClickException("--service can only be used with Compose")
-    if output is not None:
-        raise click.ClickException(
-            "--output can only be used with Compose or a Dockerfile"
-        )
     plan = resolved.plan
     assert plan is not None
     saved_config = _run_config_from_plan(

@@ -412,7 +412,7 @@ def test_save_takes_the_per_type_default_port() -> None:
 
         result = runner_.invoke(
             cli,
-            ["save", "--no-input", "--dry-run", "--type", "django"],
+            ["save", "host", "--no-input", "--dry-run", "--type", "django"],
             # A random isolated_filesystem() directory name can contain an
             # underscore, which fails DNS-safe project-name validation; pin
             # a safe name so this test does not depend on that draw.
@@ -432,6 +432,7 @@ def test_save_custom_command_does_not_record_an_irrelevant_detected_type() -> No
             cli,
             [
                 "save",
+                "host",
                 "--no-input",
                 "--name",
                 "demo",
@@ -453,7 +454,7 @@ def test_save_accepts_dockerfile_as_a_type() -> None:
 
         result = runner_.invoke(
             cli,
-            ["save", "--no-input", "--dry-run", "--type", "dockerfile", "-p", "80"],
+            ["save", "dockerfile", "--no-input", "--dry-run", "-p", "80"],
             # See test_save_takes_the_per_type_default_port: pin a safe
             # name so a random isolated_filesystem() directory name cannot
             # fail DNS-safe project-name validation.
@@ -465,7 +466,12 @@ def test_save_accepts_dockerfile_as_a_type() -> None:
 
 
 def test_save_uses_run_detection_when_dockerfile_and_django_are_present() -> None:
-    """Dockerfile scaffolding does not make save diverge from run detection."""
+    """Dockerfile scaffolding does not make save diverge from run detection.
+
+    Deliberately invokes bare `save`, not `save host`: this is testing
+    bare save's own type-priority (a host/Compose type wins over a
+    coexisting Dockerfile), not `save host`'s always-non-dockerfile
+    resolution, which would pass here trivially."""
     runner_ = CliRunner()
     with runner_.isolated_filesystem():
         Path(".git").mkdir()
@@ -474,7 +480,12 @@ def test_save_uses_run_detection_when_dockerfile_and_django_are_present() -> Non
 
         result = runner_.invoke(
             cli,
-            ["save", "--no-input", "--dry-run", "--name", "demo"],
+            ["save", "--no-input", "--dry-run"],
+            # --name isn't a bare-save flag any more; pin the project name
+            # via the environment instead so this doesn't depend on the
+            # isolated_filesystem() directory's random (and possibly
+            # DNS-unsafe) name.
+            env={"COMPOSE_PROJECT_NAME": "demo-app"},
         )
 
         assert result.exit_code == 0, result.output
@@ -934,7 +945,9 @@ def test_explicit_unknown_service_lists_valid_choices(monkeypatch) -> None:
 
     with runner.isolated_filesystem():
         Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
-        result = runner.invoke(cli, ["save", "--no-input", "--service", "missing"])
+        result = runner.invoke(
+            cli, ["save", "compose", "--no-input", "--service", "missing"]
+        )
 
     assert result.exit_code != 0
     assert "choose one of: web, worker" in result.output
@@ -973,7 +986,7 @@ def test_save_can_select_a_host_type_in_a_compose_project(monkeypatch) -> None:
         Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
         Path("manage.py").touch()
         host = runner.invoke(
-            cli, ["save", "--type", "django", "--name", "demo"]
+            cli, ["save", "host", "--type", "django", "--name", "demo"]
         )
         assert host.exit_code == 0, host.output
         assert 'type = "django"' in Path(".localghost.toml").read_text()
@@ -1006,7 +1019,9 @@ def test_new_override_refuses_a_router_owned_by_another_service(monkeypatch) -> 
 
     with runner.isolated_filesystem():
         Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
-        result = runner.invoke(cli, ["save", "--no-input", "--service", "web"])
+        result = runner.invoke(
+            cli, ["save", "compose", "--no-input", "--service", "web"]
+        )
 
         assert result.exit_code != 0
         assert "already defined for service 'worker'" in result.output
@@ -1022,13 +1037,17 @@ def test_existing_override_requires_confirmation_or_extend(monkeypatch) -> None:
         Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
         original = "# existing\nservices: {}\n"
         Path("compose.override.yaml").write_text(original, encoding="utf-8")
-        declined = runner.invoke(cli, ["save", "--service", "web"], input="n\n")
+        declined = runner.invoke(
+            cli, ["save", "compose", "--service", "web"], input="n\n"
+        )
 
         assert declined.exit_code != 0
         assert "refusing to overwrite" in declined.output
         assert Path("compose.override.yaml").read_text(encoding="utf-8") == original
 
-        accepted = runner.invoke(cli, ["save", "--service", "web"], input="y\n")
+        accepted = runner.invoke(
+            cli, ["save", "compose", "--service", "web"], input="y\n"
+        )
 
         assert accepted.exit_code == 0, accepted.output
         assert "Backup:" in accepted.output
@@ -1071,7 +1090,7 @@ def test_existing_complete_override_reports_no_change(monkeypatch) -> None:
                 ): "8000",
         }
         install_compose(monkeypatch, complete_model)
-        second = runner.invoke(cli, ["save", "--no-input", "--extend"])
+        second = runner.invoke(cli, ["save", "compose", "--no-input", "--extend"])
 
         assert second.exit_code == 0, second.output
         assert "already contains" in second.output
@@ -1089,7 +1108,7 @@ def test_save_host_defaults_to_toml_with_project_name_from_dotenv(monkeypatch) -
         Path("index.php").touch()
         result = runner.invoke(
             cli,
-            ["save", "--no-input", "--type", "php", "--port", "3000"],
+            ["save", "host", "--no-input", "--type", "php", "--port", "3000"],
         )
 
         assert result.exit_code == 0, result.output
@@ -1101,6 +1120,11 @@ def test_save_host_defaults_to_toml_with_project_name_from_dotenv(monkeypatch) -
 def test_save_host_defaults_reject_compose_options_and_refuse_overwrite(
     monkeypatch,
 ) -> None:
+    """`save host` declares neither --service nor --output any more (see
+    test_save_host_help_omits_compose_options), so what used to be a
+    runtime guard ("--service/--output can only be used with Compose") is
+    now a parse-time rejection from click itself -- exactly the point of
+    giving each subcommand only the options its type accepts."""
     monkeypatch.setattr("localghost.runner.shutil.which", lambda _: "/usr/bin/php")
     runner = CliRunner()
 
@@ -1111,6 +1135,7 @@ def test_save_host_defaults_reject_compose_options_and_refuse_overwrite(
             cli,
             [
                 "save",
+                "host",
                 "--no-input",
                 "--type",
                 "php",
@@ -1122,14 +1147,15 @@ def test_save_host_defaults_reject_compose_options_and_refuse_overwrite(
             env=environment,
         )
         assert invalid_service.exit_code != 0
-        assert "--service can only be used" in invalid_service.output
+        assert "no such option" in invalid_service.output.lower()
+        assert "--service" in invalid_service.output
 
         # php (like every non-dockerfile, non-compose type) has a default
         # port, so only dockerfile -- which has none -- can still exercise
         # the "requires --port" guard here.
         Path("Dockerfile").write_text("FROM scratch\n")
         missing_port = runner.invoke(
-            cli, ["save", "--no-input", "--type", "dockerfile"], env=environment
+            cli, ["save", "dockerfile", "--no-input"], env=environment
         )
         assert missing_port.exit_code != 0
         assert "requires --port" in missing_port.output
@@ -1137,14 +1163,7 @@ def test_save_host_defaults_reject_compose_options_and_refuse_overwrite(
         Path("Dockerfile").unlink()
         missing_dockerfile = runner.invoke(
             cli,
-            [
-                "save",
-                "--no-input",
-                "--type",
-                "dockerfile",
-                "--port",
-                "8000",
-            ],
+            ["save", "dockerfile", "--no-input", "--port", "8000"],
             env=environment,
         )
         assert missing_dockerfile.exit_code != 0
@@ -1157,6 +1176,7 @@ def test_save_host_defaults_reject_compose_options_and_refuse_overwrite(
             cli,
             [
                 "save",
+                "host",
                 "--no-input",
                 "--type",
                 "php",
@@ -1168,7 +1188,8 @@ def test_save_host_defaults_reject_compose_options_and_refuse_overwrite(
             env=environment,
         )
         assert overwrite.exit_code != 0
-        assert "--output can only be used" in overwrite.output
+        assert "no such option" in overwrite.output.lower()
+        assert "--output" in overwrite.output
         assert Path("saved.yaml").read_text(encoding="utf-8") == "keep\n"
 
 
@@ -1376,7 +1397,7 @@ def test_compose_run_routes_after_save_fixes_an_override() -> None:
         assert "localghost run --save" in refused.output
 
         saved = runner.invoke(
-            cli, ["save", "--no-input", "--port", "80"], env=environment
+            cli, ["save", "compose", "--no-input", "--port", "80"], env=environment
         )
         assert saved.exit_code == 0, saved.output
         assert Path("compose.override.yaml").exists()
@@ -1572,52 +1593,58 @@ def test_pinned_root_from_discovered_config_does_not_claim_a_root_flag(
 def test_save_command_requires_a_port() -> None:
     runner = CliRunner()
     with runner.isolated_filesystem():
-        result = runner.invoke(cli, ["save", "--no-input", "--", "./server"])
+        result = runner.invoke(cli, ["save", "host", "--no-input", "--", "./server"])
 
     assert result.exit_code != 0
     assert "a custom command requires --port" in result.output
 
 
 def test_save_command_rejects_dockerfile_type() -> None:
+    """`save dockerfile` declares no positional command argument at all
+    (see task-3-brief.md's save_dockerfile signature), so a command passed
+    to it is rejected by click itself as an unexpected extra argument --
+    the old "a command cannot be combined with --type dockerfile" guard in
+    `_resolve_application` is simply never reached from this subcommand."""
     runner = CliRunner()
     with runner.isolated_filesystem():
         result = runner.invoke(
             cli,
-            [
-                "save",
-                "--no-input",
-                "--type",
-                "dockerfile",
-                "--port",
-                "3000",
-                "--",
-                "./server",
-            ],
+            ["save", "dockerfile", "--no-input", "--port", "3000", "--", "./server"],
         )
 
     assert result.exit_code != 0
-    assert "cannot be combined with --type dockerfile" in result.output
+    assert "unexpected extra argument" in result.output.lower()
 
 
 def test_save_offers_compose_as_a_type_but_requires_a_compose_file() -> None:
+    """`save compose` resolves Compose files in the given directory itself
+    (via `docker compose config`), not by searching upward for a project
+    root the way `--type compose` on the old flat `save` did through
+    `discover_type` -- so the failure here is Compose's own "no
+    configuration file" error, not "could not find a compose project
+    root"."""
     runner_ = CliRunner()
     with runner_.isolated_filesystem():
         result = runner_.invoke(
-            cli, ["save", "--no-input", "--type", "compose", "--port", "80"]
+            cli, ["save", "compose", "--no-input", "--port", "80"]
         )
 
     assert result.exit_code != 0
-    assert "could not find a compose project root" in result.output
+    assert "could not resolve the project" in result.output
 
 
 def test_save_command_rejects_compose_type() -> None:
+    """`save compose` declares no positional command argument either, so
+    this is the same parse-time rejection as
+    test_save_command_rejects_dockerfile_type, not the old
+    `_resolve_application` guard."""
     result = CliRunner().invoke(
         cli,
-        ["save", "--type", "compose", "--port", "3000", "--", "./server"],
+        ["save", "compose", "--port", "3000", "--", "./server"],
     )
 
     assert result.exit_code != 0
-    assert "cannot be combined with --type compose" in result.output
+    assert "unexpected extra argument" in result.output.lower()
 
 
 def test_save_detects_a_dockerfile_from_a_subdirectory_and_writes_at_the_root(
@@ -1629,7 +1656,14 @@ def test_save_detects_a_dockerfile_from_a_subdirectory_and_writes_at_the_root(
     Before the fix, the Dockerfile existence check stayed cwd-only, so a
     Dockerfile detected two levels up produced "requires a Dockerfile in the
     current directory" -- naming a flag (--type dockerfile) the user never
-    passed, about a file that manifestly exists."""
+    passed, about a file that manifestly exists.
+
+    Invokes `save dockerfile` directly rather than bare `save`: bare
+    `save` has no `--port`, and the interactive prompt that would supply
+    one can't be exercised under CliRunner (stdin never reports as a tty).
+    `_save_dockerfile_project`'s own upward `discover_type` fallback is the
+    same root-resolution machinery bare save's dispatch would use, so this
+    still exercises the property under test."""
     root = tmp_path / "project"
     root.mkdir()
     (root / ".git").mkdir()
@@ -1640,7 +1674,7 @@ def test_save_detects_a_dockerfile_from_a_subdirectory_and_writes_at_the_root(
 
     result = CliRunner().invoke(
         cli,
-        ["save", "--no-input", "--port", "80"],
+        ["save", "dockerfile", "--no-input", "--port", "80"],
         env={"COMPOSE_PROJECT_NAME": "root-detected-dockerfile"},
     )
 
@@ -1667,6 +1701,7 @@ def test_save_command_writes_and_then_extends_the_config() -> None:
             cli,
             [
                 "save",
+                "host",
                 "--no-input",
                 "--name",
                 "demo",
@@ -1683,6 +1718,7 @@ def test_save_command_writes_and_then_extends_the_config() -> None:
             cli,
             [
                 "save",
+                "host",
                 "--no-input",
                 "--extend",
                 "--name",
@@ -1709,6 +1745,7 @@ def test_save_command_refuses_to_overwrite_without_extend() -> None:
             cli,
             [
                 "save",
+                "host",
                 "--no-input",
                 "--name",
                 "demo",
@@ -1730,6 +1767,7 @@ def test_save_command_dry_run_prints_without_writing() -> None:
             cli,
             [
                 "save",
+                "host",
                 "--no-input",
                 "--dry-run",
                 "--name",
@@ -1828,7 +1866,7 @@ def test_save_and_run_save_write_the_same_host_configuration(
     monkeypatch.chdir(save_root)
     saved = runner.invoke(
         cli,
-        ["save", "--type", "django", "--name", "demo", "--port", "34567"],
+        ["save", "host", "--type", "django", "--name", "demo", "--port", "34567"],
     )
     assert saved.exit_code == 0, saved.output
 

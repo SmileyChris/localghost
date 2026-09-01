@@ -37,6 +37,7 @@ def test_saved_compose_files_resolve_correctly(
         cli,
         [
             "save",
+            "compose",
             "--no-input",
             "--file",
             str(GENERATOR_FIXTURE),
@@ -69,7 +70,7 @@ def test_saved_compose_files_resolve_correctly(
     monkeypatch.chdir(dockerfile_dir)
     result = runner.invoke(
         cli,
-        ["save", "--no-input", "--type", "dockerfile", "--port", "80"],
+        ["save", "dockerfile", "--no-input", "--port", "80"],
         env={"COMPOSE_PROJECT_NAME": "dockerfile-fixture"},
     )
     assert result.exit_code == 0, result.output
@@ -97,6 +98,7 @@ def test_saved_compose_files_resolve_correctly(
         cli,
         [
             "save",
+            "compose",
             "--no-input",
             "--extend",
             "--file",
@@ -117,6 +119,7 @@ def test_saved_compose_files_resolve_correctly(
         cli,
         [
             "save",
+            "compose",
             "--no-input",
             "--file",
             str(GENERATOR_FIXTURE),
@@ -127,3 +130,49 @@ def test_saved_compose_files_resolve_correctly(
     )
     assert result.exit_code != 0
     assert "refusing to overwrite" in result.output
+
+
+def _fake_compose_model() -> dict:
+    return {
+        "name": "sample-project",
+        "networks": {"default": {"name": "sample-project_default"}},
+        "services": {
+            "worker": {"expose": [9000], "networks": {"default": None}},
+            "web": {"expose": [8000], "networks": {"default": None}},
+        },
+    }
+
+
+def test_save_compose_subcommand_writes_an_override(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "localghost.cli.resolve_compose", lambda files: _fake_compose_model()
+    )
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
+        result = runner.invoke(cli, ["save", "compose", "--no-input"])
+
+        assert result.exit_code == 0, result.output
+        override = Path("compose.override.yaml").read_text(encoding="utf-8")
+        assert "web:" in override
+        assert "loadbalancer.server.port=8000" in override
+
+
+def test_save_compose_help_lists_only_compose_options() -> None:
+    result = CliRunner().invoke(cli, ["save", "compose", "--help"])
+
+    assert result.exit_code == 0, result.output
+    assert "--file" in result.output
+    assert "--service" in result.output
+    assert "--output" in result.output
+    # Host-only options must not appear on the compose subcommand.
+    assert "--config" not in result.output
+    assert "--project-root" not in result.output
+
+
+def test_bare_save_rejects_type_specific_flags() -> None:
+    result = CliRunner().invoke(cli, ["save", "--service", "web"])
+
+    assert result.exit_code != 0
+    assert "no such option" in result.output.lower()
