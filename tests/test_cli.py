@@ -35,7 +35,7 @@ def test_default_command_starts_the_bundled_proxy(monkeypatch) -> None:
     monkeypatch.setattr("localghost.cli.subprocess.run", run)
     runner = CliRunner()
 
-    result = runner.invoke(cli)
+    result = runner.invoke(cli, ["hub", "up"])
 
     assert result.exit_code == 0, result.output
     assert commands[0] == (
@@ -59,7 +59,7 @@ def test_default_command_starts_the_bundled_proxy(monkeypatch) -> None:
     assert kwargs["text"] is True
     assert kwargs["env"]["LOCALGHOST_IMAGE_TAG"] == f"v{LOCALGHOST_VERSION}"
     assert "Hub is ready at http://traefik.localhost" in result.output
-    assert "Stop the hub: uvx localghost down" in result.output
+    assert "Stop the hub: uvx localghost hub down" in result.output
     assert "Save a setup: uvx localghost save" in result.output
     assert "uvx localghost run to run a local app." in " ".join(result.output.split())
 
@@ -79,7 +79,7 @@ def test_default_command_reports_existing_proxy_and_routes(monkeypatch) -> None:
         lambda command, **kwargs: CompletedProcess(command, 0),
     )
 
-    result = CliRunner().invoke(cli)
+    result = CliRunner().invoke(cli, ["hub", "up"])
 
     assert result.exit_code == 0, result.output
     assert "Hub is already ready" in result.output
@@ -97,7 +97,7 @@ def test_default_command_warns_when_route_listing_is_unavailable(monkeypatch) ->
         lambda command, **kwargs: CompletedProcess(command, 0),
     )
 
-    result = CliRunner().invoke(cli)
+    result = CliRunner().invoke(cli, ["hub", "up"])
 
     assert result.exit_code == 0, result.output
     assert "inspect failed" in result.output
@@ -122,7 +122,7 @@ def test_first_launch_introduces_localghost_before_the_https_prompt(
     )
     monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
 
-    result = CliRunner().invoke(cli)
+    result = CliRunner().invoke(cli, ["hub", "up"])
 
     assert result.exit_code == 0, result.output
     assert events == [
@@ -144,12 +144,12 @@ def test_first_launch_skips_https_prompt_without_mkcert(monkeypatch) -> None:
     )
     monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
 
-    result = CliRunner().invoke(cli)
+    result = CliRunner().invoke(cli, ["hub", "up"])
 
     assert result.exit_code == 0, result.output
     assert "Hub is ready at http://" in result.output
     assert (
-        "Enable HTTPS: uvx localghost trust after installing mkcert."
+        "Enable HTTPS: uvx localghost trust install after installing mkcert."
         in result.output
     )
 
@@ -200,6 +200,74 @@ def test_status_flag_is_gone() -> None:
     assert "no such option" in result.output.lower()
 
 
+def test_hub_up_starts_the_hub(monkeypatch) -> None:
+    started = []
+    monkeypatch.setattr(
+        "localghost.cli._run_proxy",
+        lambda action, **kwargs: started.append(action),
+    )
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
+    monkeypatch.setattr("localghost.cli._ensure_https_or_warn", lambda: False)
+    monkeypatch.setattr("localghost.cli.active_routes", lambda: [])
+
+    result = CliRunner().invoke(cli, ["hub", "up"])
+
+    assert result.exit_code == 0, result.output
+    assert started == ["up"]
+
+
+def test_hub_logs_streams_the_traefik_container(monkeypatch) -> None:
+    argv = []
+    monkeypatch.setattr(
+        "localghost.cli.subprocess.run",
+        lambda command, **kwargs: argv.append(command)
+        or CompletedProcess(command, 0),
+    )
+
+    result = CliRunner().invoke(cli, ["hub", "logs", "-f", "--tail", "50"])
+
+    assert result.exit_code == 0, result.output
+    assert argv[0][:4] == ["docker", "compose", "--project-name", "localghost"]
+    assert argv[0][-4:] == ["--follow", "--tail", "50", "traefik"]
+
+
+def test_top_level_down_is_gone() -> None:
+    result = CliRunner().invoke(cli, ["down"])
+
+    assert result.exit_code != 0
+    assert "no such command" in result.output.lower()
+
+
+def test_bare_hub_reports_without_starting(monkeypatch) -> None:
+    started = []
+    monkeypatch.setattr(
+        "localghost.cli._run_proxy",
+        lambda action, **kwargs: started.append(action),
+    )
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
+
+    result = CliRunner().invoke(cli, ["hub"])
+
+    assert result.exit_code == 0, result.output
+    assert started == []
+    assert "stopped" in result.output
+
+
+def test_bare_invocation_reports_without_starting(monkeypatch) -> None:
+    started = []
+    monkeypatch.setattr(
+        "localghost.cli._run_proxy",
+        lambda action, **kwargs: started.append(action),
+    )
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
+
+    result = CliRunner().invoke(cli)
+
+    assert result.exit_code == 0, result.output
+    assert started == []
+    assert "stopped" in result.output
+
+
 def test_down_stops_the_bundled_proxy(monkeypatch) -> None:
     commands = []
 
@@ -210,7 +278,7 @@ def test_down_stops_the_bundled_proxy(monkeypatch) -> None:
     monkeypatch.setattr("localghost.cli.subprocess.run", run)
     runner = CliRunner()
 
-    result = runner.invoke(cli, ["down"])
+    result = runner.invoke(cli, ["hub", "down"])
 
     assert result.exit_code == 0, result.output
     assert commands[0][0][-1] == "down"
@@ -233,7 +301,7 @@ def test_down_also_removes_the_profiled_bootstrap_container(monkeypatch) -> None
 
     monkeypatch.setattr("localghost.cli.subprocess.run", run)
 
-    result = CliRunner().invoke(cli, ["down"])
+    result = CliRunner().invoke(cli, ["hub", "down"])
 
     assert result.exit_code == 0, result.output
     down = next(item for item in commands if item[-1] == "down")
@@ -339,7 +407,7 @@ def test_proxy_command_preserves_docker_compose_failure_status(monkeypatch) -> N
     )
     runner = CliRunner()
 
-    result = runner.invoke(cli)
+    result = runner.invoke(cli, ["hub", "up"])
 
     assert result.exit_code == 17
     assert "compose failed" in result.output
@@ -355,7 +423,7 @@ def test_proxy_commands_report_missing_docker(monkeypatch) -> None:
     monkeypatch.setattr("localghost.cli.subprocess.run", run)
     runner = CliRunner()
 
-    result = runner.invoke(cli)
+    result = runner.invoke(cli, ["hub", "up"])
 
     assert result.exit_code != 0
     assert "docker is required" in result.output
@@ -370,7 +438,7 @@ def test_proxy_port_defaults_when_the_environment_value_is_empty(monkeypatch) ->
     )
     runner = CliRunner()
 
-    result = runner.invoke(cli, env={"LOCALGHOST_HTTP_PORT": ""})
+    result = runner.invoke(cli, ["hub", "up"], env={"LOCALGHOST_HTTP_PORT": ""})
 
     assert result.exit_code == 0, result.output
     assert "http://traefik.localhost\n" in result.output
@@ -875,7 +943,9 @@ def test_proxy_port_rejects_invalid_environment_values(monkeypatch, value) -> No
     monkeypatch.setattr("localghost.cli.subprocess.run", run)
     runner = CliRunner()
 
-    result = runner.invoke(cli, env={"LOCALGHOST_HTTP_PORT": value})
+    result = runner.invoke(
+        cli, ["hub", "up"], env={"LOCALGHOST_HTTP_PORT": value}
+    )
 
     assert result.exit_code != 0
     assert "integer from 1 to 65535" in result.output

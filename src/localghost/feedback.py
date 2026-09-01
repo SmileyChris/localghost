@@ -42,7 +42,7 @@ def title(*, welcome: bool = False) -> None:
 
 def next_actions(*, https_enabled: bool) -> None:
     """Show useful commands after a successful hub launch."""
-    action("Stop the hub", "uvx localghost down")
+    action("Stop the hub", "uvx localghost hub down")
     action(
         "Save a setup",
         "uvx localghost save",
@@ -55,7 +55,7 @@ def next_actions(*, https_enabled: bool) -> None:
     if not https_enabled:
         action(
             "Enable HTTPS",
-            "uvx localghost trust",
+            "uvx localghost trust install",
             " after installing mkcert.",
         )
 

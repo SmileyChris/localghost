@@ -111,25 +111,8 @@ class ResolvedApplication:
 def cli(ctx: click.Context) -> None:
     """Give local applications friendly .localhost URLs."""
     if ctx.invoked_subcommand is None:
-        _proxy_http_port()
-        was_running = proxy_is_running()
-        first_launch = not _managed_image_is_available()
-        title(welcome=first_launch)
-        https_enabled = _ensure_https_or_warn()
-        _run_proxy("up", already_running=was_running, https_enabled=https_enabled)
-        scheme = "https" if https_enabled else "http"
-        port = _proxy_https_port() if https_enabled else _proxy_http_port()
-        default_port = 443 if https_enabled else 80
-        suffix = "" if port == default_port else f":{port}"
-        if was_running:
-            success(f"Hub is already ready at {scheme}://traefik.localhost{suffix}")
-        else:
-            success(f"Hub is ready at {scheme}://traefik.localhost{suffix}")
-        try:
-            routes((route.hostname, route.location) for route in active_routes())
-        except click.ClickException as exc:
-            warning("Route listing unavailable", [exc.message])
-        next_actions(https_enabled=https_enabled)
+        title()
+        _proxy_status()
 
 
 @cli.command()
@@ -188,12 +171,79 @@ def _proxy_status(as_json: bool = False) -> None:
     action("Trust details", "localghost trust status")
 
 
-@cli.command()
-def down() -> None:
+@cli.group(invoke_without_command=True)
+@click.pass_context
+def hub(ctx: click.Context) -> None:
+    """Start, stop, and inspect the shared Traefik hub."""
+    if ctx.invoked_subcommand is None:
+        title()
+        _proxy_status()
+
+
+@hub.command("down")
+def hub_down() -> None:
     """Stop and remove the hub."""
     title()
     _run_proxy("down", https_enabled=_https_configured())
     success("Hub stopped and removed.")
+
+
+@hub.command("logs")
+@click.option(
+    "follow",
+    "--follow",
+    "-f",
+    is_flag=True,
+    help="Keep printing new output until interrupted.",
+)
+@click.option(
+    "tail", "--tail", default="100", help="Lines of history to show, or 'all'."
+)
+def hub_logs(follow: bool, tail: str) -> None:
+    """Print the hub's Traefik logs."""
+    with _proxy_resource_directory() as resource_root:
+        command = [
+            "docker",
+            "compose",
+            "--project-name",
+            "localghost",
+            "--file",
+            str(resource_root / "proxy_compose.yaml"),
+            "logs",
+        ]
+        if follow:
+            command.append("--follow")
+        command.extend(["--tail", tail, "traefik"])
+        try:
+            result = subprocess.run(command, check=False)
+        except FileNotFoundError as exc:
+            raise click.ClickException("docker is required") from exc
+    if result.returncode:
+        raise click.exceptions.Exit(result.returncode)
+
+
+@hub.command("up")
+def hub_up() -> None:
+    """Start the hub."""
+    _proxy_http_port()
+    was_running = proxy_is_running()
+    first_launch = not _managed_image_is_available()
+    title(welcome=first_launch)
+    https_enabled = _ensure_https_or_warn()
+    _run_proxy("up", already_running=was_running, https_enabled=https_enabled)
+    scheme = "https" if https_enabled else "http"
+    port = _proxy_https_port() if https_enabled else _proxy_http_port()
+    default_port = 443 if https_enabled else 80
+    suffix = "" if port == default_port else f":{port}"
+    if was_running:
+        success(f"Hub is already ready at {scheme}://traefik.localhost{suffix}")
+    else:
+        success(f"Hub is ready at {scheme}://traefik.localhost{suffix}")
+    try:
+        routes((route.hostname, route.location) for route in active_routes())
+    except click.ClickException as exc:
+        warning("Route listing unavailable", [exc.message])
+    next_actions(https_enabled=https_enabled)
 
 
 @cli.command()

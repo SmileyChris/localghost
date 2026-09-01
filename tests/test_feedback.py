@@ -141,10 +141,10 @@ def test_next_actions_use_plain_text_outside_interactive_terminals(monkeypatch):
     feedback.next_actions(https_enabled=False)
 
     assert standard.items == [
-        "Stop the hub: uvx localghost down",
+        "Stop the hub: uvx localghost hub down",
         "Save a setup: uvx localghost save, or "
         "uvx localghost run to run a local app.",
-        "Enable HTTPS: uvx localghost trust after installing mkcert.",
+        "Enable HTTPS: uvx localghost trust install after installing mkcert.",
     ]
 
 

@@ -74,6 +74,7 @@ def test_default_command_uses_configured_https_and_custom_port(
     monkeypatch.setattr("localghost.cli.subprocess.run", run)
     result = CliRunner().invoke(
         cli,
+        ["hub", "up"],
         env={
             "LOCALGHOST_STATE_DIR": str(tmp_path),
             "LOCALGHOST_HTTPS_PORT": "8443",
@@ -97,7 +98,7 @@ def test_interactive_start_can_enable_https(monkeypatch) -> None:
     monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
     monkeypatch.setattr("localghost.cli.active_routes", lambda: [])
 
-    result = CliRunner().invoke(cli, input="y\n")
+    result = CliRunner().invoke(cli, ["hub", "up"], input="y\n")
 
     assert result.exit_code == 0, result.output
     assert enabled == [True]
