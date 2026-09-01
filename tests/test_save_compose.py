@@ -209,6 +209,166 @@ def test_bare_save_detects_compose_from_a_subdirectory_and_writes_at_the_root(
     assert not (nested / "compose.override.yaml").exists()
 
 
+def test_save_compose_from_a_subdirectory_writes_at_the_compose_root(
+    tmp_path, monkeypatch
+) -> None:
+    """The named subcommand has to resolve the root the way bare `save`
+    does. Writing the override next to the invocation directory puts it
+    where Compose never merges it, and the follow-up hint then names
+    `localghost save` -- the command that just appeared to succeed."""
+    monkeypatch.setattr(
+        "localghost.cli.resolve_compose",
+        lambda files, **kwargs: _fake_compose_model(),
+    )
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / ".git").mkdir()
+    (root / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
+    nested = root / "services" / "api"
+    nested.mkdir(parents=True)
+    monkeypatch.chdir(nested)
+
+    result = CliRunner().invoke(
+        cli,
+        ["save", "compose", "--no-input"],
+        env={"COMPOSE_PROJECT_NAME": "nested-compose-project"},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (root / "compose.override.yaml").exists()
+    assert not (nested / "compose.override.yaml").exists()
+    # The type pin and the registry entry are keyed off the same resolved
+    # root, so the remembered hostname matches the routers just written.
+    assert (root / ".localghost.toml").exists()
+    assert not (nested / ".localghost.toml").exists()
+
+
+def test_save_compose_with_an_explicit_file_stack_stays_where_it_was_invoked(
+    tmp_path, monkeypatch
+) -> None:
+    """`-f/--file` names the model to inspect, so the output directory
+    stays the invocation directory -- its documented behaviour, and the
+    reason the upward search above is gated on `files` being empty."""
+    monkeypatch.setattr(
+        "localghost.cli.resolve_compose",
+        lambda files, **kwargs: _fake_compose_model(),
+    )
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / ".git").mkdir()
+    (root / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
+    nested = root / "services" / "api"
+    nested.mkdir(parents=True)
+    monkeypatch.chdir(nested)
+
+    result = CliRunner().invoke(
+        cli,
+        ["save", "compose", "--no-input", "--file", str(root / "compose.yaml")],
+        env={"COMPOSE_PROJECT_NAME": "explicit-stack-project"},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (nested / "compose.override.yaml").exists()
+    assert not (root / "compose.override.yaml").exists()
+    # No pin either: an explicit stack is inspected from wherever the
+    # command was typed, which is not necessarily a project root.
+    assert not (nested / ".localghost.toml").exists()
+
+
+def test_save_compose_pins_the_type_so_later_runs_need_no_flag(monkeypatch) -> None:
+    """`compose.yaml` beside `manage.py` is genuinely ambiguous and
+    `discover_type` refuses to guess. `save host --type django` pins the
+    host side of that fork; this pin is the only way to pin the Compose
+    side, and without it every later `run` needs `--type compose` by
+    hand."""
+    monkeypatch.setattr(
+        "localghost.cli.resolve_compose", lambda files: _fake_compose_model()
+    )
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
+        Path("manage.py").touch()
+        result = runner.invoke(cli, ["save", "compose", "--no-input"])
+
+        assert result.exit_code == 0, result.output
+        assert 'type = "compose"' in Path(".localghost.toml").read_text(
+            encoding="utf-8"
+        )
+
+
+def test_bare_save_does_not_pin_the_compose_type(monkeypatch) -> None:
+    """Bare `save` only reaches the compose branch when detection was
+    already unambiguous, so there is nothing to remember -- and writing a
+    pin no one asked for would make a plain `save` touch a second file."""
+    monkeypatch.setattr(
+        "localghost.cli.resolve_compose", lambda files, **kwargs: _fake_compose_model()
+    )
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
+        result = runner.invoke(cli, ["save", "--no-input"])
+
+        assert result.exit_code == 0, result.output
+        assert Path("compose.override.yaml").exists()
+        assert not Path(".localghost.toml").exists()
+
+
+def test_save_compose_run_rejects_a_nonstandard_output(monkeypatch) -> None:
+    """Compose only merges `compose.override.yaml` automatically, so
+    `--output` and `--run` can never both hold: the pair could only save
+    successfully and then fail the routing check. It is rejected at parse
+    time instead, before anything is written."""
+    monkeypatch.setattr(
+        "localghost.cli.resolve_compose", lambda files, **kwargs: _fake_compose_model()
+    )
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
+        result = runner.invoke(
+            cli, ["save", "compose", "--no-input", "--output", "custom.yaml", "--run"]
+        )
+
+        assert result.exit_code != 0
+        assert "--output cannot be combined with --run" in result.output
+        assert not Path("custom.yaml").exists()
+
+
+def test_save_compose_run_starts_an_ambiguous_compose_project(
+    tmp_path, monkeypatch
+) -> None:
+    """`run` re-resolves from scratch, so without the subcommand's own type
+    being forwarded this saved the override and then died on
+    "both compose and django were detected; rerun with --type compose" --
+    advice that cannot be followed from `save compose --run`, where the
+    subcommand name already is the type."""
+    started: list[str | None] = []
+    monkeypatch.setattr(
+        "localghost.cli.resolve_compose", lambda files, **kwargs: _fake_compose_model()
+    )
+    monkeypatch.setattr("localghost.cli._check_compose_routing", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "localghost.cli._run_compose",
+        lambda root, name, detach, **kwargs: started.append(name),
+    )
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
+    (tmp_path / "manage.py").touch()
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        ["save", "compose", "--no-input", "--run"],
+        env={"COMPOSE_PROJECT_NAME": "ambiguous-project"},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "compose.override.yaml").exists()
+    assert started, "save compose --run must start the application after saving"
+
+
 def test_bare_save_rejects_type_specific_flags() -> None:
     result = CliRunner().invoke(cli, ["save", "--service", "web"])
 

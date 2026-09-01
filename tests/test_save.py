@@ -190,6 +190,143 @@ def test_save_host_run_is_a_noop_with_dry_run(monkeypatch) -> None:
         assert not started, "save --dry-run --run must not start the application"
 
 
+def test_save_host_run_forwards_the_project_root(monkeypatch, tmp_path) -> None:
+    """`--run` re-enters `run`, which re-resolves from its own flags. With
+    only `-C` forwarded, `run` searched upward from the invocation
+    directory, never saw the `.localghost.toml` just written under
+    `--project-root`, and exited 1 on the setup that had just succeeded."""
+    started: list[str] = []
+    monkeypatch.setattr(
+        "localghost.cli.execute",
+        lambda plan, *args, **kwargs: started.append(plan.name) or 0,
+    )
+    monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
+    (tmp_path / ".git").mkdir()
+    backend = tmp_path / "backend"
+    backend.mkdir()
+    (backend / "manage.py").touch()
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        ["save", "host", "--no-input", "--project-root", "backend", "--run"],
+        env={"COMPOSE_PROJECT_NAME": "backend-project"},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (backend / ".localghost.toml").exists()
+    assert started, "save host --project-root --run must start the application"
+
+
+def test_save_host_run_forwards_a_custom_configuration_path(
+    monkeypatch, tmp_path
+) -> None:
+    """Same failure through `--config`: `run` discovers `.localghost.toml`,
+    never the custom path just written, so the command and port saved a
+    line earlier were invisible to it."""
+    started: list[str] = []
+    monkeypatch.setattr(
+        "localghost.cli.execute",
+        lambda plan, *args, **kwargs: started.append(plan.name) or 0,
+    )
+    monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "custom.toml").write_text("[run]\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "save", "host", "--no-input", "--config", "custom.toml", "--extend",
+            "--run", "--port", "8080", "--", "./server",
+        ],
+        env={"COMPOSE_PROJECT_NAME": "custom-config-project"},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert 'command = ["./server"]' in (tmp_path / "custom.toml").read_text(
+        encoding="utf-8"
+    )
+    assert not (tmp_path / ".localghost.toml").exists()
+    assert started, "save host --config --run must start the application"
+
+
+def test_save_dockerfile_no_input_never_prompts_for_a_port(monkeypatch) -> None:
+    """`--no-input` is declared on `save dockerfile`, so it has to reach the
+    port prompt. It was read out of the group's context but never passed
+    on, and `_save_dockerfile_project` asked `_is_interactive(False)`
+    regardless -- a declared option that did nothing."""
+    monkeypatch.setattr("localghost.cli._is_interactive", lambda no_input: not no_input)
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        Path("Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+        result = runner.invoke(
+            cli,
+            ["save", "dockerfile", "--no-input"],
+            env={"COMPOSE_PROJECT_NAME": "dockerfile-fixture"},
+        )
+
+        assert result.exit_code != 0
+        assert "Container HTTP port" not in result.output
+        assert "requires --port" in result.output
+
+
+def test_bare_save_no_input_reaches_the_dockerfile_branch(monkeypatch) -> None:
+    """Bare `save` stores `--no-input` in its context for the subcommand to
+    pick up; the dockerfile branch dropped it on the floor."""
+    monkeypatch.setattr("localghost.cli._is_interactive", lambda no_input: not no_input)
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        Path("Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+        result = runner.invoke(
+            cli,
+            ["save", "--no-input"],
+            env={"COMPOSE_PROJECT_NAME": "dockerfile-fixture"},
+        )
+
+        assert result.exit_code != 0
+        assert "Container HTTP port" not in result.output
+        assert "requires --port" in result.output
+
+
+def test_bare_save_help_lists_only_type_neutral_options() -> None:
+    result = CliRunner().invoke(cli, ["save", "--help"])
+
+    assert result.exit_code == 0, result.output
+    for option in ("--directory", "--dry-run", "--no-input", "--run"):
+        assert option in result.output
+    # Everything type-specific lives on the subcommand that accepts it --
+    # the whole point of the split, and what makes `--help` truthful.
+    for option in (
+        "--type",
+        "--file",
+        "--service",
+        "--output",
+        "--name",
+        "--config",
+        "--project-root",
+        "--port",
+        "--extend",
+    ):
+        assert option not in result.output
+    for subcommand in ("host", "compose", "dockerfile"):
+        assert subcommand in result.output
+
+
+def test_save_dockerfile_help_lists_only_dockerfile_options() -> None:
+    result = CliRunner().invoke(cli, ["save", "dockerfile", "--help"])
+
+    assert result.exit_code == 0, result.output
+    for option in ("--project-root", "--service", "--port", "--output", "--no-input"):
+        assert option in result.output
+    # A Dockerfile scaffold writes a new compose.yaml rather than editing
+    # one, and never touches .localghost.toml.
+    for option in ("--file", "--config", "--name", "--extend"):
+        assert option not in result.output
+
+
 def test_save_host_help_omits_compose_options() -> None:
     result = CliRunner().invoke(cli, ["save", "host", "--help"])
 

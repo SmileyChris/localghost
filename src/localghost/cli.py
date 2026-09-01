@@ -1171,9 +1171,16 @@ def save(
         "dry_run": dry_run,
         "no_input": no_input,
         "run_after": run_after,
+        "from_bare_save": False,
     }
     if ctx.invoked_subcommand is not None:
         return
+    # Everything below dispatches to a subcommand on the user's behalf.
+    # `save_compose` reads this to decide whether to pin `type = "compose"`:
+    # a pin only earns its place when the user named the type, since bare
+    # `save` reaches the compose branch only when detection was already
+    # unambiguous.
+    ctx.obj["from_bare_save"] = True
     start = working_directory or Path.cwd()
     if os.environ.get("COMPOSE_FILE"):
         # Matches `_resolve_application`'s `compose_from_environment` check:
@@ -1278,10 +1285,22 @@ def save_compose(
 ) -> None:
     """Save Compose integration to compose.override.yaml."""
     shared = ctx.obj or {}
-    cwd = working_directory or shared.get("working_directory") or Path.cwd()
+    working_directory = working_directory or shared.get("working_directory")
     dry_run = dry_run or shared.get("dry_run", False)
     no_input = no_input or shared.get("no_input", False)
     run_after = run_after or shared.get("run_after", False)
+    if run_after and output is not None:
+        # Compose only merges `compose.override.yaml` automatically, so a
+        # nonstandard --output is never part of the project `run` would
+        # start: the pair can only ever save successfully and then fail the
+        # routing check. Rejecting it here beats that confusing sequence.
+        raise click.UsageError(
+            "--output cannot be combined with --run: Docker Compose only "
+            "merges compose.override.yaml automatically, so a nonstandard "
+            "output would not be part of the project this would start"
+        )
+    cwd = _compose_save_root(working_directory or Path.cwd(), files)
+    interactive = _is_interactive(no_input)
     if not dry_run:
         title()
     _save_compose_project(
@@ -1292,12 +1311,14 @@ def save_compose(
         output=output,
         extend=extend,
         dry_run=dry_run,
-        interactive=_is_interactive(no_input),
+        interactive=interactive,
     )
+    if not files and not shared.get("from_bare_save", False):
+        _pin_compose_type(cwd, extend=extend, dry_run=dry_run, interactive=interactive)
     if not dry_run:
         registry.record(_local_project_name(cwd), cwd, "compose")
     if run_after and not dry_run:
-        ctx.invoke(run, working_directory=cwd)
+        _run_after_save(ctx, working_directory=cwd, selected_type="compose")
 
 
 @save.command("host")
@@ -1397,7 +1418,14 @@ def save_host(
     if not dry_run:
         _record_registry(resolved)
     if run_after and not dry_run:
-        ctx.invoke(run, working_directory=working_directory)
+        _run_after_save(
+            ctx,
+            working_directory=working_directory,
+            root=root,
+            config=config,
+            name=name,
+            selected_type=selected_type,
+        )
 
 
 @save.command("dockerfile")
@@ -1451,6 +1479,7 @@ def save_dockerfile(
     shared = ctx.obj or {}
     working_directory = working_directory or shared.get("working_directory")
     dry_run = dry_run or shared.get("dry_run", False)
+    no_input = no_input or shared.get("no_input", False)
     run_after = run_after or shared.get("run_after", False)
     if not dry_run:
         title()
@@ -1461,9 +1490,78 @@ def save_dockerfile(
         port=port,
         output=output,
         dry_run=dry_run,
+        interactive=_is_interactive(no_input),
     )
     if run_after and not dry_run:
-        ctx.invoke(run, working_directory=working_directory)
+        # `save dockerfile` has just written a compose.yaml, so what `run`
+        # starts is a Compose project -- name the type rather than leaving
+        # `run` to re-detect it and trip over a coexisting framework.
+        _run_after_save(
+            ctx,
+            working_directory=working_directory,
+            root=root,
+            selected_type="compose",
+        )
+
+
+def _run_after_save(ctx: click.Context, **overrides: object) -> None:
+    """Start what `save` just wrote, on the terms it was written with.
+
+    `run` re-runs the whole resolution chain from its own flags, so a save
+    that used `--project-root`, `--config`, or a subcommand-implied type has
+    to forward them; otherwise `run` searches from the invocation directory,
+    never sees the file just written, and fails on the very setup that
+    succeeded a line earlier. `--port` and the trailing command are
+    deliberately not forwarded: `save` has just persisted them, and `run`
+    reads them back out of the saved configuration.
+    """
+    ctx.invoke(run, **overrides)
+
+
+def _compose_save_root(start: Path, files: tuple[Path, ...]) -> Path:
+    """The directory `save compose` writes `compose.override.yaml` into.
+
+    An explicit `-f/--file` stack (or `COMPOSE_FILE`, its environment
+    equivalent -- the same pairing `_resolve_application` makes) names the
+    model to inspect, so the invocation directory stays the output
+    directory: its existing, documented behaviour. Otherwise the Compose
+    root has to be searched for exactly as bare `save` searches, or an
+    override saved from `project/services/api` lands where Compose will
+    never merge it.
+
+    Detection failing is not fatal here -- `resolve_compose` reports a
+    missing model far better than `discover_type` would -- so an
+    undetectable project falls back to the invocation directory.
+    """
+    if files or os.environ.get("COMPOSE_FILE"):
+        return start
+    try:
+        _, root = discover_type(start, "compose", allowed=RUN_TYPES)
+    except click.ClickException:
+        return start
+    return root
+
+
+def _pin_compose_type(
+    root: Path, *, extend: bool, dry_run: bool, interactive: bool
+) -> None:
+    """Remember `type = "compose"` so later runs need no `--type`.
+
+    Detection cannot resolve a `compose.yaml` that shares a directory with a
+    framework: `discover_type` refuses and demands a type. `save host --type
+    django` pins the host side of that fork forever; without this the
+    Compose side could not be pinned at all, and every later `run` would
+    need `--type compose` typed by hand.
+
+    Only a direct `save compose` writes it (see `save`'s `from_bare_save`),
+    and only without `-f/--file`: an explicit file stack is inspected from
+    the invocation directory, which is not necessarily a project root.
+    """
+    config = RunConfig(type="compose")
+    if dry_run:
+        click.echo(render_run_config(config), nl=False)
+        return
+    _save_run_config(root, config, extend=extend, interactive=interactive)
 
 
 def _save_compose_project(
@@ -1582,6 +1680,7 @@ def _save_dockerfile_project(
     port: int | None,
     output: Path | None,
     dry_run: bool,
+    interactive: bool,
 ) -> None:
     start = working_directory or Path.cwd()
     project_root = resolve_root(
@@ -1596,7 +1695,7 @@ def _save_dockerfile_project(
             "dockerfile",
             allowed=SAVE_TYPES,
         )
-    if port is None and _is_interactive(False):
+    if port is None and interactive:
         port = click.prompt(
             "Container HTTP port",
             type=click.IntRange(1, 65535),
