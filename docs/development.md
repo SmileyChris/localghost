@@ -220,8 +220,8 @@ does not support account username-and-password uploads; use an API token.
    version:
    ```sh
    uvx --refresh localghost@<version> --version
-   uvx --refresh localghost@<version>
-   uvx localghost@<version> down
+   uvx --refresh localghost@<version> hub up
+   uvx localghost@<version> hub down
    uvx --refresh localghost --version
    ```
    PyPI propagation can take a short time; retry the exact-version check until
