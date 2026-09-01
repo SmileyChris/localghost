@@ -37,11 +37,30 @@ uses [Semantic Versioning](https://semver.org/).
   recorded in `.localghost.toml`, Compose integration is written to
   `compose.override.yaml`, and Dockerfile-only projects can be saved as a new
   `compose.yaml`.
-- Added `localghost run --save`, which uses the same persistence path as
-  `localghost save` and then starts the application. Plain `run` remains
-  non-mutating and directs an unconfigured Compose project to `run --save`.
+- `localghost save` is now a command group with one subcommand per project
+  type — `save host`, `save compose`, `save dockerfile`. Bare `save` still
+  detects the type and dispatches, but type-specific options now live on the
+  subcommand that accepts them, so `--help` is accurate for the project in
+  front of you.
+- `localghost run` is now strictly read-only. `run --save` is replaced by
+  `save --run`, and `run --service` moves to `save compose --service`.
+- `save compose` has no `--name` option: a Compose project's name always
+  comes from Docker (`COMPOSE_PROJECT_NAME`, the `.env` file, or the
+  directory name), never from a flag — a `--name` there would have moved only
+  the ghost-page registry entry, leaving it pointing at a hostname no router
+  serves.
+- `save host --type` no longer accepts `compose`; use `save compose` for a
+  Compose project.
+- `save compose --run` now validates the Compose routing before starting,
+  where the removed `run --save` skipped that check.
+- `--root` is renamed `--project-root` so it stops reading as a synonym of
+  `--directory`.
 - Explicit `type = "compose"` run configuration now resolves type ambiguity
   without bypassing validation of the resolved Compose routing model.
+
+### Removed
+
+- `run --save`, `run --service`, and the deprecated `--framework` alias.
 
 ## [2.1.0] - 2026-08-26
 

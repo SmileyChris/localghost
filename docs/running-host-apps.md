@@ -21,7 +21,7 @@ directory; `--type` resolves ambiguity or skips detection entirely.
 
 `dockerfile` is an eighth type, but it is save-only — see
 [Saving project setup](saving-setup.md). Running a Dockerfile
-project first needs `localghost save --type dockerfile` to produce a
+project first needs `localghost save dockerfile` to produce a
 Compose file; after that the project is `compose`.
 
 Within PHP, `cakephp` and `laravel` are specializations of `php` rather than
@@ -67,8 +67,10 @@ uvx localghost run --type compose
 Before starting anything, a Compose run checks that the project is actually
 wired to the hub — the `localghost` network is present, and at least one
 service carries `traefik.enable=true` on that network. A project that has not
-saved its setup is refused with an exact `localghost run --save` next action,
-rather than starting and printing a URL that would never route. A saved
+saved its setup is refused with an exact `localghost save` next action, rather
+than starting and printing a URL that would never route. `save compose --run`
+runs the same check before starting, so a misconfigured save is caught
+immediately rather than deferred to the next `run`. A saved
 `type = "compose"` resolves ambiguity but never bypasses this routing check.
 
 ### Configured runs
@@ -114,12 +116,12 @@ Settings are layered: a command-line option wins over `.localghost.toml`,
 which wins over automatic detection. Use `--config PATH` to read a different
 file.
 
-`localghost save` writes this file without running, while `run --save` writes
+`localghost save` writes this file without running, while `save --run` writes
 the same setup and then starts it:
 
 ```sh
-uvx localghost save --port 8080 -- ./server --port 8080
-uvx localghost run --save --port 8080 -- ./server --port 8080
+uvx localghost save host --port 8080 -- ./server --port 8080
+uvx localghost save host --port 8080 --run -- ./server --port 8080
 ```
 
 It refuses to overwrite an existing `.localghost.toml` unless `--extend` is
@@ -131,7 +133,7 @@ configuration without writing anything under `--dry-run`.
 The project root supplies the hostname and anchors configuration. Resolution
 tries each of the following in order, and the first match wins:
 
-1. `--root PATH` — resolved relative to the process working directory.
+1. `--project-root PATH` — resolved relative to the process working directory.
 2. `[run].root` in a discovered `.localghost.toml` — resolved relative to the
    directory holding that config file.
 3. The directory holding the discovered `.localghost.toml`, when one is found
@@ -139,7 +141,7 @@ tries each of the following in order, and the first match wins:
 4. The nearest ancestor of `-C`/`--directory` (inclusive) at which a type is
    detected — the default, unbounded-by-config search.
 
-Both `--root` and `[run].root` accept `..`, so a config file at
+Both `--project-root` and `[run].root` accept `..`, so a config file at
 `myrepo/tools/.localghost.toml` can set `root = ".."` to point at `myrepo`.
 When the root is pinned by one of the first three rules, type detection runs
 only at that directory rather than walking upward; a pinned root with no
@@ -249,8 +251,9 @@ Skip auto-detection and specify the type:
 uvx localghost run --type vite
 ```
 
-`--framework` still works as a deprecated alias for `--type` and prints a
-warning; it is hidden from `--help`.
+`--framework` is no longer accepted as a CLI option; use `--type`.
+`[run].framework` in `.localghost.toml` still works as a deprecated alias for
+`[run].type` — see [Configured runs](#configured-runs) above.
 
 ### Custom command
 
