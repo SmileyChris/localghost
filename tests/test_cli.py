@@ -329,14 +329,14 @@ def test_trust_configures_a_stopped_proxy_without_starting_it(
     monkeypatch.setattr("localghost.cli.subprocess.run", run)
 
     result = CliRunner().invoke(
-        cli, ["trust"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+        cli, ["trust", "install"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
     )
 
     assert result.exit_code == 0, result.output
     assert (tmp_path / "https-enabled").is_file()
     assert "public-root fingerprint: SHA256:" in result.output
     assert commands == []
-    assert "Start the hub: localghost" in result.output
+    assert "Start the hub: localghost hub up" in result.output
 
 
 def test_trust_restarts_a_running_proxy_when_https_becomes_configured(
@@ -360,7 +360,7 @@ def test_trust_restarts_a_running_proxy_when_https_becomes_configured(
 
     monkeypatch.setattr("localghost.cli.subprocess.run", run)
     result = CliRunner().invoke(
-        cli, ["trust"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+        cli, ["trust", "install"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
     )
 
     assert result.exit_code == 0, result.output
@@ -389,7 +389,7 @@ def test_trust_remove_disables_https_before_mutating_managed_stores(
     monkeypatch.setattr("localghost.cli.subprocess.run", run)
 
     result = CliRunner().invoke(
-        cli, ["trust", "--remove"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+        cli, ["trust", "remove"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
     )
 
     assert result.exit_code == 0, result.output

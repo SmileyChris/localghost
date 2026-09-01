@@ -1,4 +1,4 @@
-# Applied only after `localghost trust` has installed this proxy's public root.
+# Applied only after `localghost trust install` has installed this proxy's public root.
 services:
   bootstrap:
     # This is an explicit one-shot job invoked by `docker compose run`; it is

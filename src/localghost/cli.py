@@ -403,30 +403,18 @@ def manage_clean() -> None:
     success(f"Removed {clean_sessions()} stale session(s).")
 
 
-@cli.command()
-@click.option(
-    "remove",
-    "--remove",
-    is_flag=True,
-    help="Remove the managed root and disable HTTPS.",
-)
-@click.option(
-    "show_status",
-    "--status",
-    is_flag=True,
-    help="Show the managed public-root state without changing it.",
-)
-def trust(remove: bool, show_status: bool) -> None:
-    """Install, remove, or inspect the hub's public development root."""
-    if remove and show_status:
-        raise click.UsageError("--remove and --status cannot be used together")
+@cli.group(invoke_without_command=True)
+@click.pass_context
+def trust(ctx: click.Context) -> None:
+    """Inspect, install, or remove the hub's public development root."""
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(trust_status)
+
+
+@trust.command("install")
+def trust_install() -> None:
+    """Install the managed public root and enable HTTPS."""
     title()
-    if show_status:
-        _trust_status()
-        return
-    if remove:
-        _remove_trust()
-        return
     was_configured = _https_configured()
     was_running = proxy_is_running()
     info("Preparing HTTPS trust…")
@@ -438,7 +426,21 @@ def trust(remove: bool, show_status: bool) -> None:
         success("The hub was already configured for HTTPS.")
     else:
         success("Trusted HTTPS is configured.")
-        action("Start the hub", "localghost")
+        action("Start the hub", "localghost hub up")
+
+
+@trust.command("remove")
+def trust_remove() -> None:
+    """Remove the managed root and disable HTTPS."""
+    title()
+    _remove_trust()
+
+
+@trust.command("status")
+def trust_status() -> None:
+    """Show the managed public-root state without changing it."""
+    title()
+    _trust_status()
 
 
 def _remove_trust() -> None:
