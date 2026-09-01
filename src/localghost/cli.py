@@ -1574,7 +1574,6 @@ def _save_compose_project(
     extend: bool,
     dry_run: bool,
     interactive: bool,
-    final_hint: bool = True,
 ) -> None:
     """Persist the Compose setup for a Compose project."""
     output = output or cwd / "compose.override.yaml"
@@ -1632,7 +1631,7 @@ def _save_compose_project(
                 f"port {selected_port}."
             )
 
-    if not dry_run and final_hint:
+    if not dry_run:
         info(
             "Run it with localghost run, or start the hub and keep using "
             "docker compose up."
@@ -1759,19 +1758,6 @@ def _save_run_config(
             else backup
         )
         info(f"Backup: {shown_backup}")
-
-
-def _has_compose_file(root: Path | None = None) -> bool:
-    root = root or Path.cwd()
-    return bool(os.environ.get("COMPOSE_FILE")) or any(
-        (root / filename).is_file()
-        for filename in (
-            "compose.yaml",
-            "compose.yml",
-            "docker-compose.yaml",
-            "docker-compose.yml",
-        )
-    )
 
 
 def _is_interactive(no_input: bool) -> bool:

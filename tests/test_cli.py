@@ -1612,12 +1612,13 @@ def test_save_command_requires_a_port() -> None:
     assert "a custom command requires --port" in result.output
 
 
-def test_save_command_rejects_dockerfile_type() -> None:
-    """`save dockerfile` declares no positional command argument at all
-    (see task-3-brief.md's save_dockerfile signature), so a command passed
-    to it is rejected by click itself as an unexpected extra argument --
-    the old "a command cannot be combined with --type dockerfile" guard in
-    `_resolve_application` is simply never reached from this subcommand."""
+def test_save_dockerfile_takes_no_trailing_command() -> None:
+    """`save dockerfile` declares no positional command argument at all, so
+    a command passed to it is rejected by click itself as an unexpected
+    extra argument -- the old "a command cannot be combined with --type
+    dockerfile" guard in `_resolve_application` is simply never reached
+    from this subcommand. This is an arity assertion, not a --type one:
+    the invocation carries no --type at all."""
     runner = CliRunner()
     with runner.isolated_filesystem():
         result = runner.invoke(
@@ -1630,13 +1631,14 @@ def test_save_command_rejects_dockerfile_type() -> None:
 
 
 def test_save_compose_surfaces_a_resolution_failure(monkeypatch) -> None:
-    """`save compose` resolves Compose files in the given directory itself
-    (via `docker compose config`), not by searching upward for a project
-    root the way `--type compose` on the old flat `save` did through
-    `discover_type` -- so a missing compose file surfaces as
-    `resolve_compose`'s own failure, not "could not find a compose project
-    root". ("compose" is a subcommand now, not a --type value -- renamed
-    from test_save_offers_compose_as_a_type_but_requires_a_compose_file.)
+    """`save compose` reports a missing Compose model through
+    `resolve_compose` (`docker compose config`) itself. Its upward search
+    for the project root is deliberately best-effort -- a directory where
+    `discover_type` finds no compose file falls back to the invocation
+    directory -- so what the user sees is Compose's own diagnosis, not
+    "could not find a compose project root". ("compose" is a subcommand
+    now, not a --type value -- renamed from
+    test_save_offers_compose_as_a_type_but_requires_a_compose_file.)
 
     `resolve_compose` is stubbed to raise directly, matching the other
     tests in this file (see `install_compose`), rather than letting a real
@@ -1661,10 +1663,10 @@ def test_save_compose_surfaces_a_resolution_failure(monkeypatch) -> None:
     assert "no configuration file provided" in result.output
 
 
-def test_save_command_rejects_compose_type() -> None:
+def test_save_compose_takes_no_trailing_command() -> None:
     """`save compose` declares no positional command argument either, so
-    this is the same parse-time rejection as
-    test_save_command_rejects_dockerfile_type, not the old
+    this is the same parse-time arity rejection as
+    test_save_dockerfile_takes_no_trailing_command, not the old
     `_resolve_application` guard."""
     result = CliRunner().invoke(
         cli,
