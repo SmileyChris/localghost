@@ -1401,9 +1401,6 @@ def save_host(
         )
     _persist_resolved_application(
         resolved,
-        service_name=None,
-        port=resolved.port,
-        output=None,
         extend=extend,
         dry_run=dry_run,
         interactive=_is_interactive(no_input),
@@ -1558,44 +1555,17 @@ def _save_compose_project(
 def _persist_resolved_application(
     resolved: ResolvedApplication,
     *,
-    service_name: str | None,
-    port: int | None,
-    output: Path | None,
     extend: bool,
     dry_run: bool,
     interactive: bool,
-    final_hint: bool = True,
 ) -> None:
-    """Persist the exact resolution used by both save entry points."""
-    if resolved.selected_type == "compose":
-        if output is not None and resolved.config_file is not None:
-            raise click.ClickException(
-                "--output cannot be combined with a run configuration file"
-            )
-        _save_compose_project(
-            cwd=resolved.root,
-            files=(),
-            service_name=service_name,
-            port=port,
-            output=output,
-            extend=extend,
-            dry_run=dry_run,
-            interactive=interactive,
-            final_hint=final_hint,
-        )
-        if resolved.requested_type == "compose":
-            compose_config = RunConfig(type="compose", name=resolved.name)
-            if dry_run:
-                click.echo(render_run_config(compose_config), nl=False)
-            else:
-                _save_run_config(
-                    resolved.root,
-                    compose_config,
-                    extend=extend,
-                    interactive=interactive,
-                    target=resolved.config_file,
-                )
-        return
+    """Persist a host resolution to .localghost.toml.
+
+    Compose projects never reach here: `save_host`, the only caller, raises
+    before calling this whenever `resolved.selected_type == "compose"` --
+    Compose is persisted via `_save_compose_project` instead, called
+    directly by `save_compose`.
+    """
     plan = resolved.plan
     assert plan is not None
     saved_config = _run_config_from_plan(
