@@ -249,8 +249,19 @@ def hub_up() -> None:
     next_actions(https_enabled=https_enabled)
 
 
+def _complete_project_name(
+    ctx: click.Context, param: click.Parameter, incomplete: str
+) -> list[str]:
+    """Complete remembered project names; never raise into the shell."""
+    try:
+        entries = registry.entries()
+    except OSError:
+        return []
+    return [entry.name for entry in entries if entry.name.startswith(incomplete)]
+
+
 @cli.command()
-@click.argument("name", required=False)
+@click.argument("name", required=False, shell_complete=_complete_project_name)
 @click.option("--all", "forget_everything", is_flag=True, help="Forget every project.")
 def forget(name: str | None, forget_everything: bool) -> None:
     """Drop a project's ghost page entry."""
@@ -284,7 +295,7 @@ def _summon_entry(
 
 
 @cli.command()
-@click.argument("name", required=False)
+@click.argument("name", required=False, shell_complete=_complete_project_name)
 @click.option("app_name", "--name", help="Public project name used for NAME.localhost.")
 @click.option(
     "selected_type",

@@ -4,6 +4,7 @@ from subprocess import CompletedProcess
 
 from click.testing import CliRunner
 
+from localghost import cli as cli_module
 from localghost import registry
 from localghost.cli import cli
 
@@ -102,6 +103,26 @@ def test_forget_requires_name_or_all(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
     result = CliRunner().invoke(cli, ["forget"])
     assert result.exit_code != 0
+
+
+def test_project_name_completion_filters_by_prefix(tmp_path):
+    registry.record("blog", tmp_path, "django")
+    registry.record("shop", tmp_path, "compose")
+
+    assert cli_module._complete_project_name(None, None, "bl") == ["blog"]
+    assert sorted(cli_module._complete_project_name(None, None, "")) == [
+        "blog",
+        "shop",
+    ]
+
+
+def test_project_name_completion_survives_a_broken_registry(monkeypatch):
+    def explode():
+        raise OSError("registry unreadable")
+
+    monkeypatch.setattr("localghost.cli.registry.entries", explode)
+
+    assert cli_module._complete_project_name(None, None, "") == []
 
 
 # -- recording wiring: `save` and `run` -------------------------------------
