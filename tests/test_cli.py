@@ -619,6 +619,29 @@ def test_run_pins_the_root_with_the_flag(monkeypatch, tmp_path) -> None:
     assert "backend.localhost" in result.output
 
 
+def test_run_project_root_discovers_config_inside_the_pinned_root(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr("localghost.runner._port_available", lambda port: True)
+    root = tmp_path / "backend"
+    root.mkdir()
+    (root / ".localghost.toml").write_text(
+        '[run]\nname = "configured-backend"\nport = 4321\n'
+        'command = ["serve"]\n',
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(
+        cli, ["run", "--project-root", "backend", "--dry-run"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "configured-backend.localhost" in result.output
+    assert "Host port: 4321" in result.output
+    assert "serve" in result.output
+
+
 def test_a_pinned_root_without_a_type_errors(tmp_path) -> None:
     root = tmp_path / "empty"
     root.mkdir()

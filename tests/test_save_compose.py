@@ -7,6 +7,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
+from localghost import registry
 from localghost.cli import cli
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -295,6 +296,50 @@ def test_save_compose_pins_the_type_so_later_runs_need_no_flag(monkeypatch) -> N
         assert 'type = "compose"' in Path(".localghost.toml").read_text(
             encoding="utf-8"
         )
+
+
+def test_save_compose_continues_when_an_existing_config_refuses_the_type_pin(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "localghost.cli.resolve_compose", lambda files: _fake_compose_model()
+    )
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
+        Path(".localghost.toml").write_text(
+            '[run]\nname = "keep-me"\n', encoding="utf-8"
+        )
+        result = runner.invoke(
+            cli,
+            ["save", "compose", "--no-input"],
+            env={"COMPOSE_PROJECT_NAME": "sample-project"},
+        )
+
+        assert result.exit_code == 0, result.output
+        assert Path("compose.override.yaml").exists()
+        assert 'name = "keep-me"' in Path(".localghost.toml").read_text()
+        assert "saved without a Compose type pin" in result.output
+        assert [entry.name for entry in registry.entries()] == ["sample-project"]
+
+
+def test_save_compose_with_explicit_output_does_not_pin_the_type(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "localghost.cli.resolve_compose", lambda files: _fake_compose_model()
+    )
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
+        result = runner.invoke(
+            cli,
+            ["save", "compose", "--no-input", "--output", "custom.yaml"],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert Path("custom.yaml").exists()
+        assert not Path(".localghost.toml").exists()
 
 
 def test_bare_save_does_not_pin_the_compose_type(monkeypatch) -> None:

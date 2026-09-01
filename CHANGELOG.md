@@ -83,6 +83,16 @@ uses [Semantic Versioning](https://semver.org/).
   public root; use `localghost trust install`. Bare lifecycle namespaces now
   report when invoked and never change anything.
 
+### Fixed
+
+- `run --project-root` now discovers `.localghost.toml` inside the explicitly
+  pinned root, including when that root is below the invocation directory.
+- `save compose` no longer aborts after writing its override when an existing
+  `.localghost.toml` refuses the supplementary Compose type pin; it warns and
+  still records the saved project.
+- `save compose --output` no longer pins `type = "compose"`, because Compose
+  does not automatically merge a nonstandard output into later runs.
+
 ### Removed
 
 - `run --save`, `run --service`, and the deprecated `--framework` alias.

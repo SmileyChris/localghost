@@ -734,7 +734,13 @@ def _resolve_application(
     """Resolve the effective application once for running and persistence."""
     cwd = working_directory or Path.cwd()
     requested_type = selected_type
-    config_file = config or discover_config(cwd)
+    root_from_flag = root is not None
+    flagged_root = (
+        resolve_root(start=cwd, flag=root, configured=None, config_dir=None)
+        if root_from_flag
+        else None
+    )
+    config_file = config or discover_config(flagged_root or cwd)
     settings = load_config(config_file) if config_file else RunConfig()
     config_dir = config_file.parent if config_file else None
     explicit_run_settings = bool(command) or any(
@@ -748,12 +754,8 @@ def _resolve_application(
         raise click.ClickException(
             f"a command cannot be combined with --type {selected_type}"
         )
-    root_from_flag = root is not None
-    pinned = resolve_root(
-        start=cwd,
-        flag=root,
-        configured=settings.root,
-        config_dir=config_dir,
+    pinned = flagged_root or resolve_root(
+        start=cwd, flag=None, configured=settings.root, config_dir=config_dir
     )
     resolved_root: Path | None = None
     compose_from_environment = (
@@ -1482,8 +1484,16 @@ def save_compose(
         dry_run=dry_run,
         interactive=interactive,
     )
-    if not files and not shared.get("from_bare_save", False):
-        _pin_compose_type(cwd, extend=extend, dry_run=dry_run, interactive=interactive)
+    if not files and output is None and not shared.get("from_bare_save", False):
+        try:
+            _pin_compose_type(
+                cwd, extend=extend, dry_run=dry_run, interactive=interactive
+            )
+        except click.ClickException as exc:
+            warning(
+                "Compose type was not pinned",
+                [f"The override was saved without a Compose type pin: {exc.message}"],
+            )
     if not dry_run:
         registry.record(_local_project_name(cwd), cwd, "compose")
     if run_after and not dry_run:
