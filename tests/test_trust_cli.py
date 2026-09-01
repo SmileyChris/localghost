@@ -112,7 +112,7 @@ def test_proxy_status_reports_running_route_failure(monkeypatch) -> None:
         lambda: (_ for _ in ()).throw(click.ClickException("inspect failed")),
     )
 
-    result = CliRunner().invoke(cli, ["--status"])
+    result = CliRunner().invoke(cli, ["status"])
 
     assert result.exit_code == 0, result.output
     assert "Hub: running" in result.output

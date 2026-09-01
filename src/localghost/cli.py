@@ -107,21 +107,9 @@ class ResolvedApplication:
 
 @click.group(invoke_without_command=True)
 @click.version_option(package_name="localghost", message="%(version)s")
-@click.option(
-    "show_status",
-    "--status",
-    is_flag=True,
-    help="Report hub state without starting or changing anything.",
-)
 @click.pass_context
-def cli(ctx: click.Context, show_status: bool) -> None:
+def cli(ctx: click.Context) -> None:
     """Give local applications friendly .localhost URLs."""
-    if show_status:
-        if ctx.invoked_subcommand is not None:
-            raise click.UsageError("--status cannot be combined with a subcommand")
-        title()
-        _proxy_status()
-        return
     if ctx.invoked_subcommand is None:
         _proxy_http_port()
         was_running = proxy_is_running()
@@ -144,9 +132,41 @@ def cli(ctx: click.Context, show_status: bool) -> None:
         next_actions(https_enabled=https_enabled)
 
 
-def _proxy_status() -> None:
+@cli.command()
+@click.option(
+    "as_json",
+    "--json",
+    is_flag=True,
+    help="Print the status as JSON instead of a table.",
+)
+def status(as_json: bool) -> None:
+    """Report hub state, HTTPS, routes, and remembered projects."""
+    if not as_json:
+        title()
+    _proxy_status(as_json)
+
+
+def _proxy_status(as_json: bool = False) -> None:
     """Report only observable hub state; never reconcile the hub."""
     running = proxy_is_running()
+    remembered = registry.entries()
+    if as_json:
+        payload: dict[str, object] = {
+            "hub": "running" if running else "stopped",
+            "https": "enabled" if _https_configured() else "http-only",
+            "routes": [],
+            "remembered": [entry.as_dict() for entry in remembered],
+        }
+        if running:
+            try:
+                payload["routes"] = [
+                    {"hostname": route.hostname, "location": route.location}
+                    for route in active_routes()
+                ]
+            except click.ClickException as exc:
+                payload["routes_error"] = exc.message
+        click.echo(json.dumps(payload, indent=2))
+        return
     https_state = "enabled" if _https_configured() else "HTTP only"
     details(
         [
@@ -160,7 +180,12 @@ def _proxy_status() -> None:
             routes((route.hostname, route.location) for route in active_routes())
         except click.ClickException as exc:
             warning("Route listing unavailable", [exc.message])
-    action("Trust details", "localghost trust --status")
+    if remembered:
+        details(
+            [(entry.hostname, entry.directory) for entry in remembered],
+            title="Remembered projects",
+        )
+    action("Trust details", "localghost trust status")
 
 
 @cli.command()

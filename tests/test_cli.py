@@ -7,6 +7,7 @@ import click
 import pytest
 from click.testing import CliRunner
 
+from localghost import registry
 from localghost.cli import LOCALGHOST_VERSION, cli
 from localghost.runner import RunPlan
 from localghost.sessions import create
@@ -162,19 +163,41 @@ def test_status_reports_proxy_state_without_reconciling(monkeypatch) -> None:
         "localghost.cli._run_proxy", lambda *args, **kwargs: pytest.fail("reconciled")
     )
 
-    result = CliRunner().invoke(cli, ["--status"])
+    result = CliRunner().invoke(cli, ["status"])
 
     assert result.exit_code == 0, result.output
     assert "Hub: stopped" in result.output
     assert "HTTPS configuration: HTTP only" in result.output
-    assert "localghost trust --status" in result.output
+    assert "localghost trust status" in result.output
 
 
-def test_status_cannot_be_combined_with_a_subcommand() -> None:
-    result = CliRunner().invoke(cli, ["--status", "down"])
+def test_status_lists_remembered_projects(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
+    registry.record("blog", tmp_path, "django")
+
+    result = CliRunner().invoke(cli, ["status"])
+
+    assert result.exit_code == 0, result.output
+    assert "blog.localhost" in result.output
+
+
+def test_status_json_is_machine_readable(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
+    registry.record("blog", tmp_path, "django")
+
+    result = CliRunner().invoke(cli, ["status", "--json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["hub"] == "stopped"
+    assert payload["remembered"][0]["hostname"] == "blog.localhost"
+
+
+def test_status_flag_is_gone() -> None:
+    result = CliRunner().invoke(cli, ["--status"])
 
     assert result.exit_code != 0
-    assert "cannot be combined" in result.output
+    assert "no such option" in result.output.lower()
 
 
 def test_down_stops_the_bundled_proxy(monkeypatch) -> None:

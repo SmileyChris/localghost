@@ -25,6 +25,9 @@ class RegistryEntry:
     type: str
     last_started: str
 
+    def as_dict(self) -> dict[str, str]:
+        return self.__dict__.copy()
+
 
 def registry_dir() -> Path:
     return state_directory() / "registry"
