@@ -10,7 +10,7 @@ Start the hub before the first application. This creates the external
 `localghost` network:
 
 ```sh
-uvx localghost
+uvx localghost hub up
 ```
 
 Compose automatically derives the project name from the checkout directory and
@@ -108,9 +108,9 @@ router/service identifiers must be distinct within the project.
 
 Each example defines two routers for the same hostname and backend service. The
 ordinary router uses the always-available `web` entrypoint. The `-secure` router
-uses `websecure` with TLS and becomes active after `localghost trust` enables
-the hub's HTTPS configuration. Keeping both routers means HTTP continues to
-work after HTTPS is enabled.
+uses `websecure` with TLS and becomes active after `localghost trust install`
+enables the hub's HTTPS configuration. Keeping both routers means HTTP
+continues to work after HTTPS is enabled.
 
 `localghost save` adds both routers automatically. For hand-written integration,
 include all four `-secure` labels shown above: entrypoint, rule, service, and
@@ -120,8 +120,8 @@ with the wrong backend when a container defines multiple routers or services.
 Install `mkcert`, then enable and inspect trust with:
 
 ```sh
-uvx localghost trust
-uvx localghost trust --status
+uvx localghost trust install
+uvx localghost trust status
 ```
 
 Use `https://<project>.localhost` for the primary service and

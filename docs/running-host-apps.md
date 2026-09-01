@@ -226,7 +226,7 @@ its recorded process ID and a Compose session's by `docker compose ps`.
 with `SIGKILL` after a two second grace period; it reports an error and keeps
 the record if the process somehow survives. `localghost manage clean` removes
 records and bridges left by sessions that already exited, leaving running
-ones alone. `localghost down` continues to control only the hub.
+ones alone. `localghost hub down` continues to control only the hub.
 
 The app is available at `https://my-django-project.localhost`. Press Ctrl+C to
 stop it.

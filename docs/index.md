@@ -67,7 +67,7 @@ HTTP is always available. To install Localghost's local development root and
 enable HTTPS, first install `mkcert`, then run:
 
 ```sh
-uvx localghost trust
+uvx localghost trust install
 ```
 
 See [Security and trust](security.md) for certificate handling and

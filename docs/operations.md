@@ -6,7 +6,7 @@ applications are intentionally separate lifecycle domains.
 ## Start or reconcile
 
 ```sh
-uvx localghost
+uvx localghost hub up
 ```
 
 The command runs the Compose configuration bundled with the CLI. It is
@@ -18,46 +18,46 @@ To inspect the current hub state and routes without starting or reconciling
 it, run:
 
 ```sh
-uvx localghost --status
+uvx localghost status
 ```
 
 ## Optional trusted HTTPS
 
 The hub begins HTTP-only. Trusted HTTPS requires `mkcert` on the host. In an
-interactive terminal, `localghost trust` explains that a sudo password may be
-requested because the public development root is being added to the system
-trust store. In an
+interactive terminal, `localghost trust install` explains that a sudo password
+may be requested because the public development root is being added to the
+system trust store. In an
 interactive terminal with `mkcert` installed, the first start offers to enable
 HTTPS and names the public root fingerprint before any privilege prompt
 appears. Otherwise, the successful HTTP startup ends by showing the command to
 enable HTTPS after installing `mkcert`. The explicit equivalent is:
 
 ```sh
-uvx localghost trust
+uvx localghost trust install
 ```
 
-`trust` runs `mkcert` with `TRUST_STORES=system,nss` and a `CAROOT` containing
-only the hub's exported `rootCA.pem`. The private root and the online
+`trust install` runs `mkcert` with `TRUST_STORES=system,nss` and a `CAROOT`
+containing only the hub's exported `rootCA.pem`. The private root and the online
 intermediate remain in Docker volumes. It also imports the exact public root
 into detected Zen NSS profiles, because Zen is not reliably discovered by
 mkcert. A missing `mkcert`, declined authorization, or failed verification
 leaves HTTPS unpublished and HTTP working.
 
 When the hub is already running, a successful trust change reconciles it to
-the corresponding HTTP or HTTPS configuration. Neither `trust` nor `trust
---remove` starts a stopped hub.
+the corresponding HTTP or HTTPS configuration. Neither `trust install` nor
+`trust remove` starts a stopped hub.
 
 Check the state without modifying a trust store:
 
 ```sh
-uvx localghost trust --status
+uvx localghost trust status
 ```
 
 To disable the HTTPS listener and remove only this root from the stores managed
 by the command:
 
 ```sh
-uvx localghost trust --remove
+uvx localghost trust remove
 ```
 
 Restart browsers after trust changes when their NSS implementation requires it.
@@ -77,8 +77,11 @@ docker ps --filter label=com.docker.compose.project=localghost
 The Traefik container should report `healthy`. Follow its logs with:
 
 ```sh
-docker logs -f localghost-traefik-1
+uvx localghost hub logs -f
 ```
+
+If the CLI cannot reach Docker, the raw fallback is
+`docker logs -f localghost-traefik-1`.
 
 The dashboard at `http://traefik.localhost` shows discovered routers, services,
 and middleware. It is useful for confirming label discovery, but it does not
@@ -134,7 +137,7 @@ once to add the mount; after that the container is stable across runs.
 ## Stop and remove
 
 ```sh
-uvx localghost down
+uvx localghost hub down
 ```
 
 Compose removes the hub container, the one-shot `bootstrap` container that mints
@@ -149,7 +152,7 @@ and Docker went on reporting the `localghost` project as existing.
 `down` deliberately preserves the `localghost_localghost-ca-root` and
 `localghost_localghost-ca-signer` Docker volumes. This keeps the same trusted
 root available when the hub is restarted, avoiding another host trust-store
-change. `trust --remove` disables HTTPS and removes the public root from the
+change. `trust remove` disables HTTPS and removes the public root from the
 managed host stores, but leaves those private Docker volumes and the public
 `rootCA.pem` copy in Localghost's state directory available for an intentional
 re-enable.
@@ -158,8 +161,8 @@ For complete removal, remove host trust first, stop the hub, then delete the
 two CA volumes:
 
 ```sh
-uvx localghost trust --remove
-uvx localghost down
+uvx localghost trust remove
+uvx localghost hub down
 docker volume rm \
   localghost_localghost-ca-root \
   localghost_localghost-ca-signer
@@ -170,10 +173,10 @@ there. It is `LOCALGHOST_STATE_DIR` when that override is set, otherwise
 `${XDG_STATE_HOME:-$HOME/.local/state}/localghost`. The retained `rootCA.pem` is
 public, but removing it completes the local cleanup.
 
-Deleting the CA volumes is irreversible. A later `localghost trust` creates a
-new root and requires that new public root to be installed. If Docker reports a
-volume is in use, stop remaining `localghost` project containers before
-retrying; do not force-remove a volume from a running hub.
+Deleting the CA volumes is irreversible. A later `localghost trust install`
+creates a new root and requires that new public root to be installed. If Docker
+reports a volume is in use, stop remaining `localghost` project containers
+before retrying; do not force-remove a volume from a running hub.
 
 Running `docker compose down` inside an application checkout affects only that
 application and leaves the hub running.
@@ -184,7 +187,7 @@ The ordinary command may reuse a cached CLI release. To fetch the newest
 published release and reconcile the hub when you choose, run:
 
 ```sh
-uvx --refresh localghost
+uvx --refresh localghost hub up
 ```
 
 The top-level project name and shared network name are fixed, so the new bundled
@@ -200,7 +203,7 @@ If loopback port 80 is occupied, consistently prefix every lifecycle command
 with the same override:
 
 ```sh
-LOCALGHOST_HTTP_PORT=8080 uvx localghost
+LOCALGHOST_HTTP_PORT=8080 uvx localghost hub up
 ```
 
 The hub still binds only to `127.0.0.1`. URLs include the selected port:

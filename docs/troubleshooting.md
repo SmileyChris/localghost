@@ -3,6 +3,13 @@
 Start with the hub status and logs:
 
 ```sh
+uvx localghost status
+uvx localghost hub logs --tail 100
+```
+
+If the CLI cannot reach Docker, use the raw commands:
+
+```sh
 docker ps --filter label=com.docker.compose.project=localghost
 docker logs --tail=100 localghost-traefik-1
 ```
@@ -15,7 +22,7 @@ Typical error:
 network localghost declared as external, but could not be found
 ```
 
-The hub has not yet created its shared network. Run `uvx localghost`
+The hub has not yet created its shared network. Run `uvx localghost hub up`
 once, then rerun the application's `docker compose up` command.
 
 Do not change the application network to a normal, implicitly created network.
@@ -25,7 +32,7 @@ That would create a project-scoped network that Traefik cannot share reliably.
 
 Consumer containers can run while the hub container is stopped. Check that
 the hub is running and healthy with `ps`, then inspect its logs. Reconcile it
-with `uvx localghost` if needed.
+with `uvx localghost hub up` if needed.
 
 Also confirm the URL uses the configured `LOCALGHOST_HTTP_PORT` when it is
 not 80.
@@ -101,8 +108,8 @@ Stop the conflicting listener if appropriate, or use
 Inspect the managed trust and listener state first:
 
 ```sh
-uvx localghost trust --status
-uvx localghost --status
+uvx localghost trust status
+uvx localghost status
 ```
 
 HTTPS requires `mkcert`, an installed Localghost public root, and a running hub

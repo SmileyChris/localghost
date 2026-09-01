@@ -118,7 +118,7 @@ uvx localghost run
 or start the hub and retain the normal Compose lifecycle:
 
 ```sh
-uvx localghost
+uvx localghost hub up
 docker compose up
 ```
 
@@ -127,7 +127,7 @@ docker compose up
 When a root contains more than one runnable type, Localghost refuses to guess:
 
 ```text
-Multiple application types were found: compose, vite
+both compose and vite were detected; rerun with --type compose or --type vite
 ```
 
 Choose once with `run --type`, or remember the choice by saving it:
@@ -140,14 +140,18 @@ uvx localghost save compose
 
 `run --type` decides one run. Naming a `save` subcommand decides every later
 run: `save host --type vite` writes `type = "vite"` to `.localghost.toml`, and
-`save compose` writes `type = "compose"` there as well as the
-`compose.override.yaml` holding the integration itself. The two files keep
-distinct responsibilities — `.localghost.toml` records which type this project
-is, `compose.override.yaml` records how the Compose project reaches the hub —
-and afterwards a plain `uvx localghost run` needs no flag at all.
+a directly named `save compose` without `--file` writes `type = "compose"`
+there as well as the `compose.override.yaml` holding the integration itself.
+The two files keep distinct responsibilities — `.localghost.toml` records which
+type this project is, `compose.override.yaml` records how the Compose project
+reaches the hub — and afterwards a plain `uvx localghost run` needs no flag at
+all.
 
 Bare `uvx localghost save` writes no such pin. It reaches the Compose branch
 only when detection was already unambiguous, so there is nothing to remember.
+`save compose --file ...` also writes no pin: later runs need the same
+`COMPOSE_FILE` stack in their environment, because Localghost deliberately does
+not persist an explicit Compose file stack in `.localghost.toml`.
 
 ## Existing files and previews
 

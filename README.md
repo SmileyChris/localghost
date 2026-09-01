@@ -71,12 +71,12 @@ uvx localghost save
 Start or reconcile only the shared hub with:
 
 ```sh
-uvx localghost
+uvx localghost hub up
 ```
 
 Open [http://traefik.localhost](http://traefik.localhost) for its dashboard,
-inspect it with `uvx localghost --status`, and remove it with
-`uvx localghost down`.
+inspect it with `uvx localghost status`, and remove it with
+`uvx localghost hub down`.
 
 Run it in the background with `--detach` and manage it afterwards:
 

@@ -25,6 +25,12 @@ uses [Semantic Versioning](https://semver.org/).
   terminal (Enter summons, Delete forgets) and prints a plain listing when
   piped. Ghost pages now offer `summon`/`forget` as click-to-copy command
   chips.
+- `localghost hub` groups the shared Traefik container's commands: `hub up`,
+  `hub down`, and a new `hub logs [-f]` that no longer requires knowing the
+  container's generated name.
+- `localghost status` reports hub state, HTTPS, active routes, and remembered
+  projects, with `--json` for scripts.
+- `localghost trust` gained `install`, `remove`, and `status` subcommands.
 
 ### Changed
 
@@ -63,6 +69,14 @@ uses [Semantic Versioning](https://semver.org/).
   `run --type compose` every time. Bare `save` dispatching to the same
   subcommand writes no pin: it only gets there when detection was already
   unambiguous.
+- A bare `localghost` now reports status instead of starting the hub. Use
+  `localghost hub up`, or just `localghost run`, which starts the hub itself.
+- `localghost down` is now `localghost hub down`. The old spelling read as
+  "stop my application" but stops the container every project on the machine
+  routes through.
+- A bare `localghost trust` now reports trust status instead of installing the
+  public root; use `localghost trust install`. Bare lifecycle namespaces now
+  report when invoked and never change anything.
 
 ### Removed
 
@@ -71,6 +85,8 @@ uses [Semantic Versioning](https://semver.org/).
   `--output`, `--name`, `--config`, or `--project-root`. Each now lives on the
   `save host`, `save compose`, or `save dockerfile` subcommand that actually
   accepts it, which is what makes `save --help` truthful per project type.
+- `localghost --status`, `trust --status`, and `trust --remove`.
+- Top-level `localghost down`; use `localghost hub down`.
 
 ## [2.1.0] - 2026-08-26
 

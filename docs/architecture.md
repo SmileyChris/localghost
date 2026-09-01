@@ -84,7 +84,7 @@ not guarantee that every consumer application is healthy or correctly labelled.
 
 ## Optional HTTPS path
 
-HTTP remains the baseline entrypoint. After `localghost trust` installs the
+HTTP remains the baseline entrypoint. After `localghost trust install` adds the
 hub's public development root, the hub also publishes the `websecure`
 entrypoint on loopback and loads its local certificate provider. The private
 root and online signer stay in Docker volumes; only the public root is copied to

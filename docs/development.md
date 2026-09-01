@@ -65,8 +65,9 @@ already exist and cleans up resources it creates even after failure. Ports 80,
 **It also destroys the CA volumes.** Teardown runs with `--volumes`, and the
 volumes holding the bootstrapped root are named `localghost` like everything
 else. On a machine with trusted HTTPS configured that leaves the hub unable to
-start — it crash-loops on a missing bootstrapped root — until `localghost trust`
-runs again. The suite therefore refuses to begin in that state. Either point
+start — it crash-loops on a missing bootstrapped root — until
+`localghost trust install` runs again. The suite therefore refuses to begin in
+that state. Either point
 `LOCALGHOST_STATE_DIR` at a scratch directory, which leaves your own trust
 configuration untouched, or set `LOCALGHOST_ACCEPT_CA_RESET=1` to accept the
 reset and re-bootstrap afterwards.
@@ -130,7 +131,7 @@ publication:
 
 ```sh
 uvx --from . localghost --help
-uvx --from . localghost down --help
+uvx --from . localghost hub down --help
 uvx --from . localghost save --help
 uvx --from . localghost run --help
 ```
@@ -144,8 +145,8 @@ the lifecycle commands from that wheel:
 ```sh
 uv build --no-sources
 wheel=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
-uvx --isolated --from "$wheel" localghost
-uvx --isolated --from "$wheel" localghost down
+uvx --isolated --from "$wheel" localghost hub up
+uvx --isolated --from "$wheel" localghost hub down
 ```
 
 CI performs the same wheel smoke test before the source integration suite.
@@ -195,8 +196,8 @@ does not support account username-and-password uploads; use an API token.
    wheel=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
    sdist=$(find dist -maxdepth 1 -name '*.tar.gz' -print -quit)
    test -n "$wheel" && test -n "$sdist"
-   uvx --isolated --from "$wheel" localghost
-   uvx --isolated --from "$wheel" localghost down
+   uvx --isolated --from "$wheel" localghost hub up
+   uvx --isolated --from "$wheel" localghost hub down
    sha256sum "$wheel" "$sdist"
    ```
 7. Create the immutable SemVer tag and a draft GitHub release for that commit,

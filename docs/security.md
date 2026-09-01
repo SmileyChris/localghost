@@ -71,22 +71,22 @@ they specifically need the shared network.
 
 ## HTTPS trust
 
-HTTPS is an explicit local-development opt-in. `localghost trust` asks mkcert to
-install one public development root into the system and NSS stores; it prints
-the root fingerprint and explains the scope before the operating system asks
-for authorization. The private root and intermediate signing keys are never
-passed to mkcert or written to the host state directory.
+HTTPS is an explicit local-development opt-in. `localghost trust install` asks
+mkcert to install one public development root into the system and NSS stores;
+it prints the root fingerprint and explains the scope before the operating
+system asks for authorization. The private root and intermediate signing keys
+are never passed to mkcert or written to the host state directory.
 
 The command keeps HTTP available when trust setup cannot complete. `localghost
-trust --remove` first disables the HTTPS listener, then removes the exact root
+trust remove` first disables the HTTPS listener, then removes the exact root
 selected by its fingerprint. Browser trust anchors are powerful: enable this
 only on a machine where you trust the installed package and its local Docker
 users.
 
 Removing host trust does not delete the private CA Docker volumes or the public
 root copy in Localghost's host state directory. This is intentional so a later
-opt-in can reuse the same root, but it means `localghost down` and `localghost
-trust --remove` are not complete data removal. Follow the
+opt-in can reuse the same root, but it means `localghost hub down` and
+`localghost trust remove` are not complete data removal. Follow the
 [complete-removal procedure](operations.md#stop-and-remove) after removing the
 public root from host trust stores.
 
