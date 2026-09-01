@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
@@ -309,27 +310,27 @@ def summon(ctx: click.Context, name: str | None) -> None:
     _summon_entry(ctx, match)
 
 
-@cli.group(invoke_without_command=True)
+@cli.group("sessions", invoke_without_command=True)
 @click.pass_context
-def manage(ctx: click.Context) -> None:
+def sessions_group(ctx: click.Context) -> None:
     """Inspect and control detached application sessions."""
     if ctx.invoked_subcommand is None:
-        _manage_list(False)
+        _sessions_list(False)
 
 
-@manage.command("list")
+@sessions_group.command("list")
 @click.option(
     "--json",
     "as_json",
     is_flag=True,
     help="Print the session records as JSON instead of a table.",
 )
-def manage_list(as_json: bool) -> None:
+def sessions_list(as_json: bool) -> None:
     """List detached sessions and whether each one is still running."""
-    _manage_list(as_json)
+    _sessions_list(as_json)
 
 
-def _manage_list(as_json: bool) -> None:
+def _sessions_list(as_json: bool) -> None:
     records = []
     for session in sessions():
         status = "running" if session_alive(session) else "stopped"
@@ -349,26 +350,61 @@ def _manage_list(as_json: bool) -> None:
         )
 
 
-@manage.command("attach")
+@sessions_group.command("logs")
 @click.argument("session_id")
-def manage_attach(session_id: str) -> None:
+@click.option(
+    "follow",
+    "--follow",
+    "-f",
+    is_flag=True,
+    help="Keep printing new output until interrupted.",
+)
+def sessions_logs(session_id: str, follow: bool) -> None:
     """Print the captured log of a detached session."""
     session = next((item for item in sessions() if item.id == session_id), None)
     if session is None:
         raise click.ClickException(f"unknown session '{session_id}'")
+    if session.mode == "compose" and session.project:
+        command = [
+            "docker",
+            "compose",
+            "--project-name",
+            session.project,
+            "logs",
+        ]
+        if follow:
+            command.append("--follow")
+        try:
+            result = subprocess.run(command, cwd=session.cwd, check=False)
+        except FileNotFoundError as exc:
+            raise click.ClickException("docker is required") from exc
+        if result.returncode:
+            raise click.exceptions.Exit(result.returncode)
+        return
     log = Path(session.log)
-    if log.exists():
-        click.echo(log.read_text(encoding="utf-8", errors="replace"), nl=False)
-    else:
+    if not log.exists():
         click.echo(f"Session {session.id} has no log yet.")
+        return
+    with log.open("r", encoding="utf-8", errors="replace") as handle:
+        click.echo(handle.read(), nl=False)
+        if not follow:
+            return
+        while True:
+            line = handle.readline()
+            if line:
+                click.echo(line, nl=False)
+                continue
+            if not session_alive(session):
+                return
+            time.sleep(0.2)
 
 
-@manage.command("stop")
+@sessions_group.command("stop")
 @click.argument("session_id", required=False)
 @click.option(
     "--all", "stop_all", is_flag=True, help="Stop every detached session."
 )
-def manage_stop(session_id: str | None, stop_all: bool) -> None:
+def sessions_stop(session_id: str | None, stop_all: bool) -> None:
     """Stop one detached session, or every session with --all.
 
     A host session is asked to exit with SIGTERM and force-quit with SIGKILL
@@ -399,8 +435,8 @@ def manage_stop(session_id: str | None, stop_all: bool) -> None:
         raise click.ClickException("; ".join(failures))
 
 
-@manage.command("clean")
-def manage_clean() -> None:
+@sessions_group.command("clean")
+def sessions_clean() -> None:
     """Remove records and bridges left behind by sessions that already exited."""
     success(f"Removed {clean_sessions()} stale session(s).")
 
@@ -592,8 +628,8 @@ def run(
     matching = find_matching(name=plan.name, cwd=plan.project_root or resolved.cwd)
     if matching:
         message = (
-            f"Session {matching.id} is already running; attach with: "
-            f"localghost manage attach {matching.id}"
+            f"Session {matching.id} is already running; view logs with: "
+            f"localghost sessions logs {matching.id}"
         )
         if resolved.explicit_run_settings:
             raise click.ClickException(message)
@@ -860,13 +896,13 @@ def _print_run_plan(plan: RunPlan, dry_run: bool, detach: bool = False) -> None:
     elif detach:
         info(
             "Starting the application in the background; inspect and stop it "
-            "with localghost manage."
+            "with localghost sessions."
         )
     else:
         info(
             "Starting foreground application; press Ctrl+C to stop it. "
             "Terminal detach (Ctrl-B D) is unavailable in this environment; "
-            "use --detach with localghost manage instead."
+            "use --detach with localghost sessions instead."
         )
 
 
