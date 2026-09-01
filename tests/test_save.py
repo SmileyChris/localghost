@@ -64,6 +64,32 @@ def test_existing_override_is_extended_and_backed_up(monkeypatch) -> None:
         assert Path("compose.override.yaml.bak").exists()
 
 
+def test_save_compose_run_starts_the_application(monkeypatch) -> None:
+    started: list[str | None] = []
+
+    def fake_run_compose(root: Path, name: str | None, detach: bool, **kwargs) -> None:
+        started.append(name)
+
+    monkeypatch.setattr(
+        "localghost.cli.resolve_compose", lambda files, **kwargs: compose_model()
+    )
+    monkeypatch.setattr("localghost.cli._check_compose_routing", lambda *a, **k: None)
+    monkeypatch.setattr("localghost.cli._run_compose", fake_run_compose)
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
+        result = runner.invoke(
+            cli,
+            ["save", "compose", "--no-input", "--run"],
+            env={"COMPOSE_PROJECT_NAME": "sample-project"},
+        )
+
+        assert result.exit_code == 0, result.output
+        assert Path("compose.override.yaml").exists()
+        assert started, "save compose --run must start the application after saving"
+
+
 def test_host_run_defaults_are_saved_without_compose(monkeypatch) -> None:
     monkeypatch.setattr("localghost.runner.shutil.which", lambda _: "/usr/bin/php")
     runner = CliRunner()
@@ -140,6 +166,30 @@ def test_save_host_run_starts_the_application(monkeypatch) -> None:
         assert started, "save --run must start the application after saving"
 
 
+def test_save_host_run_is_a_noop_with_dry_run(monkeypatch) -> None:
+    started: list[str] = []
+    monkeypatch.setattr(
+        "localghost.cli.execute",
+        lambda plan, *args, **kwargs: started.append(plan.name) or 0,
+    )
+    monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli,
+            [
+                "save", "host", "--no-input", "--dry-run", "--run",
+                "--port", "8080", "--", "./server",
+            ],
+            env={"COMPOSE_PROJECT_NAME": "sample-host"},
+        )
+
+        assert result.exit_code == 0, result.output
+        assert not Path(".localghost.toml").exists()
+        assert not started, "save --dry-run --run must not start the application"
+
+
 def test_save_host_help_omits_compose_options() -> None:
     result = CliRunner().invoke(cli, ["save", "host", "--help"])
 
@@ -198,6 +248,29 @@ def test_save_dockerfile_subcommand_writes_compose() -> None:
         assert Path("compose.yaml").exists()
 
 
+def test_save_dockerfile_run_starts_the_application(monkeypatch) -> None:
+    started: list[str | None] = []
+
+    def fake_run_compose(root: Path, name: str | None, detach: bool, **kwargs) -> None:
+        started.append(name)
+
+    monkeypatch.setattr("localghost.cli._check_compose_routing", lambda *a, **k: None)
+    monkeypatch.setattr("localghost.cli._run_compose", fake_run_compose)
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        Path("Dockerfile").write_text("FROM scratch\nEXPOSE 8000\n", encoding="utf-8")
+        result = runner.invoke(
+            cli,
+            ["save", "dockerfile", "--no-input", "--run", "--port", "8000"],
+            env={"COMPOSE_PROJECT_NAME": "dockerfile-fixture"},
+        )
+
+        assert result.exit_code == 0, result.output
+        assert Path("compose.yaml").exists()
+        assert started, "save dockerfile --run must start the application after saving"
+
+
 def test_bare_save_dispatches_to_dockerfile(monkeypatch) -> None:
     # Bare `save` carries no `--port` (type-neutral flags only), and
     # `_save_dockerfile_project` requires one when it can't prompt — so a
@@ -222,6 +295,34 @@ def test_bare_save_dispatches_to_dockerfile(monkeypatch) -> None:
 
         assert result.exit_code == 0, result.output
         assert Path("compose.yaml").exists()
+
+
+def test_bare_save_run_starts_the_application(monkeypatch) -> None:
+    """Bare `save` has no `--type`; it dispatches to `save_host` via
+    `ctx.invoke(save_host)`, which never forwards `--run` explicitly. This
+    only works because the group stores `run_after` in `ctx.obj` and the
+    subcommand falls back to it -- the same mechanism `dry_run`/`no_input`
+    already rely on."""
+    started: list[str] = []
+    monkeypatch.setattr(
+        "localghost.cli.execute",
+        lambda plan, *args, **kwargs: started.append(plan.name) or 0,
+    )
+    monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
+    monkeypatch.setattr("localghost.runner.shutil.which", lambda _: "/usr/bin/php")
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        Path("index.php").touch()
+        result = runner.invoke(
+            cli,
+            ["save", "--no-input", "--run"],
+            env={"COMPOSE_PROJECT_NAME": "sample-project"},
+        )
+
+        assert result.exit_code == 0, result.output
+        assert Path(".localghost.toml").exists()
+        assert started, "bare save --run must start the application after saving"
 
 
 def test_bare_save_reports_the_detected_type_when_nothing_matches() -> None:
