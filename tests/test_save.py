@@ -251,6 +251,35 @@ def test_save_host_run_forwards_a_custom_configuration_path(
     assert started, "save host --config --run must start the application"
 
 
+def test_save_host_run_prints_the_wordmark_once(monkeypatch, tmp_path) -> None:
+    """`save host --run` prints the title and then re-enters `run`, which
+    prints one of its own. The wordmark is a per-invocation brand mark, so
+    `feedback.title` shows it at most once per process instead of three
+    subcommands each carrying a suppression flag."""
+    printed: list[str] = []
+
+    class Recorder:
+        def print(self, item: object = "", **kwargs: object) -> None:
+            printed.append(str(item))
+
+    monkeypatch.setattr("localghost.feedback._rich_terminal", lambda err: True)
+    monkeypatch.setattr("localghost.feedback._console", lambda err: Recorder())
+    monkeypatch.setattr("localghost.cli.execute", lambda *args, **kwargs: 0)
+    monkeypatch.setattr("localghost.cli._run_proxy", lambda *args, **kwargs: None)
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "manage.py").touch()
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        ["save", "host", "--no-input", "--run"],
+        env={"COMPOSE_PROJECT_NAME": "wordmark-project"},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert printed.count("localghost") == 1
+
+
 def test_save_dockerfile_no_input_never_prompts_for_a_port(monkeypatch) -> None:
     """`--no-input` is declared on `save dockerfile`, so it has to reach the
     port prompt. It was read out of the group's context but never passed

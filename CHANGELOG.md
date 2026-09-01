@@ -57,10 +57,20 @@ uses [Semantic Versioning](https://semver.org/).
   `--directory`.
 - Explicit `type = "compose"` run configuration now resolves type ambiguity
   without bypassing validation of the resolved Compose routing model.
+- `save compose`, named directly, now writes `type = "compose"` into
+  `.localghost.toml` as well as the override, so a Compose project that shares
+  a directory with a framework can be pinned once instead of needing
+  `run --type compose` every time. Bare `save` dispatching to the same
+  subcommand writes no pin: it only gets there when detection was already
+  unambiguous.
 
 ### Removed
 
 - `run --save`, `run --service`, and the deprecated `--framework` alias.
+- Bare `localghost save` no longer accepts `--type`, `--file`, `--service`,
+  `--output`, `--name`, `--config`, or `--project-root`. Each now lives on the
+  `save host`, `save compose`, or `save dockerfile` subcommand that actually
+  accepts it, which is what makes `save --help` truthful per project type.
 
 ## [2.1.0] - 2026-08-26
 

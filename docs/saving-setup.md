@@ -35,6 +35,8 @@ project root:
 
 ```sh
 uvx localghost save host --type laravel
+uvx localghost save host --name checkout
+uvx localghost save host --project-root backend
 ```
 
 Save a custom command with its required HTTP port:
@@ -136,9 +138,16 @@ uvx localghost save host --type vite
 uvx localghost save compose
 ```
 
-Selecting Compose may save both `.localghost.toml` (to remember an otherwise
-ambiguous type) and `compose.override.yaml` (to store the integration). Each
-file has a distinct responsibility.
+`run --type` decides one run. Naming a `save` subcommand decides every later
+run: `save host --type vite` writes `type = "vite"` to `.localghost.toml`, and
+`save compose` writes `type = "compose"` there as well as the
+`compose.override.yaml` holding the integration itself. The two files keep
+distinct responsibilities — `.localghost.toml` records which type this project
+is, `compose.override.yaml` records how the Compose project reaches the hub —
+and afterwards a plain `uvx localghost run` needs no flag at all.
+
+Bare `uvx localghost save` writes no such pin. It reaches the Compose branch
+only when detection was already unambiguous, so there is nothing to remember.
 
 ## Existing files and previews
 

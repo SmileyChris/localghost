@@ -100,6 +100,39 @@ def test_title_keeps_the_gap_without_a_welcome_message(monkeypatch):
     assert console.items[1] == ""
 
 
+def test_title_shows_the_wordmark_only_once_per_process(monkeypatch):
+    """Commands compose -- `save host --run` re-enters `run`, which prints
+    a title of its own -- so the wordmark has to be a per-invocation mark
+    rather than a per-command one, or a single command line prints it
+    twice."""
+    console = Console()
+    monkeypatch.setattr(feedback, "_rich_terminal", lambda err: True)
+    monkeypatch.setattr(feedback, "_console", lambda err: console)
+
+    feedback.title()
+    feedback.title()
+
+    assert len(console.items) == 2
+
+
+def test_title_does_not_burn_the_wordmark_on_a_plain_stream(monkeypatch):
+    """The guard is set only when the mark is actually drawn: a piped
+    command must not consume the one title a later interactive command in
+    the same process would have shown."""
+    plain = Console()
+    monkeypatch.setattr(feedback, "_rich_terminal", lambda err: False)
+    monkeypatch.setattr(feedback, "_console", lambda err: plain)
+    feedback.title()
+
+    rich = Console()
+    monkeypatch.setattr(feedback, "_rich_terminal", lambda err: True)
+    monkeypatch.setattr(feedback, "_console", lambda err: rich)
+    feedback.title()
+
+    assert plain.items == []
+    assert len(rich.items) == 2
+
+
 def test_next_actions_use_plain_text_outside_interactive_terminals(monkeypatch):
     standard = Console()
     monkeypatch.setattr(feedback, "_rich_terminal", lambda err: False)
