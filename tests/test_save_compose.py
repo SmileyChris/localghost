@@ -169,6 +169,44 @@ def test_save_compose_help_lists_only_compose_options() -> None:
     # Host-only options must not appear on the compose subcommand.
     assert "--config" not in result.output
     assert "--project-root" not in result.output
+    # --name is gone entirely: _save_compose_project derives router names
+    # from the resolved Compose model and never sees it, so
+    # `save compose --name foo` would write routers for the Compose
+    # project's own name while registering a ghost page for foo.localhost.
+    assert "--name" not in result.output
+
+
+def test_bare_save_detects_compose_from_a_subdirectory_and_writes_at_the_root(
+    tmp_path, monkeypatch
+) -> None:
+    """Mirrors test_save_detects_a_dockerfile_from_a_subdirectory_and_
+    writes_at_the_root in tests/test_cli.py, for the Compose path:
+    `_save_compose_project` never searches upward on its own (unlike
+    save_host/save_dockerfile's own discover_type fallbacks), so the root
+    bare `save`'s dispatch detects must be threaded through explicitly to
+    `save_compose` or the override lands next to the invocation directory
+    instead of next to compose.yaml."""
+    monkeypatch.setattr(
+        "localghost.cli.resolve_compose",
+        lambda files, **kwargs: _fake_compose_model(),
+    )
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / ".git").mkdir()
+    (root / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
+    nested = root / "services" / "api"
+    nested.mkdir(parents=True)
+    monkeypatch.chdir(nested)
+
+    result = CliRunner().invoke(
+        cli,
+        ["save", "--no-input"],
+        env={"COMPOSE_PROJECT_NAME": "nested-compose-project"},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (root / "compose.override.yaml").exists()
+    assert not (nested / "compose.override.yaml").exists()
 
 
 def test_bare_save_rejects_type_specific_flags() -> None:

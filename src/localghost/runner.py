@@ -231,12 +231,21 @@ def discover_type(
     cwd: Path,
     requested: str | None = None,
     allowed: tuple[str, ...] = RUN_TYPES,
+    *,
+    ambiguous_hint: Callable[[list[str]], str] | None = None,
+    not_found_hint: str = "provide --type, or a command after -- together with --port",
 ) -> tuple[str, Path]:
     """Return the nearest project type this command supports, and its root.
 
     Ambiguity is computed after filtering to `allowed`, so a type another
     command handles never blocks this one. Generic `php` defers to anything
     stronger found further up; see `_php_project_strength`.
+
+    `ambiguous_hint` and `not_found_hint` let a caller without `--type` (bare
+    `save`, which dispatches to a subcommand rather than accepting `--type`
+    itself) override the default advice, which otherwise assumes the caller
+    has `--type`, `--port`, and a trailing command -- true for `run` and
+    `save host`, not for bare `save`.
     """
     if requested is not None and requested not in SUPPORTED_TYPES:
         raise click.ClickException(type_choices("--type"))
@@ -244,7 +253,7 @@ def discover_type(
         if requested == "dockerfile":
             raise click.ClickException(
                 "'dockerfile' cannot be run directly; run `localghost save "
-                "--type dockerfile` to build a Compose file first"
+                "dockerfile --port <port>` to build a Compose file first"
             )
         raise click.ClickException(
             f"'{requested}' is not available here; {type_choices('--type', allowed)}"
@@ -268,7 +277,11 @@ def discover_type(
                 fallback = ("php", candidate)
             continue
         if len(detected) > 1:
-            choices = " or ".join(f"--type {item}" for item in detected)
+            choices = (
+                ambiguous_hint(detected)
+                if ambiguous_hint is not None
+                else " or ".join(f"--type {item}" for item in detected)
+            )
             raise click.ClickException(
                 f"both {' and '.join(detected)} were detected; rerun with {choices}"
             )
@@ -281,8 +294,7 @@ def discover_type(
             f"could not find a {requested} project root from '{start}'"
         )
     raise click.ClickException(
-        f"could not detect a project type from '{start}'; provide --type, or a "
-        "command after -- together with --port"
+        f"could not detect a project type from '{start}'; {not_found_hint}"
     )
 
 

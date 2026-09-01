@@ -1158,7 +1158,12 @@ def test_save_host_defaults_reject_compose_options_and_refuse_overwrite(
             cli, ["save", "dockerfile", "--no-input"], env=environment
         )
         assert missing_port.exit_code != 0
-        assert "requires --port" in missing_port.output
+        # Exact match, not just a substring: "save dockerfile" is this
+        # subcommand's own name, not the removed "--type dockerfile" flag
+        # -- a loose "requires --port" substring check would stay green
+        # even if the message regressed to naming a flag that no longer
+        # exists on `save dockerfile`.
+        assert "Error: save dockerfile requires --port" in missing_port.output
 
         Path("Dockerfile").unlink()
         missing_dockerfile = runner.invoke(
@@ -1318,6 +1323,24 @@ def test_compose_run_dry_run_prints_the_plan_and_starts_nothing(
     assert "Type: compose" in result.output
     assert f"Project: {tmp_path.name}" in result.output
     assert "Public URL: http://" in result.output
+
+
+def test_run_dry_run_detects_compose_over_a_coexisting_dockerfile(
+    monkeypatch, tmp_path
+) -> None:
+    """`run`'s detection (`discover_type`'s default `allowed=RUN_TYPES`,
+    which excludes "dockerfile") already gives Compose priority over a
+    coexisting Dockerfile with no --type needed -- no explicit pin
+    required. This locks that in with a test instead of leaving it to
+    detection order alone."""
+    (tmp_path / "compose.yaml").write_text("services: {}\n")
+    (tmp_path / "Dockerfile").write_text("FROM scratch\n")
+    install_compose(monkeypatch, routed_compose_model())
+
+    result = CliRunner().invoke(cli, ["run", "-C", str(tmp_path), "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "Type: compose" in result.output
 
 
 def test_compose_run_refuses_an_unrouted_project(monkeypatch, tmp_path) -> None:
@@ -1616,13 +1639,28 @@ def test_save_command_rejects_dockerfile_type() -> None:
     assert "unexpected extra argument" in result.output.lower()
 
 
-def test_save_offers_compose_as_a_type_but_requires_a_compose_file() -> None:
+def test_save_compose_surfaces_a_resolution_failure(monkeypatch) -> None:
     """`save compose` resolves Compose files in the given directory itself
     (via `docker compose config`), not by searching upward for a project
     root the way `--type compose` on the old flat `save` did through
-    `discover_type` -- so the failure here is Compose's own "no
-    configuration file" error, not "could not find a compose project
-    root"."""
+    `discover_type` -- so a missing compose file surfaces as
+    `resolve_compose`'s own failure, not "could not find a compose project
+    root". ("compose" is a subcommand now, not a --type value -- renamed
+    from test_save_offers_compose_as_a_type_but_requires_a_compose_file.)
+
+    `resolve_compose` is stubbed to raise directly, matching the other
+    tests in this file (see `install_compose`), rather than letting a real
+    `docker compose config` run: without docker installed, the actual
+    failure text is "docker is required and was not found" instead of a
+    resolution error, which would make this test depend on a docker binary
+    being present -- `uv run pytest` (a Global Constraint) must pass
+    without one.
+    """
+
+    def _no_compose_file(files: object, **kwargs: object) -> None:
+        raise click.ClickException("no configuration file provided: not found")
+
+    monkeypatch.setattr("localghost.cli.resolve_compose", _no_compose_file)
     runner_ = CliRunner()
     with runner_.isolated_filesystem():
         result = runner_.invoke(
@@ -1630,7 +1668,7 @@ def test_save_offers_compose_as_a_type_but_requires_a_compose_file() -> None:
         )
 
     assert result.exit_code != 0
-    assert "could not resolve the project" in result.output
+    assert "no configuration file provided" in result.output
 
 
 def test_save_command_rejects_compose_type() -> None:

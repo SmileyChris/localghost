@@ -137,6 +137,28 @@ def test_save_host_rejects_compose_as_a_type() -> None:
     assert "compose" in result.output.lower()
 
 
+def test_save_host_refuses_a_detected_compose_project() -> None:
+    """`_resolve_application`'s own detection (`discover_type(cwd, None)`,
+    default `allowed=RUN_TYPES`) includes "compose" -- HOST_TYPES only
+    blocks an explicit `--type compose` (see
+    test_save_host_rejects_compose_as_a_type above), not detection walking
+    straight past it. Without this guard, `save host` -- documented as
+    writing .localghost.toml -- would silently write a Compose override
+    instead."""
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
+        result = runner.invoke(
+            cli, ["save", "host", "--no-input"], env={"COMPOSE_PROJECT_NAME": "demo"}
+        )
+
+        assert result.exit_code != 0
+        assert "save compose" in result.output
+        assert not Path("compose.override.yaml").exists()
+        assert not Path(".localghost.toml").exists()
+
+
 def test_save_dockerfile_subcommand_writes_compose() -> None:
     runner = CliRunner()
 
@@ -189,3 +211,26 @@ def test_bare_save_reports_the_detected_type_when_nothing_matches() -> None:
 
         assert result.exit_code != 0
         assert "could not detect" in result.output.lower()
+
+
+def test_bare_save_ambiguity_names_the_save_host_subcommand(monkeypatch) -> None:
+    """The two-phase RUN_TYPES-then-SAVE_TYPES retry only exists for the
+    "nothing detected at all" case; an ambiguity between two host types
+    (found on the first, RUN_TYPES-scoped pass) must not be retried with
+    dockerfile allowed too, which would discard this message for a worse
+    one that also names a type neither `save host --type` nor bare `save`
+    can act on directly. The message must also say `save host --type`, not
+    bare `save`'s own (nonexistent) `--type`."""
+    monkeypatch.setattr("localghost.runner.shutil.which", lambda _: "/usr/bin/php")
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        Path("manage.py").touch()
+        Path("index.php").touch()
+        result = runner.invoke(cli, ["save", "--no-input"])
+
+        assert result.exit_code != 0
+        assert "both django and php were detected" in result.output
+        assert "save host --type django" in result.output
+        assert "save host --type php" in result.output
+        assert "dockerfile" not in result.output.lower()

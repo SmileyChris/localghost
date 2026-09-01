@@ -1176,6 +1176,19 @@ def _environment_port(name: str, default: int) -> int:
     return port
 
 
+def _save_subcommand_hint(detected_type: str) -> str:
+    """The `save` invocation that would resolve a type bare save detected.
+
+    Used to word `discover_type`'s ambiguity message correctly from bare
+    `save`, which has no `--type` of its own to rerun with.
+    """
+    if detected_type == "compose":
+        return "`localghost save compose`"
+    if detected_type == "dockerfile":
+        return "`localghost save dockerfile`"
+    return f"`localghost save host --type {detected_type}`"
+
+
 @cli.group(invoke_without_command=True)
 @click.option(
     "working_directory",
@@ -1218,12 +1231,37 @@ def save(
     # that also ships a Dockerfile), and only consider "dockerfile" when
     # nothing else resolves. A single `discover_type(..., allowed=SAVE_TYPES)`
     # call would instead raise an ambiguity error whenever both are present.
+    #
+    # Bare `save` has none of --type, --port, or a trailing command (unlike
+    # `run`/`save host`, `discover_type`'s other callers), so its ambiguity
+    # and not-found messages need their own, subcommand-aware wording.
+    discover_kwargs = {
+        "ambiguous_hint": lambda types: " or ".join(
+            _save_subcommand_hint(item) for item in types
+        ),
+        "not_found_hint": (
+            "run `localghost save host --type <type>`, `localghost save "
+            "compose`, or `localghost save dockerfile`"
+        ),
+    }
     try:
-        detected, _ = discover_type(start, None, allowed=RUN_TYPES)
-    except click.ClickException:
-        detected, _ = discover_type(start, None, allowed=SAVE_TYPES)
+        detected, root = discover_type(
+            start, None, allowed=RUN_TYPES, **discover_kwargs
+        )
+    except click.ClickException as error:
+        if "could not detect a project type" not in str(error):
+            raise
+        detected, root = discover_type(
+            start, None, allowed=SAVE_TYPES, **discover_kwargs
+        )
     if detected == "compose":
-        ctx.invoke(save_compose)
+        # `_save_compose_project` never searches upward on its own (unlike
+        # `save_host`/`save_dockerfile`'s own `_resolve_application`/
+        # `discover_type` fallbacks), so the detected root must be threaded
+        # through explicitly or a Compose project detected from a
+        # subdirectory would write its override next to the invocation
+        # directory instead of next to compose.yaml.
+        ctx.invoke(save_compose, working_directory=root)
     elif detected == "dockerfile":
         ctx.invoke(save_dockerfile)
     else:
@@ -1240,7 +1278,6 @@ def save(
     help="Compose file to inspect; repeat for an existing file stack.",
 )
 @click.option("service_name", "--service", "-s", help="Service to expose.")
-@click.option("name", "--name", help="Local application name for NAME.localhost.")
 @click.option(
     "working_directory",
     "--directory",
@@ -1272,7 +1309,6 @@ def save_compose(
     ctx: click.Context,
     files: tuple[Path, ...],
     service_name: str | None,
-    name: str | None,
     working_directory: Path | None,
     port: int | None,
     output: Path | None,
@@ -1298,7 +1334,7 @@ def save_compose(
         interactive=_is_interactive(no_input),
     )
     if not dry_run:
-        registry.record(name or _local_project_name(cwd), cwd, "compose")
+        registry.record(_local_project_name(cwd), cwd, "compose")
 
 
 @save.command("host")
@@ -1373,6 +1409,16 @@ def save_host(
         config=config,
         command=command,
     )
+    if resolved.selected_type == "compose":
+        # `_resolve_application`'s own detection (`discover_type(cwd, None)`,
+        # default `allowed=RUN_TYPES`) includes "compose" -- `HOST_TYPES`
+        # only blocks an explicit `--type compose`, not detection walking
+        # straight past it. A subcommand documented as writing
+        # .localghost.toml must not silently write a Compose override
+        # instead.
+        raise click.ClickException(
+            "this is a Compose project; use `localghost save compose` instead"
+        )
     _persist_resolved_application(
         resolved,
         service_name=None,
@@ -1607,7 +1653,7 @@ def _save_dockerfile_project(
             type=click.IntRange(1, 65535),
         )
     if port is None:
-        raise click.ClickException("--type dockerfile requires --port")
+        raise click.ClickException("save dockerfile requires --port")
     service_name = service_name or "app"
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", service_name):
         raise click.ClickException(f"'{service_name}' is not a valid service name")
