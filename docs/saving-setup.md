@@ -90,6 +90,29 @@ The saved override:
 - selects an explicit container port; and
 - leaves every other service unchanged.
 
+### Projects that already have an override
+
+Compose merges exactly one override file — the first of these that exists,
+and the others are ignored outright rather than merged in behind it:
+
+1. `compose.override.yml`
+2. `compose.override.yaml`
+3. `docker-compose.override.yml`
+4. `docker-compose.override.yaml`
+
+So a project keeping its development configuration in
+`docker-compose.override.yml` would lose all of it the moment the default
+`compose.override.yaml` appeared beside it. `save compose` refuses rather
+than let that happen, and names the file to save into instead:
+
+```sh
+uvx localghost save compose --output docker-compose.override.yml --extend
+```
+
+`--extend` merges the routing into the existing document and leaves a `.bak`
+alongside it. Because Compose loads that file on its own, `--run` works with
+it too — unlike an `--output` pointing somewhere Compose never reads.
+
 `save compose` has no `--name` option: a Compose project's public name always
 comes from Docker — `COMPOSE_PROJECT_NAME`, the `.env` file, or the directory
 name — the same precedence `docker compose` itself uses, and the routers
@@ -152,9 +175,10 @@ only when detection was already unambiguous, so there is nothing to remember.
 `save compose --file ...` also writes no pin: later runs need the same
 `COMPOSE_FILE` stack in their environment, because Localghost deliberately does
 not persist an explicit Compose file stack in `.localghost.toml`.
-An explicit `--output` writes no pin either, because Compose only merges the
-standard `compose.override.yaml` automatically; pinning another output would
-make `run` inspect a different model from the one that was saved.
+An explicit `--output` writes no pin either — including one of the override
+names Compose merges by itself. The flag names an output file rather than a
+project root, so the pin has no root it can be sure of; a project that needs
+one can still write it with `save compose` on its own.
 
 ## Existing files and previews
 

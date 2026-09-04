@@ -90,8 +90,26 @@ uses [Semantic Versioning](https://semver.org/).
 - `save compose` no longer aborts after writing its override when an existing
   `.localghost.toml` refuses the supplementary Compose type pin; it warns and
   still records the saved project.
-- `save compose --output` no longer pins `type = "compose"`, because Compose
-  does not automatically merge a nonstandard output into later runs.
+- `save compose --output` no longer pins `type = "compose"`: the flag names an
+  output file rather than a project root, so there is no root the pin can be
+  sure of.
+- `save compose` now refuses to write an override that Docker Compose would
+  ignore, or one that would silence the override a project already uses.
+  Compose merges only the first override name it finds — `compose.override.yml`,
+  then `compose.override.yaml`, then `docker-compose.override.yml`, then
+  `docker-compose.override.yaml` — so the default output used to disable a
+  project's whole `docker-compose.override.yml` (build targets, volumes,
+  environment) without a word. The error names the file to `--extend` instead.
+- `--output` may now be combined with `--run` when it names an override
+  Compose merges by itself, which is the only route a project with an existing
+  `docker-compose.override.yml` has to `save ... --run` at all. A genuinely
+  nonstandard output is still rejected.
+- `--extend` no longer rewraps long lines in services it does not touch. The
+  refolded text parsed back to the same value, but it filled the diff under
+  review with churn and trailing whitespace.
+- The error raised when a service's port cannot be guessed now names
+  `localghost save compose --port`, rather than a bare `--port` that the bare
+  `save` it is usually read from does not accept.
 
 ### Removed
 

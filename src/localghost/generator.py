@@ -586,6 +586,12 @@ def _yaml() -> YAML:
     yaml = YAML()
     yaml.preserve_quotes = True
     yaml.indent(mapping=2, sequence=4, offset=2)
+    # ruamel wraps at 80 columns by default, which rewrites long lines in
+    # services `--extend` never touched -- a Traefik rule or a command
+    # argument folds across two lines, and the diff the user reviews is full
+    # of churn that means nothing. Compose files are read as diffs; keep
+    # every untouched line byte-identical.
+    yaml.width = 4096
     return yaml
 
 

@@ -361,10 +361,11 @@ def test_bare_save_does_not_pin_the_compose_type(monkeypatch) -> None:
 
 
 def test_save_compose_run_rejects_a_nonstandard_output(monkeypatch) -> None:
-    """Compose only merges `compose.override.yaml` automatically, so
-    `--output` and `--run` can never both hold: the pair could only save
-    successfully and then fail the routing check. It is rejected at parse
-    time instead, before anything is written."""
+    """An output Compose does not merge on its own can never be part of the
+    project `run` starts: the pair could only save successfully and then fail
+    the routing check. It is rejected before anything is written. (A
+    different *auto-loaded* override name is accepted -- see
+    test_save_compose_run_accepts_another_auto_loaded_override.)"""
     monkeypatch.setattr(
         "localghost.cli.resolve_compose", lambda files, **kwargs: _fake_compose_model()
     )
@@ -419,3 +420,104 @@ def test_bare_save_rejects_type_specific_flags() -> None:
 
     assert result.exit_code != 0
     assert "no such option" in result.output.lower()
+
+
+def test_save_compose_refuses_to_shadow_a_projects_existing_override() -> None:
+    """Compose merges exactly ONE override -- the first name it finds, not
+    all of them. A project carrying `docker-compose.override.yml` therefore
+    loses it outright the moment the default `compose.override.yaml` appears
+    beside it: build targets, volumes and environment all stop applying,
+    silently. Saving has to stop and point at the file already in use."""
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        Path("docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+        Path("docker-compose.override.yml").write_text(
+            "services:\n  web:\n    environment:\n      KEEP: me\n", encoding="utf-8"
+        )
+        result = runner.invoke(cli, ["save", "compose", "--no-input"])
+
+        assert result.exit_code != 0
+        assert "compose.override.yaml" in result.output
+        assert "docker-compose.override.yml" in result.output
+        assert not Path("compose.override.yaml").exists()
+        # The file Compose actually loads is left exactly as it was.
+        assert "KEEP: me" in Path("docker-compose.override.yml").read_text(
+            encoding="utf-8"
+        )
+
+
+def test_save_compose_refuses_an_output_compose_would_ignore() -> None:
+    """The mirror image, and just as quiet: `compose.override.yml` outranks
+    `compose.override.yaml`, so writing the latter produces a file Compose
+    never reads -- and `run` then fails its routing check on setup that was
+    saved successfully a line earlier."""
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
+        Path("compose.override.yml").write_text("services: {}\n", encoding="utf-8")
+        result = runner.invoke(
+            cli,
+            ["save", "compose", "--no-input", "--output", "compose.override.yaml"],
+        )
+
+        assert result.exit_code != 0
+        assert "loads 'compose.override.yml'" in result.output
+        assert not Path("compose.override.yaml").exists()
+
+
+def test_save_compose_run_accepts_another_auto_loaded_override(
+    tmp_path, monkeypatch
+) -> None:
+    """`--output` with `--run` is rejected only because a nonstandard output
+    is not part of the project `run` starts. `docker-compose.override.yml` is
+    not nonstandard -- Compose merges it as readily as `compose.override.yaml`
+    -- so the pair holds, and this is the one route a project with an existing
+    `docker-compose.override.yml` has to `--run` at all."""
+    started: list[str | None] = []
+    monkeypatch.setattr(
+        "localghost.cli.resolve_compose", lambda files, **kwargs: _fake_compose_model()
+    )
+    monkeypatch.setattr("localghost.cli._check_compose_routing", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "localghost.cli._run_compose",
+        lambda root, name, detach, **kwargs: started.append(name),
+    )
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "save", "compose", "--no-input",
+            "--output", "docker-compose.override.yml", "--run",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "docker-compose.override.yml").exists()
+    assert started, "an auto-loaded --output must still start the application"
+
+
+def test_save_compose_port_error_names_a_command_that_accepts_the_flag(
+    monkeypatch,
+) -> None:
+    """Bare `save` stops at -C/--dry-run/--no-input/--run, so advising
+    "rerun with --port" sent the reader straight into "No such option"."""
+    model = {
+        "name": "sample-project",
+        "networks": {"default": {"name": "sample-project_default"}},
+        "services": {"web": {"networks": {"default": None}}},
+    }
+    monkeypatch.setattr("localghost.cli.resolve_compose", lambda files, **kw: model)
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
+        result = runner.invoke(cli, ["save", "--no-input"])
+
+        assert result.exit_code != 0
+        assert "no declared container ports" in result.output
+        assert "localghost save compose --port" in result.output

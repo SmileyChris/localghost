@@ -88,6 +88,18 @@ SAVE_TYPES = (*RUN_TYPES, "dockerfile")
 # split (`run --type` legitimately keeps the full `RUN_TYPES`; `run` isn't
 # split).
 HOST_TYPES = tuple(item for item in RUN_TYPES if item != "compose")
+# Compose auto-loads exactly ONE override file: the first of these that
+# exists. The rest are ignored outright — they are not merged in behind it.
+# Order measured against Docker Compose 5.4.0, and note that `.yml` beats
+# `.yaml` here, the reverse of the base-file convention. Writing the wrong
+# one of these silently disables a project's real override, so `save compose`
+# checks the whole set rather than assuming `compose.override.yaml`.
+COMPOSE_OVERRIDE_NAMES = (
+    "compose.override.yml",
+    "compose.override.yaml",
+    "docker-compose.override.yml",
+    "docker-compose.override.yaml",
+)
 
 
 @dataclass(frozen=True)
@@ -1460,17 +1472,25 @@ def save_compose(
     dry_run = dry_run or shared.get("dry_run", False)
     no_input = no_input or shared.get("no_input", False)
     run_after = run_after or shared.get("run_after", False)
-    if run_after and output is not None:
-        # Compose only merges `compose.override.yaml` automatically, so a
-        # nonstandard --output is never part of the project `run` would
-        # start: the pair can only ever save successfully and then fail the
-        # routing check. Rejecting it here beats that confusing sequence.
-        raise click.UsageError(
-            "--output cannot be combined with --run: Docker Compose only "
-            "merges compose.override.yaml automatically, so a nonstandard "
-            "output would not be part of the project this would start"
-        )
     cwd = _compose_save_root(working_directory or Path.cwd(), files)
+    if (
+        run_after
+        and output is not None
+        and not _is_auto_loaded_override(cwd, output)
+    ):
+        # An output Compose does not merge on its own is never part of the
+        # project `run` would start: the pair can only ever save successfully
+        # and then fail the routing check. Rejecting it here beats that
+        # confusing sequence. A different *auto-loaded* override name is
+        # fine, though -- Compose merges `docker-compose.override.yml` as
+        # readily as `compose.override.yaml`.
+        raise click.UsageError(
+            "--output cannot be combined with --run unless it names an "
+            "override Docker Compose merges by itself ("
+            + ", ".join(COMPOSE_OVERRIDE_NAMES)
+            + " in the project directory); this output would not be part of "
+            "the project this would start"
+        )
     interactive = _is_interactive(no_input)
     if not dry_run:
         title()
@@ -1721,6 +1741,55 @@ def _compose_save_root(start: Path, files: tuple[Path, ...]) -> Path:
     return root
 
 
+def _auto_loaded_override(directory: Path) -> Path | None:
+    """The override Docker Compose would merge in `directory`, if any."""
+    for name in COMPOSE_OVERRIDE_NAMES:
+        candidate = directory / name
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _is_auto_loaded_override(cwd: Path, output: Path) -> bool:
+    """Would Compose merge `output` on its own, without `-f`?"""
+    return (
+        output.name in COMPOSE_OVERRIDE_NAMES
+        and output.resolve().parent == cwd.resolve()
+    )
+
+
+def _check_override_shadowing(output: Path) -> None:
+    """Refuse a write Compose would ignore, or one that would mute another.
+
+    Compose merges only the first override name it finds, so a project
+    holding `docker-compose.override.yml` loses it outright the moment a
+    `compose.override.yaml` appears beside it: build targets, volumes and
+    environment all stop applying, with no message from anything. The
+    reverse is just as quiet -- an override written below an existing one
+    never loads, and `run` then fails its routing check on a file that was
+    written successfully a line earlier.
+    """
+    if output.name not in COMPOSE_OVERRIDE_NAMES:
+        return
+    existing = _auto_loaded_override(output.parent)
+    if existing is None or existing.name == output.name:
+        return
+    rank = COMPOSE_OVERRIDE_NAMES.index
+    if rank(existing.name) < rank(output.name):
+        problem = (
+            f"Docker Compose loads '{existing.name}', not '{output.name}'"
+        )
+    else:
+        problem = (
+            f"writing '{output.name}' would stop Docker Compose loading "
+            f"'{existing.name}', which it merges today"
+        )
+    raise click.ClickException(
+        f"{problem}: Compose merges only the first override it finds. "
+        f"Save into that file instead with --output {existing} --extend"
+    )
+
+
 def _pin_compose_type(
     root: Path, *, extend: bool, dry_run: bool, interactive: bool
 ) -> None:
@@ -1756,6 +1825,7 @@ def _save_compose_project(
 ) -> None:
     """Persist the Compose setup for a Compose project."""
     output = output or cwd / "compose.override.yaml"
+    _check_override_shadowing(output)
     output_exists = output.exists()
 
     inspection_files = files
@@ -2010,8 +2080,12 @@ def _select_port(candidate: Candidate, requested: int | None, interactive: bool)
             detail = f"multiple possible ports ({choices})"
         else:
             detail = "no declared container ports"
+        # Name the command, not the bare flag: this is reachable from `save`,
+        # whose own options stop at -C/--dry-run/--no-input/--run, so "rerun
+        # with --port" sends the reader straight into "No such option".
         raise click.ClickException(
-            f"service '{candidate.name}' has {detail}; rerun with --port"
+            f"service '{candidate.name}' has {detail}; rerun with "
+            "'localghost save compose --port PORT'"
         )
 
     default = candidate.ports[0] if candidate.ports else None

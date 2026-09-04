@@ -449,3 +449,25 @@ def test_extended_writes_refuse_to_replace_symlinks(tmp_path: Path) -> None:
 
     assert override.is_symlink()
     assert target.read_text(encoding="utf-8") == "keep\n"
+
+
+def test_extending_leaves_long_untouched_lines_byte_identical(tmp_path: Path) -> None:
+    """ruamel wraps at 80 columns by default, so `--extend` used to refold
+    long lines in services it never touched. The rewrap parsed back to the
+    same value, but it put churn -- and trailing whitespace -- into the diff
+    a reviewer reads, in a service localghost has no business editing."""
+    long_line = (
+        "      - --providers.docker.defaultrule=Host(`{{ index .Labels "
+        '"com.docker.compose.project" }}.localhost`)'
+    )
+    original = "services:\n  proxy:\n    command:\n" + long_line + "\n"
+    override = tmp_path / "compose.override.yaml"
+    override.write_text(original, encoding="utf-8")
+
+    document = load_override(override)
+    assert extend_override(document, {}, "shop", candidate(), 8000) is True
+    write_extended(override, document)
+
+    written = override.read_text(encoding="utf-8")
+    assert long_line in written.splitlines(keepends=False)
+    assert "loadbalancer.server.port=8000" in written
