@@ -160,6 +160,14 @@ An application-generated invalid-host, CSRF, CORS, or origin error is outside
 Traefik routing. Add the generated hostname and origin to the framework's local
 development settings. See [Framework configuration](integrating-applications.md#framework-configuration).
 
+The most common shape of this is a Django project where browsing works and
+every form post returns `403 Forbidden`: `GET` requests never consult
+`CSRF_TRUSTED_ORIGINS`, so routing looks healthy until the first `POST`. A
+related pair, when the hub serves HTTPS, is a login that silently never stays
+logged in, or `http://` links generated inside an HTTPS page — both mean
+Django has not been told to trust the hub's forwarded scheme. See
+[Django](integrating-applications.md#django) for all three settings.
+
 For `localghost run`, Django needs its generated `<name>.localhost` in
 `ALLOWED_HOSTS` and, when applicable, CSRF trusted origins. Vite HTTP, HMR, and
 WebSocket traffic use the same bridge; a failed upgrade usually means the host
