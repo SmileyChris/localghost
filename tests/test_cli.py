@@ -166,9 +166,7 @@ def test_first_launch_skips_https_prompt_without_mkcert(monkeypatch) -> None:
 
 def test_status_reports_proxy_state_without_reconciling(monkeypatch) -> None:
     monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
-    monkeypatch.setattr(
-        "localghost.cli._https_configured", lambda: False
-    )
+    monkeypatch.setattr("localghost.cli._https_configured", lambda: False)
     monkeypatch.setattr(
         "localghost.cli._run_proxy", lambda *args, **kwargs: pytest.fail("reconciled")
     )
@@ -230,8 +228,9 @@ def test_hub_logs_streams_the_traefik_container(monkeypatch) -> None:
     calls = []
     monkeypatch.setattr(
         "localghost.cli.subprocess.run",
-        lambda command, **kwargs: calls.append((command, kwargs))
-        or CompletedProcess(command, 0),
+        lambda command, **kwargs: (
+            calls.append((command, kwargs)) or CompletedProcess(command, 0)
+        ),
     )
 
     result = CliRunner().invoke(cli, ["hub", "logs", "-f", "--tail", "50"])
@@ -360,6 +359,7 @@ def test_trust_configures_a_stopped_proxy_without_starting_it(
     monkeypatch.setattr(
         "localghost.cli.ZenNssInstaller", lambda path, **kwargs: Installer()
     )
+
     def run(command, **kwargs):
         commands.append(command)
         return CompletedProcess(command, 0)
@@ -427,6 +427,7 @@ def test_trust_remove_disables_https_before_mutating_managed_stores(
     monkeypatch.setattr(
         "localghost.cli.ZenNssInstaller", lambda path, **kwargs: Installer()
     )
+
     def run(command, **kwargs):
         commands.append(command)
         return CompletedProcess(command, 0)
@@ -446,9 +447,7 @@ def test_proxy_command_preserves_docker_compose_failure_status(monkeypatch) -> N
     monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
     monkeypatch.setattr(
         "localghost.cli.subprocess.run",
-        lambda command, **kwargs: CompletedProcess(
-            command, 17, "", "compose failed"
-        ),
+        lambda command, **kwargs: CompletedProcess(command, 17, "", "compose failed"),
     )
     runner = CliRunner()
 
@@ -506,9 +505,7 @@ def test_run_reports_the_type_not_the_framework(monkeypatch, tmp_path) -> None:
 
 
 def test_run_rejects_the_removed_mode_flag(tmp_path) -> None:
-    result = CliRunner().invoke(
-        cli, ["run", "--mode", "host", "-C", str(tmp_path)]
-    )
+    result = CliRunner().invoke(cli, ["run", "--mode", "host", "-C", str(tmp_path)])
 
     assert result.exit_code != 0
     assert "no such option" in result.output.lower()
@@ -669,15 +666,12 @@ def test_run_project_root_discovers_config_inside_the_pinned_root(
     root = tmp_path / "backend"
     root.mkdir()
     (root / ".localghost.toml").write_text(
-        '[run]\nname = "configured-backend"\nport = 4321\n'
-        'command = ["serve"]\n',
+        '[run]\nname = "configured-backend"\nport = 4321\ncommand = ["serve"]\n',
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
 
-    result = CliRunner().invoke(
-        cli, ["run", "--project-root", "backend", "--dry-run"]
-    )
+    result = CliRunner().invoke(cli, ["run", "--project-root", "backend", "--dry-run"])
 
     assert result.exit_code == 0, result.output
     assert "configured-backend.localhost" in result.output
@@ -848,19 +842,24 @@ def _mock_docker_inspect(monkeypatch, container_id, exit_code, stdout_json):
 @pytest.fixture
 def cli_module():
     from localghost import cli as cli_mod
+
     return cli_mod
 
 
 def test_reclaim_route_auto_removes_stale_bridge(monkeypatch, cli_module):
     container_id = "abc123"
-    payload = json.dumps([{
-        "Config": {
-            "Labels": {
-                "io.localghost.managed": "true",
-                "io.localghost.kind": "host-run-bridge",
+    payload = json.dumps(
+        [
+            {
+                "Config": {
+                    "Labels": {
+                        "io.localghost.managed": "true",
+                        "io.localghost.kind": "host-run-bridge",
+                    }
+                }
             }
-        }
-    }])
+        ]
+    )
     calls = _mock_docker_inspect(monkeypatch, container_id, 0, payload)
     cli_module._reclaim_route(container_id, "demo")
     assert len(calls) == 2
@@ -870,11 +869,7 @@ def test_reclaim_route_auto_removes_stale_bridge(monkeypatch, cli_module):
 
 def test_reclaim_route_raises_for_non_managed_container(monkeypatch, cli_module):
     container_id = "abc123"
-    payload = json.dumps([{
-        "Config": {
-            "Labels": {"something": "else"}
-        }
-    }])
+    payload = json.dumps([{"Config": {"Labels": {"something": "else"}}}])
     _mock_docker_inspect(monkeypatch, container_id, 0, payload)
     with pytest.raises(click.ClickException, match="docker rm -f"):
         cli_module._reclaim_route(container_id, "demo")
@@ -882,14 +877,18 @@ def test_reclaim_route_raises_for_non_managed_container(monkeypatch, cli_module)
 
 def test_reclaim_route_raises_if_rm_fails(monkeypatch, cli_module):
     container_id = "abc123"
-    payload = json.dumps([{
-        "Config": {
-            "Labels": {
-                "io.localghost.managed": "true",
-                "io.localghost.kind": "host-run-bridge",
+    payload = json.dumps(
+        [
+            {
+                "Config": {
+                    "Labels": {
+                        "io.localghost.managed": "true",
+                        "io.localghost.kind": "host-run-bridge",
+                    }
+                }
             }
-        }
-    }])
+        ]
+    )
     calls = []
 
     def fake_run(command, **kwargs):
@@ -959,9 +958,7 @@ def test_run_uses_effective_origin_for_django_warning_and_preserves_status(
         recorded["origin"] = public_origin
         return ["Django origin needs updating"]
 
-    monkeypatch.setattr(
-        "localghost.cli.django_settings_warnings", settings_warnings
-    )
+    monkeypatch.setattr("localghost.cli.django_settings_warnings", settings_warnings)
     monkeypatch.setattr("localghost.cli.execute", lambda *args, **kwargs: 7)
 
     result = CliRunner().invoke(
@@ -1011,9 +1008,7 @@ def test_proxy_port_rejects_invalid_environment_values(monkeypatch, value) -> No
     monkeypatch.setattr("localghost.cli.subprocess.run", run)
     runner = CliRunner()
 
-    result = runner.invoke(
-        cli, ["hub", "up"], env={"LOCALGHOST_HTTP_PORT": value}
-    )
+    result = runner.invoke(cli, ["hub", "up"], env={"LOCALGHOST_HTTP_PORT": value})
 
     assert result.exit_code != 0
     assert "integer from 1 to 65535" in result.output
@@ -1230,21 +1225,18 @@ def test_existing_complete_override_reports_no_change(monkeypatch) -> None:
             "traefik.http.routers.sample-project-web.rule": (
                 "Host(`sample-project.localhost`)"
             ),
-                "traefik.http.routers.sample-project-web.service": "sample-project-web",
-                (
-                    "traefik.http.routers.sample-project-web-secure.entrypoints"
-                ): "websecure",
-                "traefik.http.routers.sample-project-web-secure.rule": (
-                    "Host(`sample-project.localhost`)"
-                ),
-                (
-                    "traefik.http.routers.sample-project-web-secure.service"
-                ): "sample-project-web",
-                "traefik.http.routers.sample-project-web-secure.tls": "true",
-                (
-                    "traefik.http.services.sample-project-web."
-                    "loadbalancer.server.port"
-                ): "8000",
+            "traefik.http.routers.sample-project-web.service": "sample-project-web",
+            ("traefik.http.routers.sample-project-web-secure.entrypoints"): "websecure",
+            "traefik.http.routers.sample-project-web-secure.rule": (
+                "Host(`sample-project.localhost`)"
+            ),
+            (
+                "traefik.http.routers.sample-project-web-secure.service"
+            ): "sample-project-web",
+            "traefik.http.routers.sample-project-web-secure.tls": "true",
+            (
+                "traefik.http.services.sample-project-web.loadbalancer.server.port"
+            ): "8000",
         }
         install_compose(monkeypatch, complete_model)
         second = runner.invoke(cli, ["save", "compose", "--no-input", "--extend"])
@@ -1329,9 +1321,7 @@ def test_save_host_defaults_reject_compose_options_and_refuse_overwrite(
             env=environment,
         )
         assert missing_dockerfile.exit_code != 0
-        assert "could not find a dockerfile project root" in (
-            missing_dockerfile.output
-        )
+        assert "could not find a dockerfile project root" in (missing_dockerfile.output)
 
         Path("saved.yaml").write_text("keep\n", encoding="utf-8")
         overwrite = runner.invoke(
@@ -1729,9 +1719,7 @@ def test_compose_run_with_explicit_type_from_a_subdirectory_uses_the_project_roo
 
     monkeypatch.setattr("localghost.cli.subprocess.run", _run)
 
-    result = CliRunner().invoke(
-        cli, ["run", "-C", str(nested), "--type", "compose"]
-    )
+    result = CliRunner().invoke(cli, ["run", "-C", str(nested), "--type", "compose"])
 
     assert result.exit_code == 0, result.output
     assert recorded["command"] == [
@@ -1816,9 +1804,7 @@ def test_save_compose_surfaces_a_resolution_failure(monkeypatch) -> None:
     monkeypatch.setattr("localghost.cli.resolve_compose", _no_compose_file)
     runner_ = CliRunner()
     with runner_.isolated_filesystem():
-        result = runner_.invoke(
-            cli, ["save", "compose", "--no-input", "--port", "80"]
-        )
+        result = runner_.invoke(cli, ["save", "compose", "--no-input", "--port", "80"])
 
     assert result.exit_code != 0
     assert "no configuration file provided" in result.output
@@ -2028,8 +2014,9 @@ def test_save_compose_run_writes_compose_integration_and_starts(
     commands = []
     monkeypatch.setattr(
         "localghost.cli.subprocess.run",
-        lambda command, **kwargs: commands.append(command)
-        or CompletedProcess(command, 0),
+        lambda command, **kwargs: (
+            commands.append(command) or CompletedProcess(command, 0)
+        ),
     )
 
     result = CliRunner().invoke(
@@ -2238,9 +2225,7 @@ def test_detached_host_runs_in_the_planned_working_directory(
 
 
 def test_detached_start_failure_removes_bridge(monkeypatch, tmp_path, cli_module):
-    plan = RunPlan(
-        "demo", "custom", ("missing",), 3000, "session", "services: {}\n"
-    )
+    plan = RunPlan("demo", "custom", ("missing",), 3000, "session", "services: {}\n")
     calls = []
     monkeypatch.setattr(cli_module, "_run_proxy", lambda *args, **kwargs: None)
     monkeypatch.setattr(
@@ -2280,8 +2265,12 @@ def test_compose_run_honours_compose_project_name_from_dotenv(
         "localghost.cli.resolve_compose",
         lambda files, **kwargs: {
             "networks": {"localghost": {}},
-            "services": {"web": {"labels": {"traefik.enable": "true"},
-                                 "networks": {"localghost": None}}},
+            "services": {
+                "web": {
+                    "labels": {"traefik.enable": "true"},
+                    "networks": {"localghost": None},
+                }
+            },
         },
     )
 
@@ -2305,8 +2294,12 @@ def test_compose_run_honours_compose_project_name_from_the_environment(
         "localghost.cli.resolve_compose",
         lambda files, **kwargs: {
             "networks": {"localghost": {}},
-            "services": {"web": {"labels": {"traefik.enable": "true"},
-                                 "networks": {"localghost": None}}},
+            "services": {
+                "web": {
+                    "labels": {"traefik.enable": "true"},
+                    "networks": {"localghost": None},
+                }
+            },
         },
     )
 
@@ -2316,9 +2309,7 @@ def test_compose_run_honours_compose_project_name_from_the_environment(
 
     monkeypatch.setattr("localghost.cli.subprocess.run", _run)
 
-    result = CliRunner().invoke(
-        cli, ["run", "-C", str(tmp_path), "--type", "compose"]
-    )
+    result = CliRunner().invoke(cli, ["run", "-C", str(tmp_path), "--type", "compose"])
 
     assert result.exit_code == 0, result.output
     up = next(item for item in commands if item[-1] == "up")
@@ -2420,12 +2411,41 @@ def test_compose_run_pins_before_the_hub_is_reconciled(monkeypatch, tmp_path) ->
     monkeypatch.setattr("localghost.cli.subprocess.run", fake_subprocess_run)
     (tmp_path / "compose.yaml").write_text("services: {}\n")
 
-    result = CliRunner().invoke(
-        cli, ["run", "-C", str(tmp_path), "--type", "compose"]
-    )
+    result = CliRunner().invoke(cli, ["run", "-C", str(tmp_path), "--type", "compose"])
 
     assert result.exit_code == 0, result.output
     assert order[0] == "pin:starting hub"
     assert order.index("pin:starting hub") < order.index("proxy")
     assert order.index("status:starting") < order.index("compose-up")
     assert order.index("release") > order.index("compose-up")
+
+
+def test_status_json_includes_routes_and_route_errors(monkeypatch) -> None:
+    import click
+
+    from localghost.routes import Route
+
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: True)
+    monkeypatch.setattr(
+        "localghost.cli.active_routes",
+        lambda: [Route(hostname="blog.localhost", location="/tmp/blog")],
+    )
+    result = CliRunner().invoke(cli, ["status", "--json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["routes"][0]["hostname"] == "blog.localhost"
+
+    monkeypatch.setattr(
+        "localghost.cli.active_routes",
+        lambda: (_ for _ in ()).throw(click.ClickException("inspect failed")),
+    )
+    result = CliRunner().invoke(cli, ["status", "--json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["routes_error"] == "inspect failed"
+
+
+def test_save_subcommand_hint_names_each_project_kind() -> None:
+    from localghost.cli import _save_subcommand_hint
+
+    assert _save_subcommand_hint("compose") == "`localghost save compose`"
+    assert _save_subcommand_hint("dockerfile") == "`localghost save dockerfile`"
+    assert _save_subcommand_hint("vite") == "`localghost save host --type vite`"

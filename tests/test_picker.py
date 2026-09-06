@@ -156,3 +156,91 @@ def test_render_empty_list_explains_itself():
     model.apply("delete")
     lines = picker.render_lines(model, width=120)
     assert any("Nothing remembered" in line for line in lines)
+
+
+def test_relative_covers_each_age_bucket(monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime(2026, 9, 6, 12, 0, tzinfo=UTC)
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now
+
+    monkeypatch.setattr(picker, "datetime", Clock)
+    stamp = lambda **kw: (now - timedelta(**kw)).isoformat()  # noqa: E731
+    assert picker._relative("not a date") == "a while ago"
+    assert picker._relative(stamp(seconds=30)) == "moments ago"
+    assert picker._relative(stamp(minutes=5)) == "5 minutes ago"
+    assert picker._relative(stamp(hours=3)) == "3 hours ago"
+    assert picker._relative(stamp(days=4)) == "4 days ago"
+
+
+class _Stdin:
+    def fileno(self) -> int:
+        return 0
+
+
+def _drive(monkeypatch, keys: list[bytes], names: str = "ab"):
+    """Run the picker against scripted keystrokes; return (result, calls)."""
+    script = list(keys)
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(picker.sys, "stdin", _Stdin())
+    monkeypatch.setattr(picker.termios, "tcgetattr", lambda fd: "saved")
+    monkeypatch.setattr(
+        picker.termios, "tcsetattr", lambda fd, when, attrs: calls.append(("tc", attrs))
+    )
+    monkeypatch.setattr(picker.tty, "setcbreak", lambda fd: None)
+    monkeypatch.setattr(picker.os, "read", lambda fd, n: script.pop(0))
+    monkeypatch.setattr(
+        picker.shutil, "get_terminal_size", lambda: type("S", (), {"columns": 60})()
+    )
+
+    def forget(name: str) -> bool:
+        calls.append(("forget", name))
+        return True
+
+    result = picker.pick(
+        [entry(name) for name in names],
+        forget=forget,
+        restore=lambda e: calls.append(("restore", e.name)),
+    )
+    return result, calls
+
+
+def test_pick_returns_the_selected_entry_on_enter(monkeypatch, capsys):
+    result, calls = _drive(monkeypatch, [b"j", b"\r"])
+
+    assert result is not None and result.name == "b"
+    assert ("tc", "saved") in calls, "terminal attributes must be restored"
+    out = capsys.readouterr().out
+    assert out.startswith("\x1b[?25l") and out.endswith("\x1b[?25h")
+
+
+def test_pick_returns_none_on_quit(monkeypatch, capsys):
+    result, _ = _drive(monkeypatch, [b"q"])
+
+    assert result is None
+
+
+def test_pick_forgets_restores_and_redraws_a_shrunken_list(monkeypatch, capsys):
+    result, calls = _drive(
+        monkeypatch, [b"\x1b[3~", b"\x1b[3~", b"u", b"\x1b"], names="abc"
+    )
+
+    assert result is None
+    assert [c for c in calls if c[0] == "forget"] == [("forget", "a"), ("forget", "b")]
+    assert ("restore", "b") in calls
+    out = capsys.readouterr().out
+    # The second Delete shrinks the list, so the stale row is wiped and the
+    # cursor moves back up over it.
+    assert "\x1b[2K\r\n\x1b[1A" in out
+
+
+def test_pick_raises_on_interrupt(monkeypatch, capsys):
+    import pytest
+
+    with pytest.raises(KeyboardInterrupt):
+        _drive(monkeypatch, [b"\x03"])
+    assert capsys.readouterr().out.endswith("\x1b[?25h")

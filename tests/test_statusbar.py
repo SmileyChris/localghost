@@ -409,3 +409,51 @@ def test_pinned_shows_the_secondary_url():
         pass
 
     assert TAILNET_URL in visible(stream.text)
+
+
+def test_fg_and_terminal_size_read_the_real_environment(monkeypatch):
+    assert statusbar._fg("#ff0080") == "\x1b[38;2;255;0;128m"
+    monkeypatch.undo()  # drop the fixture's stub and read the real size
+    columns, lines = statusbar._terminal_size()
+    assert columns > 0 and lines > 0
+
+
+def test_poll_until_ready_swallows_connection_errors_until_success():
+    answers = iter([OSError("refused"), True])
+
+    def probe() -> bool:
+        answer = next(answers)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    assert statusbar._poll_until_ready(probe, threading.Event(), interval=0) is True
+
+
+def test_winch_handler_resizes_the_region(monkeypatch):
+    stream = Stream()
+    size = [80, 24]
+    monkeypatch.setattr(statusbar, "_terminal_size", lambda: tuple(size))
+
+    with statusbar.pinned(URL, stream=stream) as bar:
+        size[1] = 30
+        bar._on_winch(signal.SIGWINCH, None)
+
+    assert "\x1b[1;29r" in stream.text
+
+
+def test_repaint_thread_ticks_the_spinner_then_stops(monkeypatch):
+    monkeypatch.setattr(statusbar, "_REPAINT_SECONDS", 0.01)
+    monkeypatch.setattr(statusbar, "_SPINNER_SECONDS", 0.01)
+    stream = Stream()
+
+    with statusbar.pinned(URL, stream=stream, probe=lambda: False) as bar:
+        threading.Event().wait(0.1)
+        ticked = bar._frame
+        bar.ready()
+        threading.Event().wait(0.05)
+        painter = bar._painter
+
+    assert ticked > 0, "the spinner should advance while loading"
+    painter.join(1)
+    assert not painter.is_alive()

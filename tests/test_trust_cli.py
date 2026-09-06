@@ -721,3 +721,123 @@ def test_proxy_resource_directory_materializes_non_filesystem_resources(
         assert (directory / "proxy_compose.yaml").read_text(encoding="utf-8") == (
             "services: {}\n"
         )
+
+
+def _tailnet_state() -> TailscaleState:
+    return TailscaleState(
+        tailnet="example.com",
+        suffix="tailwork",
+        gateway_ips=("100.64.0.10",),
+        previous_split_dns={},
+    )
+
+
+def test_trust_status_reports_a_missing_tailnet_root(monkeypatch, tmp_path) -> None:
+    (tmp_path / "rootCA.pem").write_bytes(CERTIFICATE_PEM)
+    monkeypatch.setattr(cli_module, "load_tailscale_state", _tailnet_state)
+
+    result = CliRunner().invoke(
+        cli, ["trust", "status"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Tailnet .tailwork: not installed" in result.output
+
+
+def test_trust_status_reports_an_installed_tailnet_root(monkeypatch, tmp_path) -> None:
+    (tmp_path / "rootCA.pem").write_bytes(CERTIFICATE_PEM)
+    (tmp_path / "tailscale-tailwork-rootCA.pem").write_bytes(CERTIFICATE_PEM)
+    monkeypatch.setattr(cli_module, "load_tailscale_state", _tailnet_state)
+
+    result = CliRunner().invoke(
+        cli, ["trust", "status"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+    )
+
+    assert result.exit_code == 0, result.output
+    fingerprint = PublicCertificate.parse(CERTIFICATE_PEM).fingerprint
+    assert f"Tailnet .tailwork: {fingerprint}" in result.output
+
+
+def test_trust_status_rejects_an_invalid_tailnet_root(monkeypatch, tmp_path) -> None:
+    (tmp_path / "rootCA.pem").write_bytes(CERTIFICATE_PEM)
+    (tmp_path / "tailscale-tailwork-rootCA.pem").write_text("junk", encoding="utf-8")
+    monkeypatch.setattr(cli_module, "load_tailscale_state", _tailnet_state)
+
+    result = CliRunner().invoke(
+        cli, ["trust", "status"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+    )
+
+    assert result.exit_code != 0
+    assert "invalid .tailwork public root" in result.output
+
+
+def _record_runs(monkeypatch, *, returncode: int = 0, stderr: bytes = b""):
+    commands: list[list[str]] = []
+
+    def run(command, **kwargs):
+        commands.append(command)
+        return CompletedProcess(command, returncode, b"", stderr)
+
+    monkeypatch.setattr(cli_module.subprocess, "run", run)
+    return commands
+
+
+def test_ensure_gateway_image_skips_a_built_image(monkeypatch) -> None:
+    monkeypatch.setattr(cli_module, "_images_are_built", lambda *names: True)
+    commands = _record_runs(monkeypatch)
+
+    cli_module._ensure_gateway_image("tailwork")
+
+    assert commands == []
+
+
+def test_ensure_gateway_image_builds_only_the_gateway(monkeypatch) -> None:
+    monkeypatch.setattr(cli_module, "_images_are_built", lambda *names: False)
+    commands = _record_runs(monkeypatch)
+
+    cli_module._ensure_gateway_image("tailwork")
+
+    assert commands[-1][-2:] == ["build", "tailscale-gateway"]
+    assert any("proxy_compose_tailscale.yaml" in item for item in commands[-1])
+
+
+def test_ensure_gateway_image_reports_a_failed_build(monkeypatch) -> None:
+    from localghost.tailscale import TailscaleError
+
+    monkeypatch.setattr(cli_module, "_images_are_built", lambda *names: False)
+    _record_runs(monkeypatch, returncode=1, stderr=b"no space left")
+
+    with pytest.raises(TailscaleError, match="no space left"):
+        cli_module._ensure_gateway_image("tailwork")
+
+
+def test_ensure_gateway_image_requires_docker(monkeypatch) -> None:
+    from localghost.tailscale import TailscaleError
+
+    monkeypatch.setattr(cli_module, "_images_are_built", lambda *names: False)
+
+    def missing(command, **kwargs):
+        raise FileNotFoundError("docker")
+
+    monkeypatch.setattr(cli_module.subprocess, "run", missing)
+    with pytest.raises(TailscaleError, match="docker is required"):
+        cli_module._ensure_gateway_image("tailwork")
+
+
+def test_bootstrap_tailnet_root_error_paths(monkeypatch) -> None:
+    from localghost.tailscale import TailscaleError
+
+    def missing(command, **kwargs):
+        raise FileNotFoundError("docker")
+
+    monkeypatch.setattr(cli_module.subprocess, "run", missing)
+    with pytest.raises(TailscaleError, match="docker is required"):
+        cli_module._bootstrap_tailnet_root("tailwork")
+
+    _record_runs(monkeypatch, returncode=1, stderr=b"")
+    with pytest.raises(TailscaleError, match="could not bootstrap"):
+        cli_module._bootstrap_tailnet_root("tailwork")
+
+    _record_runs(monkeypatch, returncode=0)
+    with pytest.raises(TailscaleError, match="invalid data"):
+        cli_module._bootstrap_tailnet_root("tailwork")
