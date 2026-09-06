@@ -454,7 +454,7 @@ assert_equal 503 "${ghost_status}" 'Ghost page status for remembered project'
 ghost_body=$(curl --noproxy '*' --silent --max-time 5 --header 'Accept: text/html' \
   "http://ghosttest.localhost:${ACTIVE_PORT}/")
 case "${ghost_body}" in
-  *ghosttest*localghost\ run*) ;;
+  *ghosttest*localghost\ summon\ ghosttest*) ;;
   *) fail 'Ghost page body missing project name or restart hint' ;;
 esac
 
