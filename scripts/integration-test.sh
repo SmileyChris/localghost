@@ -221,7 +221,8 @@ fi
 # way `_run_proxy` sets it from `registry.registry_dir()` for real runs. It
 # must be exported before the first `proxy … up` so every hub start in this
 # suite sees it.
-export LOCALGHOST_REGISTRY_DIR="$(localghost_state_dir)/registry"
+LOCALGHOST_REGISTRY_DIR="$(localghost_state_dir)/registry"
+export LOCALGHOST_REGISTRY_DIR
 mkdir -p "${LOCALGHOST_REGISTRY_DIR}"
 
 for project in localghost "${PROJECT_A}" "${PROJECT_B}" "${HOST_PROJECT}" \
