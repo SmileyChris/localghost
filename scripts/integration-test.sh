@@ -211,7 +211,7 @@ localghost_state_dir() {
 if [[ -f "$(localghost_state_dir)/https-enabled" && -z ${LOCALGHOST_ACCEPT_CA_RESET:-} ]]; then
   fail "trusted HTTPS is configured on this machine, and this suite deletes the
   localghost CA volumes; the hub will not start again until you run
-  'localghost trust'. Re-run with LOCALGHOST_ACCEPT_CA_RESET=1 to proceed
+  'localghost trust install'. Re-run with LOCALGHOST_ACCEPT_CA_RESET=1 to proceed
   anyway, or point LOCALGHOST_STATE_DIR at a scratch directory to leave your
   own trust configuration untouched"
 fi

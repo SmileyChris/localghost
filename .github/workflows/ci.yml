@@ -91,8 +91,8 @@ jobs:
           wheel=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
           test -n "${wheel}"
           uvx --isolated --from "${wheel}" localghost --help
-          uvx --isolated --from "${wheel}" localghost
-          uvx --isolated --from "${wheel}" localghost down
+          uvx --isolated --from "${wheel}" localghost hub up
+          uvx --isolated --from "${wheel}" localghost hub down
 
       - name: Run integration suite
         run: ./scripts/integration-test.sh
