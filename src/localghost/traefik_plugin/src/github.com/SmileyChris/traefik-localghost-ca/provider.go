@@ -33,6 +33,11 @@ type Config struct {
 	DomainSuffix   string `json:"domainSuffix,omitempty"`
 	LeafLifetime   string `json:"leafLifetime,omitempty"`
 	RenewBefore    string `json:"renewBefore,omitempty"`
+	// RegistryPath points at the localghost CLI's ghost-page registry.
+	// Hostnames remembered there keep their certificates after their
+	// containers stop, so ghost pages serve warning-free over HTTPS.
+	// Empty disables the lookup.
+	RegistryPath string `json:"registryPath,omitempty"`
 }
 
 func CreateConfig() *Config {
@@ -72,6 +77,7 @@ type Provider struct {
 	network        string
 	storagePath    string
 	domainSuffix   string
+	registryPath   string
 
 	dockerClient   *DockerClient
 	listContainers func(context.Context) ([]ContainerInfo, error) // test override; nil in Traefik/Yaegi
@@ -107,7 +113,8 @@ func New(_ context.Context, config *Config, name string) (*Provider, error) {
 		name: name, pollInterval: pi, leafLifetime: ll, renewBefore: rb,
 		dockerEndpoint: config.DockerEndpoint, network: config.Network,
 		storagePath: config.StoragePath, domainSuffix: config.DomainSuffix,
-		storedCerts: make(map[string]*projectCert), activeCerts: make(map[string]*projectCert),
+		registryPath: config.RegistryPath,
+		storedCerts:  make(map[string]*projectCert), activeCerts: make(map[string]*projectCert),
 	}, nil
 }
 
@@ -307,6 +314,22 @@ func (p *Provider) desiredSpecs(containers []ContainerInfo) ([]certSpec, error) 
 		byKey[spec.key] = spec
 		claimed[domain] = struct{}{}
 	}
+	// Registry hostnames are best-effort: running containers always win the
+	// certificate budget, and an oversized registry never fails the publish.
+	for _, domain := range p.registryDomains() {
+		if _, duplicate := claimed[domain]; duplicate {
+			continue
+		}
+		if len(byKey) >= maxActiveCertificates {
+			fmt.Fprintf(os.Stderr,
+				"localghostCA[%s]: certificate limit reached; skipping remaining registry hostnames\n",
+				p.name)
+			break
+		}
+		spec := p.metadataSpec(domain)
+		byKey[spec.key] = spec
+		claimed[domain] = struct{}{}
+	}
 	keys := make([]string, 0, len(byKey))
 	for key := range byKey {
 		keys = append(keys, key)
@@ -320,6 +343,38 @@ func (p *Provider) desiredSpecs(containers []ContainerInfo) ([]certSpec, error) 
 		result = append(result, byKey[key])
 	}
 	return result, nil
+}
+
+// registryDomains returns hostnames remembered by the localghost CLI so
+// their certificates outlive the containers that first claimed them.
+// Entries share the ghost-page registry's JSON shape; invalid or
+// unreadable files are skipped, and a missing registry is not an error.
+func (p *Provider) registryDomains() []string {
+	if p.registryPath == "" {
+		return nil
+	}
+	paths, err := filepath.Glob(filepath.Join(p.registryPath, "*.json"))
+	if err != nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	for _, path := range paths {
+		payload, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var e struct {
+			Hostname string `json:"hostname"`
+		}
+		if err := json.Unmarshal(payload, &e); err != nil {
+			continue
+		}
+		if ValidateMetadataDomain(e.Hostname) != nil {
+			continue
+		}
+		seen[e.Hostname] = struct{}{}
+	}
+	return sortedSetKeys(seen)
 }
 
 func sortedSetKeys(values map[string]struct{}) []string {

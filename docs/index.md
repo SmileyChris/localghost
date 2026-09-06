@@ -22,27 +22,37 @@ the application's `.localhost` URL. An unconfigured Compose project tells you
 to save its routing setup and continue with:
 
 ```sh
-uvx localghost run --save
+uvx localghost save compose --run
 ```
 
 ## Run, save, or do both
 
-Use `save` when you want to persist the detected setup without starting the
-application:
+`run` resolves and starts an application; it never writes project files. Use
+`save` to persist the detected setup without starting anything:
 
 ```sh
 uvx localghost save
+```
+
+Add `--run` to persist and then start in one step:
+
+```sh
+uvx localghost save --run
 ```
 
 The three forms share the same detection and planning:
 
 - `localghost run` resolves and executes;
 - `localghost save` resolves and persists; and
-- `localghost run --save` persists and then executes.
+- `localghost save --run` persists and then executes.
+
+`save` is a command group — `save host`, `save compose`, and `save dockerfile`
+carry the options specific to each project type, and bare `save` still
+detects the type and dispatches to the right one.
 
 The project type is auto-detected, searching upward to the nearest project
 root. `--detach` runs the application in the background and
-`localghost manage` inspects and stops those sessions. See
+`localghost sessions` inspects, follows, and stops those sessions. See
 [Running host applications](running-host-apps.md) for the full workflow, custom
 ports, explicit type selection, `.localghost.toml` settings, detached
 sessions, and Django runner resolution.
@@ -57,7 +67,7 @@ HTTP is always available. To install Localghost's local development root and
 enable HTTPS, first install `mkcert`, then run:
 
 ```sh
-uvx localghost trust
+uvx localghost trust install
 ```
 
 See [Security and trust](security.md) for certificate handling and

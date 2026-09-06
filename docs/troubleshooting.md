@@ -3,6 +3,13 @@
 Start with the hub status and logs:
 
 ```sh
+uvx localghost status
+uvx localghost hub logs --tail 100
+```
+
+If the CLI cannot reach Docker, use the raw commands:
+
+```sh
 docker ps --filter label=com.docker.compose.project=localghost
 docker logs --tail=100 localghost-traefik-1
 ```
@@ -15,7 +22,7 @@ Typical error:
 network localghost declared as external, but could not be found
 ```
 
-The hub has not yet created its shared network. Run `uvx localghost`
+The hub has not yet created its shared network. Run `uvx localghost hub up`
 once, then rerun the application's `docker compose up` command.
 
 Do not change the application network to a normal, implicitly created network.
@@ -25,7 +32,7 @@ That would create a project-scoped network that Traefik cannot share reliably.
 
 Consumer containers can run while the hub container is stopped. Check that
 the hub is running and healthy with `ps`, then inspect its logs. Reconcile it
-with `uvx localghost` if needed.
+with `uvx localghost hub up` if needed.
 
 Also confirm the URL uses the configured `LOCALGHOST_HTTP_PORT` when it is
 not 80.
@@ -51,6 +58,14 @@ docker inspect "$(docker compose ps -q web)" --format '{{json .Config.Labels}}'
 
 The dashboard at `http://traefik.localhost` should list the expected router.
 An unlabelled container intentionally produces a 404.
+
+## A hostname shows "is offline" instead of my app
+
+The hub remembers hostnames it has routed before. If the application behind
+one is stopped or was never started this session, the hub answers with a
+ghost page (`503 Service Unavailable`) instead of routing to it. Start the
+application with `localghost run`, or drop the stale entry with
+`localghost forget <name>` if the project is gone for good.
 
 ## Route returns 502
 
@@ -93,8 +108,8 @@ Stop the conflicting listener if appropriate, or use
 Inspect the managed trust and listener state first:
 
 ```sh
-uvx localghost trust --status
-uvx localghost --status
+uvx localghost trust status
+uvx localghost status
 ```
 
 HTTPS requires `mkcert`, an installed Localghost public root, and a running hub
@@ -144,6 +159,14 @@ hard kill or Docker failure can still leave a stale container.
 An application-generated invalid-host, CSRF, CORS, or origin error is outside
 Traefik routing. Add the generated hostname and origin to the framework's local
 development settings. See [Framework configuration](integrating-applications.md#framework-configuration).
+
+The most common shape of this is a Django project where browsing works and
+every form post returns `403 Forbidden`: `GET` requests never consult
+`CSRF_TRUSTED_ORIGINS`, so routing looks healthy until the first `POST`. A
+related pair, when the hub serves HTTPS, is a login that silently never stays
+logged in, or `http://` links generated inside an HTTPS page — both mean
+Django has not been told to trust the hub's forwarded scheme. See
+[Django](integrating-applications.md#django) for all three settings.
 
 For `localghost run`, Django needs its generated `<name>.localhost` in
 `ALLOWED_HOSTS` and, when applicable, CSRF trusted origins. Vite HTTP, HMR, and

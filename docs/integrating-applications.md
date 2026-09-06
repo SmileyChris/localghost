@@ -10,7 +10,7 @@ Start the hub before the first application. This creates the external
 `localghost` network:
 
 ```sh
-uvx localghost
+uvx localghost hub up
 ```
 
 Compose automatically derives the project name from the checkout directory and
@@ -108,9 +108,9 @@ router/service identifiers must be distinct within the project.
 
 Each example defines two routers for the same hostname and backend service. The
 ordinary router uses the always-available `web` entrypoint. The `-secure` router
-uses `websecure` with TLS and becomes active after `localghost trust` enables
-the hub's HTTPS configuration. Keeping both routers means HTTP continues to
-work after HTTPS is enabled.
+uses `websecure` with TLS and becomes active after `localghost trust install`
+enables the hub's HTTPS configuration. Keeping both routers means HTTP
+continues to work after HTTPS is enabled.
 
 `localghost save` adds both routers automatically. For hand-written integration,
 include all four `-secure` labels shown above: entrypoint, rule, service, and
@@ -120,8 +120,8 @@ with the wrong backend when a container defines multiple routers or services.
 Install `mkcert`, then enable and inspect trust with:
 
 ```sh
-uvx localghost trust
-uvx localghost trust --status
+uvx localghost trust install
+uvx localghost trust status
 ```
 
 Use `https://<project>.localhost` for the primary service and
@@ -151,32 +151,65 @@ Traefik routing does not bypass application security checks. Configure generated
 hostnames in trusted-host, origin, CORS, callback URL, and cookie settings as
 required by the framework.
 
-For Django, a checkout named `my-project` normally needs:
+### Django
+
+Routing through the hub has three separate consequences for a Django
+project. Each one fails differently, and each one is easy to mistake for a
+localghost problem:
 
 ```python
-ALLOWED_HOSTS = ["my-project.localhost"]
-CSRF_TRUSTED_ORIGINS = ["http://my-project.localhost"]
+ALLOWED_HOSTS = [".localhost"]
+CSRF_TRUSTED_ORIGINS = ["http://*.localhost", "https://*.localhost"]
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 ```
 
-When using HTTPS, allow its origin instead, or allow both origins when the
-application is intentionally used over both schemes:
+Prefer these wildcard forms over a single hostname. A checkout's public name
+follows its directory or `COMPOSE_PROJECT_NAME`, so a per-hostname list
+breaks the moment a project is renamed, copied to a second checkout, or run
+by a colleague from a differently named directory — and the failure lands in
+the application, far from the rename that caused it. `.localhost` and
+`*.localhost` are only reachable on the developer's own machine, so nothing
+is widened that a browser elsewhere could reach.
+
+**`ALLOWED_HOSTS`** — without it every request is a `400 Bad Request`
+("Invalid HTTP_HOST header"). Django's leading dot means "this domain and
+its subdomains", so `.localhost` covers every project on the hub. This one
+is usually noticed immediately, because nothing works at all.
+
+**`CSRF_TRUSTED_ORIGINS`** — without it the site loads and browsing works,
+then every form post, login, and admin save returns `403 Forbidden` with
+"Origin checking failed". This is the one that gets misread as a proxy fault:
+`GET` is unaffected, so routing looks healthy right up to the first `POST`.
+Django matches the browser's `Origin` header, so list the scheme, and list
+both schemes when the project is used over both.
+
+**`SECURE_PROXY_SSL_HEADER`** — the hub terminates TLS and forwards plain
+HTTP to the container, so `request.is_secure()` is `False` on an HTTPS
+request until Django is told to trust the forwarded scheme. The hub sets
+`X-Forwarded-Proto` on every request (`https` over the secure entrypoint,
+`http` over the plain one). Left unset, `SESSION_COOKIE_SECURE` and
+`CSRF_COOKIE_SECURE` cookies are never stored, `SECURE_SSL_REDIRECT` loops,
+and `request.build_absolute_uri()` generates `http://` links inside an HTTPS
+page. Only ever set this where a proxy always overwrites the header, as the
+hub does — an application reachable directly can be handed a forged one.
+
+When the hub uses a non-default port, the browser's origin includes it, and a
+wildcard entry without a port will not match it:
 
 ```python
-CSRF_TRUSTED_ORIGINS = [
-    "http://my-project.localhost",
-    "https://my-project.localhost",
-]
-```
-
-When the hub uses a non-default port, the browser origin includes it:
-
-```python
-CSRF_TRUSTED_ORIGINS = ["http://my-project.localhost:8080"]
+CSRF_TRUSTED_ORIGINS = ["http://*.localhost:8080"]
 ```
 
 Cookie domain settings often work best when left host-only in local development.
 OAuth and other external callbacks must use the generated URL expected by the
 browser.
+
+### Other frameworks
+
+The same three questions apply under different names: which hostnames the
+framework will answer to, which origins it trusts for state-changing
+requests, and how it learns that the original request was HTTPS when the
+connection it sees is not.
 
 ## Failure behavior
 

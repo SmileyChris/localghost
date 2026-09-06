@@ -92,7 +92,7 @@ class MkcertInstaller:
         if executable is None:
             raise TrustError(
                 "mkcert is unavailable; HTTPS remains disabled. Install mkcert, "
-                "then run `localghost trust`."
+                "then run `localghost trust install`."
             )
         # mkcert does not accept a certificate path: it always reads the exact
         # filename CAROOT/rootCA.pem. Stage only the selected public root so
@@ -249,7 +249,7 @@ class ZenNssInstaller:
         if executable is None:
             raise TrustError(
                 "Zen profile found but certutil is unavailable; install nss tools, "
-                "then run `localghost trust` again."
+                "then run `localghost trust install` again."
             )
         certificate = PublicCertificate.parse(self.certificate_path.read_bytes())
         nickname = self._nickname(certificate)

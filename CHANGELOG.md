@@ -3,7 +3,39 @@
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## [3.0.0] - 2026-09-01
+
+### Added
+
+- Ghost pages: the hub now remembers every project it routes and serves a
+  friendly offline page (HTTP 503) for stopped projects instead of a bare
+  404, including the directory and command needed to start them again.
+  Unknown hostnames get a page listing remembered projects. New
+  `localghost forget` command drops entries. A hub started from the
+  self-contained `compose.yaml` is recreated once by the first CLI
+  reconcile, which adds the registry mount.
+- The bare `http://localhost` hostname now serves the hub's welcome page —
+  logo, remembered projects, and links to the Traefik dashboard and
+  documentation. Ghost pages share the documentation site's styling.
+- On an HTTPS hub, the certificate authority now keeps issuing certificates
+  for remembered hostnames, so ghost pages serve over `https://` without
+  browser warnings after a project stops.
+- New `localghost summon <name>` runs a remembered project from its recorded
+  directory, from anywhere; bare `summon` opens an interactive picker on a
+  terminal (Enter summons, Delete forgets) and prints a plain listing when
+  piped. Ghost pages now offer `summon`/`forget` as click-to-copy command
+  chips.
+- `localghost hub` groups the shared Traefik container's commands: `hub up`,
+  `hub down`, and a new `hub logs [-f]` that no longer requires knowing the
+  container's generated name.
+- `localghost status` reports hub state, HTTPS, active routes, and remembered
+  projects, with `--json` for scripts.
+- `localghost trust` gained `install`, `remove`, and `status` subcommands.
+- `localghost sessions logs` follows a detached session's output with `-f`, and
+  reads Compose sessions' logs from Compose, which `manage attach` never could.
+- `summon` now forwards run options (`--port`, `--detach`, `--dry-run`, and the
+  rest) instead of ignoring them, and both `summon` and `forget` complete
+  remembered project names in the shell.
 
 ### Added
 
@@ -37,7 +69,7 @@ uses [Semantic Versioning](https://semver.org/).
 - Foreground runs now leave a persistent exit-status diagnosis after the
   transient URL display is removed, with a plain-output fallback hint.
 - Trust-store operations stage each selected public root in an isolated mkcert
-  `CAROOT`, so managing a tailnet root cannot silently target `.localhost`.
+  `CAROOT`, so managing one public root cannot silently target another.
 - Zen NSS nicknames now carry the authority's suffix, so a client can trust the
   `.localhost` root and a tailnet root at the same time. Installing one no
   longer sweeps the other out of the profile; each authority only replaces its
@@ -51,7 +83,7 @@ uses [Semantic Versioning](https://semver.org/).
   roots keep working and gain the constraint when the CA volumes are purged.
 - `localghost tailscale trust` accepts an optional `--fingerprint`, verified
   against the downloaded root before anything is installed, so a client can
-  pin the value shown by `localghost trust --status` on the hosting machine
+  pin the value shown by `localghost trust status` on the hosting machine
   instead of trusting the tailnet path alone.
 - The certificate-authority bootstrap now runs a binary compiled into the hub
   image instead of `go run` in a throwaway toolchain container, cutting a
@@ -60,9 +92,9 @@ uses [Semantic Versioning](https://semver.org/).
 - Starting or reconciling the hub no longer re-checks the build of images that
   already exist. Hub images are tagged with the CLI's version, so the check
   could only ever be a cache hit; skipping it takes a reconcile of a running
-  hub from about 2.6 seconds to 1.4. `localghost --rebuild` forces the build
+  hub from about 2.6 seconds to 1.4. `localghost hub up --rebuild` forces the build
   after editing the bundled Traefik plugin or gateway sources.
-- `localghost down` now removes containers the current compose files no longer
+- `localghost hub down` now removes containers the current compose files no longer
   describe, matching how application teardown already worked. A lost tailnet
   state file previously left the gateway running and, with it attached, the
   hub network could not be removed either.
@@ -71,7 +103,7 @@ uses [Semantic Versioning](https://semver.org/).
 - Tailscale enable now offers automatic tailnet trust only when localhost trust
   was already enabled; otherwise it remains non-privileged and points to the
   standard trust command.
-- `localghost trust`, `trust --status`, and `trust --remove` now manage the
+- `localghost trust install`, `trust status`, and `trust remove` now manage the
   active tailnet authority alongside `.localhost`; `tailscale trust` remains a
   compatibility alias.
 - Tailnet trust downloads use the enrolled gateway address directly, avoiding
@@ -83,11 +115,82 @@ uses [Semantic Versioning](https://semver.org/).
   recorded in `.localghost.toml`, Compose integration is written to
   `compose.override.yaml`, and Dockerfile-only projects can be saved as a new
   `compose.yaml`.
-- Added `localghost run --save`, which uses the same persistence path as
-  `localghost save` and then starts the application. Plain `run` remains
-  non-mutating and directs an unconfigured Compose project to `run --save`.
+- `localghost save` is now a command group with one subcommand per project
+  type — `save host`, `save compose`, `save dockerfile`. Bare `save` still
+  detects the type and dispatches, but type-specific options now live on the
+  subcommand that accepts them, so `--help` is accurate for the project in
+  front of you.
+- `localghost run` is now strictly read-only. `run --save` is replaced by
+  `save --run`, and `run --service` moves to `save compose --service`.
+- `save compose` has no `--name` option: a Compose project's name always
+  comes from Docker (`COMPOSE_PROJECT_NAME`, the `.env` file, or the
+  directory name), never from a flag — a `--name` there would have moved only
+  the ghost-page registry entry, leaving it pointing at a hostname no router
+  serves.
+- `save host --type` no longer accepts `compose`; use `save compose` for a
+  Compose project.
+- `save compose --run` now validates the Compose routing before starting,
+  where the removed `run --save` skipped that check.
+- `--root` is renamed `--project-root` so it stops reading as a synonym of
+  `--directory`.
 - Explicit `type = "compose"` run configuration now resolves type ambiguity
   without bypassing validation of the resolved Compose routing model.
+- `save compose`, named directly, now writes `type = "compose"` into
+  `.localghost.toml` as well as the override, so a Compose project that shares
+  a directory with a framework can be pinned once instead of needing
+  `run --type compose` every time. Bare `save` dispatching to the same
+  subcommand writes no pin: it only gets there when detection was already
+  unambiguous.
+- A bare `localghost` now reports status instead of starting the hub. Use
+  `localghost hub up`, or just `localghost run`, which starts the hub itself.
+- `localghost down` is now `localghost hub down`. The old spelling read as
+  "stop my application" but stops the container every project on the machine
+  routes through.
+- A bare `localghost trust` now reports trust status instead of installing the
+  public root; use `localghost trust install`. Bare lifecycle namespaces now
+  report when invoked and never change anything.
+
+### Fixed
+
+- `run --project-root` now discovers `.localghost.toml` inside the explicitly
+  pinned root, including when that root is below the invocation directory.
+- `save compose` no longer aborts after writing its override when an existing
+  `.localghost.toml` refuses the supplementary Compose type pin; it warns and
+  still records the saved project.
+- `save compose --output` no longer pins `type = "compose"`: the flag names an
+  output file rather than a project root, so there is no root the pin can be
+  sure of.
+- `save compose` now refuses to write an override that Docker Compose would
+  ignore, or one that would silence the override a project already uses.
+  Compose merges only the first override name it finds — `compose.override.yml`,
+  then `compose.override.yaml`, then `docker-compose.override.yml`, then
+  `docker-compose.override.yaml` — so the default output used to disable a
+  project's whole `docker-compose.override.yml` (build targets, volumes,
+  environment) without a word. The error names the file to `--extend` instead.
+- `--output` may now be combined with `--run` when it names an override
+  Compose merges by itself, which is the only route a project with an existing
+  `docker-compose.override.yml` has to `save ... --run` at all. A genuinely
+  nonstandard output is still rejected.
+- `--extend` no longer rewraps long lines in services it does not touch. The
+  refolded text parsed back to the same value, but it filled the diff under
+  review with churn and trailing whitespace.
+- The error raised when a service's port cannot be guessed now names
+  `localghost save compose --port`, rather than a bare `--port` that the bare
+  `save` it is usually read from does not accept.
+
+### Removed
+
+- `run --save`, `run --service`, and the deprecated `--framework` alias.
+- The `localghost generate` command; use `localghost save`.
+- The `--root` spelling; use `--project-root`.
+- Bare `localghost save` no longer accepts `--type`, `--file`, `--service`,
+  `--output`, `--name`, `--config`, or `--project-root`. Each now lives on the
+  `save host`, `save compose`, or `save dockerfile` subcommand that actually
+  accepts it, which is what makes `save --help` truthful per project type.
+- `localghost --status`, `trust --status`, and `trust --remove`.
+- Top-level `localghost down`; use `localghost hub down`.
+- The `localghost manage` group; use `localghost sessions`. Its `attach`
+  subcommand is now `sessions logs`.
 
 ## [2.1.0] - 2026-08-26
 

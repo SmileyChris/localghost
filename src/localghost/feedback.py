@@ -16,10 +16,23 @@ LIME = "#a3e635"
 MINT = "#2dd4bf"
 
 
+_wordmark_shown = False
+
+
 def title(*, welcome: bool = False) -> None:
-    """Show the Localghost wordmark in interactive terminals."""
-    if not _rich_terminal(False):
+    """Show the Localghost wordmark in interactive terminals, once.
+
+    The wordmark is a per-invocation brand mark, not a per-command one, and
+    commands compose: `save host --run` re-enters `run`, `save compose
+    --run` re-enters `_run_compose`, and each of those prints a title of
+    its own. Guarding here, rather than threading a suppression flag
+    through three subcommands, keeps the mark at the top of the output and
+    closes every future double print for free.
+    """
+    global _wordmark_shown
+    if _wordmark_shown or not _rich_terminal(False):
         return
+    _wordmark_shown = True
     console = _console(False)
     console.print(Text.assemble(("local", "bold"), ("ghost", f"bold {LIME}")))
     console.print()
@@ -29,7 +42,7 @@ def title(*, welcome: bool = False) -> None:
 
 def next_actions(*, https_enabled: bool) -> None:
     """Show useful commands after a successful hub launch."""
-    action("Stop the hub", "uvx localghost down")
+    action("Stop the hub", "uvx localghost hub down")
     action(
         "Save a setup",
         "uvx localghost save",
@@ -42,7 +55,7 @@ def next_actions(*, https_enabled: bool) -> None:
     if not https_enabled:
         action(
             "Enable HTTPS",
-            "uvx localghost trust",
+            "uvx localghost trust install",
             " after installing mkcert.",
         )
 

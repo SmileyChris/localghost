@@ -4,6 +4,21 @@ from pathlib import Path
 
 import pytest
 
+from localghost import feedback
+
+
+@pytest.fixture(autouse=True)
+def unshown_wordmark(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give every test a fresh copy of `title`'s once-per-process guard.
+
+    `feedback.title` prints the wordmark at most once per process so that
+    `save --run`, which re-enters `run`, does not print it twice. A test
+    session is one process running many CLI invocations, so the guard has
+    to be reset between them or the first test to reach a terminal-shaped
+    `title` would silence every later one.
+    """
+    monkeypatch.setattr(feedback, "_wordmark_shown", False)
+
 
 @pytest.fixture(autouse=True)
 def isolate_localghost_state(

@@ -84,7 +84,7 @@ not guarantee that every consumer application is healthy or correctly labelled.
 
 ## Optional HTTPS path
 
-HTTP remains the baseline entrypoint. After `localghost trust` installs the
+HTTP remains the baseline entrypoint. After `localghost trust install` adds the
 hub's public development root, the hub also publishes the `websecure`
 entrypoint on loopback and loads its local certificate provider. The private
 root and online signer stay in Docker volumes; only the public root is copied to
@@ -136,7 +136,7 @@ the Docker socket and must never be tailnet-reachable code; the gateway is
 tailnet-reachable and therefore runs from a scratch image with a read-only
 filesystem, no capabilities, no socket, and only the suffix authority's
 public material mounted. Both belong to the one `localghost` Compose project,
-so `localghost`, `localghost down`, and reconciliation own them together.
+so `localghost hub up`, `localghost hub down`, and reconciliation own them together.
 
 Because the image ships no shell, the gateway's Docker healthcheck is the
 gateway binary probing its own loopback health listener, which starts only

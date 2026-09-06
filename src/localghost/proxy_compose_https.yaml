@@ -1,4 +1,4 @@
-# Applied only after `localghost trust` has installed this proxy's public root.
+# Applied only after `localghost trust install` has installed this proxy's public root.
 services:
   bootstrap:
     # This is an explicit one-shot job invoked by `docker compose run`; it is
@@ -40,8 +40,12 @@ services:
       - --providers.plugin.localghostCA.domainsuffix=localhost
       - --providers.plugin.localghostCA.leaflifetime=24h
       - --providers.plugin.localghostCA.renewbefore=6h
+      # Ghost pages: remembered hostnames keep certificates after their
+      # containers stop, so offline pages serve without TLS warnings.
+      - --providers.plugin.localghostCA.registrypath=/var/lib/localghost-registry
       - --experimental.abortonpluginfailure=true
       - --experimental.localplugins.localghostCA.modulename=github.com/SmileyChris/traefik-localghost-ca
+      - --experimental.localplugins.localghostFallback.modulename=github.com/SmileyChris/traefik-localghost-fallback
     ports:
       - 127.0.0.1:${LOCALGHOST_HTTPS_PORT:-443}:443
     volumes:
@@ -55,6 +59,12 @@ services:
       - traefik.http.middlewares.localghost-dashboard-secure-redirect.redirectregex.permanent=true
       - traefik.http.middlewares.localghost-dashboard-secure-redirect.redirectregex.regex=^https://([^/]+)/?$
       - traefik.http.middlewares.localghost-dashboard-secure-redirect.redirectregex.replacement=https://$${1}/dashboard/
+      - traefik.http.routers.localghost-fallback-secure.entrypoints=websecure
+      - traefik.http.routers.localghost-fallback-secure.rule=HostRegexp(`.+`)
+      - traefik.http.routers.localghost-fallback-secure.priority=1
+      - traefik.http.routers.localghost-fallback-secure.middlewares=localghost-fallback
+      - traefik.http.routers.localghost-fallback-secure.service=noop@internal
+      - traefik.http.routers.localghost-fallback-secure.tls=true
 
 volumes:
   localghost-ca-root:

@@ -51,13 +51,13 @@ visible while the application runs. Press Ctrl+C to stop the application.
 An unconfigured Compose project asks you to save its routing setup first:
 
 ```sh
-uvx localghost run --save
+uvx localghost save compose --run
 ```
 
 Save a custom command the same way:
 
 ```sh
-uvx localghost run --save --port 8080 -- ./server --port 8080
+uvx localghost save host --port 8080 --run -- ./server --port 8080
 ```
 
 Use `save` when you want to persist setup without starting anything:
@@ -71,19 +71,20 @@ uvx localghost save
 Start or reconcile only the shared hub with:
 
 ```sh
-uvx localghost
+uvx localghost hub up
 ```
 
 Open [http://traefik.localhost](http://traefik.localhost) for its dashboard,
-inspect it with `uvx localghost --status`, and remove it with
-`uvx localghost down`.
+inspect it with `uvx localghost status`, and remove it with
+`uvx localghost hub down`.
 
 Run it in the background with `--detach` and manage it afterwards:
 
 ```sh
 uvx localghost run --detach
-uvx localghost manage list
-uvx localghost manage stop SESSION_ID
+uvx localghost sessions list
+uvx localghost sessions logs SESSION_ID -f
+uvx localghost sessions stop SESSION_ID
 ```
 
 See [Saving project setup](docs/saving-setup.md) for `.localghost.toml`, Compose

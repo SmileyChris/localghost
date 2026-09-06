@@ -6,8 +6,15 @@ to do with that resolution:
 ```sh
 uvx localghost run          # run without changing project files
 uvx localghost save         # save without running
-uvx localghost run --save   # save, then run
+uvx localghost save --run   # save, then run
 ```
+
+`run` never writes project files — that only ever happens through `save`.
+`save` is a command group with one subcommand per project type — `save host`,
+`save compose`, `save dockerfile` — each carrying the options specific to that
+type. Bare `save` still detects the type and dispatches to the matching
+subcommand, so `uvx localghost save` is equivalent to running whichever of the
+three fits the project in front of you.
 
 The saved artifact follows the project. Host applications and custom commands
 use `.localghost.toml`; Docker Compose applications use
@@ -22,27 +29,37 @@ For a detected Django, Vite, Astro, CakePHP, Laravel, or plain PHP application:
 uvx localghost save
 ```
 
-This writes the detected type and port to `.localghost.toml`. Save an explicit
-choice when more than one type is detected:
+This writes the detected type and port to `.localghost.toml`. Reach the
+`save host` subcommand directly for an explicit type, a public name, or a
+project root:
 
 ```sh
-uvx localghost save --type laravel
+uvx localghost save host --type laravel
+uvx localghost save host --name checkout
+uvx localghost save host --project-root backend
 ```
 
 Save a custom command with its required HTTP port:
 
 ```sh
-uvx localghost save --port 8080 -- ./server --port 8080
+uvx localghost save host --port 8080 -- ./server --port 8080
 ```
 
-The equivalent `run --save` forms write the same setup and then start the
-application. Future runs need only `uvx localghost run`.
+Add `--run` to either form to save and then start the application. Future
+runs need only `uvx localghost run`:
 
-`save` and `run --save` use the same resolver. Both accept `-C/--directory`,
-`--root`, and `--config`; both apply saved settings, project detection, command
-validation, and port selection in the same order. The only difference is that
-`save` stops after persistence. If no runnable type can be detected, `save`
-reports the same error as `run` instead of guessing a framework.
+```sh
+uvx localghost save --run
+uvx localghost save host --port 8080 --run -- ./server --port 8080
+```
+
+`save` and `save host` use the same resolver as `run`, applying saved
+settings, project detection, command validation, and port selection in the
+same order. Bare `save` only exposes the type-neutral flags —
+`-C/--directory`, `--dry-run`, `--no-input`, and `--run`; `--project-root`,
+`--config`, `--type`, `--name`, `--extend`, and a trailing command all live on
+`save host`. If no runnable type can be detected, `save` reports the same
+error as `run` instead of guessing a framework.
 
 ## Save Docker Compose integration
 
@@ -50,13 +67,13 @@ An unconfigured Compose project cannot be routed safely, so a plain
 `localghost run` explains that setup must first be saved. Do both operations:
 
 ```sh
-uvx localghost run --save
+uvx localghost save compose --run
 ```
 
 Or save without starting the project:
 
 ```sh
-uvx localghost save
+uvx localghost save compose
 ```
 
 Localghost resolves the application with `docker compose config`, selects the
@@ -73,12 +90,47 @@ The saved override:
 - selects an explicit container port; and
 - leaves every other service unchanged.
 
+### Projects that already have an override
+
+Compose merges exactly one override file — the first of these that exists,
+and the others are ignored outright rather than merged in behind it:
+
+1. `compose.override.yml`
+2. `compose.override.yaml`
+3. `docker-compose.override.yml`
+4. `docker-compose.override.yaml`
+
+So a project keeping its development configuration in
+`docker-compose.override.yml` would lose all of it the moment the default
+`compose.override.yaml` appeared beside it. `save compose` refuses rather
+than let that happen, and names the file to save into instead:
+
+```sh
+uvx localghost save compose --output docker-compose.override.yml --extend
+```
+
+`--extend` merges the routing into the existing document and leaves a `.bak`
+alongside it. Because Compose loads that file on its own, `--run` works with
+it too — unlike an `--output` pointing somewhere Compose never reads.
+
+`save compose` has no `--name` option: a Compose project's public name always
+comes from Docker — `COMPOSE_PROJECT_NAME`, the `.env` file, or the directory
+name — the same precedence `docker compose` itself uses, and the routers
+`save compose` creates are derived from that resolved model. A `--name` here
+would only rename the ghost-page registry entry, leaving it pointing at a
+hostname no router actually serves.
+
 When selection is ambiguous, Localghost prompts in an interactive terminal.
 Make either choice explicit for automation:
 
 ```sh
-uvx localghost save --service app --port 8000 --no-input
+uvx localghost save compose --service app --port 8000 --no-input
 ```
+
+`save compose --run` validates the Compose routing before starting the
+application — the same check a plain `localghost run` performs on an
+already-saved project — so a misconfigured save is caught immediately instead
+of starting a project that would not be reachable.
 
 After saving, either let Localghost own the application lifecycle:
 
@@ -89,7 +141,7 @@ uvx localghost run
 or start the hub and retain the normal Compose lifecycle:
 
 ```sh
-uvx localghost
+uvx localghost hub up
 docker compose up
 ```
 
@@ -98,21 +150,35 @@ docker compose up
 When a root contains more than one runnable type, Localghost refuses to guess:
 
 ```text
-Multiple application types were found: compose, vite
+both compose and vite were detected; rerun with --type compose or --type vite
 ```
 
-Choose once with `run --type`, or remember the choice with `save` or
-`run --save`:
+Choose once with `run --type`, or remember the choice by saving it:
 
 ```sh
 uvx localghost run --type vite
-uvx localghost save --type vite
-uvx localghost run --type compose --save
+uvx localghost save host --type vite
+uvx localghost save compose
 ```
 
-Selecting Compose may save both `.localghost.toml` (to remember an otherwise
-ambiguous type) and `compose.override.yaml` (to store the integration). Each
-file has a distinct responsibility.
+`run --type` decides one run. Naming a `save` subcommand decides every later
+run: `save host --type vite` writes `type = "vite"` to `.localghost.toml`, and
+a directly named `save compose` without `--file` or `--output` writes
+`type = "compose"` there as well as the `compose.override.yaml` holding the
+integration itself. The two files keep distinct responsibilities —
+`.localghost.toml` records which type this project is, `compose.override.yaml`
+records how the Compose project reaches the hub — and afterwards a plain
+`uvx localghost run` needs no flag at all.
+
+Bare `uvx localghost save` writes no such pin. It reaches the Compose branch
+only when detection was already unambiguous, so there is nothing to remember.
+`save compose --file ...` also writes no pin: later runs need the same
+`COMPOSE_FILE` stack in their environment, because Localghost deliberately does
+not persist an explicit Compose file stack in `.localghost.toml`.
+An explicit `--output` writes no pin either — including one of the override
+names Compose merges by itself. The flag names an output file rather than a
+project root, so the pin has no root it can be sure of; a project that needs
+one can still write it with `save compose` on its own.
 
 ## Existing files and previews
 
@@ -128,12 +194,13 @@ Preview the artifact without writing or running anything:
 
 ```sh
 uvx localghost save --dry-run
-uvx localghost run --save --dry-run
+uvx localghost save --run --dry-run
 ```
 
-Use `--file` repeatedly to inspect an explicit Compose file stack, or
-`--output` to choose a Compose output filename. A nonstandard output is not
-loaded automatically by Compose and must later be passed with `--file`.
+Use `--file` repeatedly on `save compose` to inspect an explicit Compose file
+stack, or `--output` (on `save compose` or `save dockerfile`) to choose a
+Compose output filename. A nonstandard output is not loaded automatically by
+Compose and must later be passed with `--file`.
 
 ## Dockerfile projects
 
@@ -141,7 +208,7 @@ When a Dockerfile exists without Compose, save a new `compose.yaml` by naming
 the container's HTTP port:
 
 ```sh
-uvx localghost save --type dockerfile --port 8080
+uvx localghost save dockerfile --port 8080
 ```
 
 The resulting project builds the Dockerfile, joins the external network, and

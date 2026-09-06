@@ -47,11 +47,11 @@ def resolve_root(
 ) -> Path | None:
     """The pinned project root, or None when detection should walk.
 
-    Precedence: the --root flag, then [run].root, then the directory holding
-    the discovered configuration file.
+    Precedence: the --project-root flag, then [run].root, then the directory
+    holding the discovered configuration file.
     """
     if flag is not None:
-        return _validated(flag, Path.cwd(), "--root")
+        return _validated(flag, Path.cwd(), "--project-root")
     if configured is not None:
         base = config_dir or start
         return _validated(Path(configured), base, "[run].root")

@@ -20,18 +20,31 @@ MAA=
 
 def test_trust_status_reports_an_absent_root_without_starting_proxy(tmp_path) -> None:
     result = CliRunner().invoke(
-        cli, ["trust", "--status"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+        cli, ["trust", "status"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
     )
 
     assert result.exit_code == 0, result.output
     assert "HTTPS: disabled" in result.output
 
 
-def test_trust_rejects_combined_remove_and_status() -> None:
-    result = CliRunner().invoke(cli, ["trust", "--remove", "--status"])
+def test_trust_mode_flags_are_gone() -> None:
+    for flag in ("--status", "--remove"):
+        result = CliRunner().invoke(cli, ["trust", flag])
 
-    assert result.exit_code != 0
-    assert "cannot be used together" in result.output
+        assert result.exit_code != 0, flag
+        assert "no such option" in result.output.lower()
+
+
+def test_bare_trust_reports_without_touching_trust_stores(monkeypatch) -> None:
+    enabled = []
+    monkeypatch.setattr("localghost.cli._enable_https", lambda: enabled.append(True))
+    monkeypatch.setattr("localghost.cli._https_configured", lambda: False)
+
+    result = CliRunner().invoke(cli, ["trust"])
+
+    assert result.exit_code == 0, result.output
+    assert enabled == []
+    assert "HTTPS: disabled" in result.output
 
 
 def test_trust_status_reports_valid_enabled_root(tmp_path) -> None:
@@ -39,7 +52,7 @@ def test_trust_status_reports_valid_enabled_root(tmp_path) -> None:
     (tmp_path / "https-enabled").touch()
 
     result = CliRunner().invoke(
-        cli, ["trust", "--status"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+        cli, ["trust", "status"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
     )
 
     assert result.exit_code == 0, result.output
@@ -52,7 +65,7 @@ def test_trust_status_rejects_an_invalid_root(tmp_path) -> None:
     (tmp_path / "rootCA.pem").write_text("not a certificate", encoding="utf-8")
 
     result = CliRunner().invoke(
-        cli, ["trust", "--status"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+        cli, ["trust", "status"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
     )
 
     assert result.exit_code != 0
@@ -75,6 +88,7 @@ def test_default_command_uses_configured_https_and_custom_port(
     monkeypatch.setattr("localghost.cli.subprocess.run", run)
     result = CliRunner().invoke(
         cli,
+        ["hub", "up"],
         env={
             "LOCALGHOST_STATE_DIR": str(tmp_path),
             "LOCALGHOST_HTTPS_PORT": "8443",
@@ -93,7 +107,7 @@ def compose_command(commands: list[list[str]]) -> list[str]:
 
 
 def start_recorder(monkeypatch, tmp_path, *, images_present: bool):
-    """Record the commands a plain `localghost` run issues."""
+    """Record the commands a `localghost hub up` run issues."""
     (tmp_path / "rootCA.pem").write_bytes(CERTIFICATE_PEM)
     (tmp_path / "https-enabled").touch()
     commands: list[list[str]] = []
@@ -114,7 +128,9 @@ def test_start_does_not_rebuild_images_that_already_exist(
 ) -> None:
     commands = start_recorder(monkeypatch, tmp_path, images_present=True)
 
-    result = CliRunner().invoke(cli, env={"LOCALGHOST_STATE_DIR": str(tmp_path)})
+    result = CliRunner().invoke(
+        cli, ["hub", "up"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+    )
 
     assert result.exit_code == 0, result.output
     # Hub images are tagged with the release version, so re-checking the build
@@ -125,7 +141,9 @@ def test_start_does_not_rebuild_images_that_already_exist(
 def test_start_builds_when_a_hub_image_is_missing(monkeypatch, tmp_path) -> None:
     commands = start_recorder(monkeypatch, tmp_path, images_present=False)
 
-    result = CliRunner().invoke(cli, env={"LOCALGHOST_STATE_DIR": str(tmp_path)})
+    result = CliRunner().invoke(
+        cli, ["hub", "up"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+    )
 
     assert result.exit_code == 0, result.output
     assert "--no-build" not in compose_command(commands)
@@ -135,7 +153,7 @@ def test_rebuild_forces_a_build_of_existing_images(monkeypatch, tmp_path) -> Non
     commands = start_recorder(monkeypatch, tmp_path, images_present=True)
 
     result = CliRunner().invoke(
-        cli, ["--rebuild"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+        cli, ["hub", "up", "--rebuild"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
     )
 
     assert result.exit_code == 0, result.output
@@ -154,7 +172,9 @@ def test_start_checks_the_gateway_image_while_tailnet_hosting_is_on(
     commands = start_recorder(monkeypatch, tmp_path, images_present=True)
     monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: state)
 
-    result = CliRunner().invoke(cli, env={"LOCALGHOST_STATE_DIR": str(tmp_path)})
+    result = CliRunner().invoke(
+        cli, ["hub", "up"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+    )
 
     assert result.exit_code == 0, result.output
     inspected = [
@@ -177,7 +197,7 @@ def test_interactive_start_can_enable_https(monkeypatch) -> None:
     monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
     monkeypatch.setattr("localghost.cli.active_routes", lambda: [])
 
-    result = CliRunner().invoke(cli, input="y\n")
+    result = CliRunner().invoke(cli, ["hub", "up"], input="y\n")
 
     assert result.exit_code == 0, result.output
     assert enabled == [True]
@@ -192,7 +212,7 @@ def test_proxy_status_reports_running_route_failure(monkeypatch) -> None:
         lambda: (_ for _ in ()).throw(click.ClickException("inspect failed")),
     )
 
-    result = CliRunner().invoke(cli, ["--status"])
+    result = CliRunner().invoke(cli, ["status"])
 
     assert result.exit_code == 0, result.output
     assert "Hub: running" in result.output
@@ -209,7 +229,7 @@ def test_trust_reports_existing_https_on_a_running_proxy(monkeypatch, tmp_path) 
     )
 
     result = CliRunner().invoke(
-        cli, ["trust"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+        cli, ["trust", "install"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
     )
 
     assert result.exit_code == 0, result.output
@@ -243,7 +263,7 @@ def test_trust_installs_active_tailnet_root(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(cli_module, "ZenNssInstaller", Installer)
 
     result = CliRunner().invoke(
-        cli, ["trust"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+        cli, ["trust", "install"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
     )
 
     assert result.exit_code == 0, result.output
@@ -286,7 +306,7 @@ def test_trust_scopes_each_authority_for_zen(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(cli_module, "ZenNssInstaller", Zen)
 
     result = CliRunner().invoke(
-        cli, ["trust"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+        cli, ["trust", "install"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
     )
 
     assert result.exit_code == 0, result.output
@@ -320,7 +340,7 @@ def test_trust_remove_scopes_each_authority_for_zen(monkeypatch, tmp_path) -> No
     monkeypatch.setattr(cli_module, "ZenNssInstaller", Zen)
 
     result = CliRunner().invoke(
-        cli, ["trust", "--remove"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+        cli, ["trust", "remove"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
     )
 
     assert result.exit_code == 0, result.output
@@ -358,7 +378,7 @@ def test_trust_remove_reconciles_running_proxy_before_uninstall(
 
     result = CliRunner().invoke(
         cli,
-        ["trust", "--remove"],
+        ["trust", "remove"],
         env={"LOCALGHOST_STATE_DIR": str(tmp_path)},
     )
 
@@ -385,7 +405,7 @@ def test_trust_remove_reports_store_failure(monkeypatch, tmp_path) -> None:
 
     result = CliRunner().invoke(
         cli,
-        ["trust", "--remove"],
+        ["trust", "remove"],
         env={"LOCALGHOST_STATE_DIR": str(tmp_path)},
     )
 
@@ -407,7 +427,7 @@ def test_trust_remove_keeps_marker_when_proxy_reconciliation_fails(
 
     result = CliRunner().invoke(
         cli,
-        ["trust", "--remove"],
+        ["trust", "remove"],
         env={"LOCALGHOST_STATE_DIR": str(tmp_path)},
     )
 
@@ -434,7 +454,7 @@ def test_enable_https_clears_marker_when_installation_fails(
     monkeypatch.setattr("localghost.cli.MkcertInstaller", lambda path: Installer())
 
     result = CliRunner().invoke(
-        cli, ["trust"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+        cli, ["trust", "install"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
     )
 
     assert result.exit_code != 0
@@ -469,7 +489,7 @@ def test_enable_https_rolls_back_partial_trust_installation(
     monkeypatch.setattr("localghost.cli.ZenNssInstaller", lambda path, **kwargs: Zen())
 
     result = CliRunner().invoke(
-        cli, ["trust"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+        cli, ["trust", "install"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
     )
 
     assert result.exit_code != 0
@@ -503,7 +523,7 @@ def test_enable_https_retains_an_existing_configuration_on_refresh_failure(
     monkeypatch.setattr("localghost.cli.MkcertInstaller", lambda path: Installer())
 
     result = CliRunner().invoke(
-        cli, ["trust"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+        cli, ["trust", "install"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
     )
 
     assert result.exit_code != 0
@@ -536,7 +556,7 @@ def test_enable_https_reports_incomplete_automatic_rollback(
     monkeypatch.setattr("localghost.cli.ZenNssInstaller", lambda path, **kwargs: Zen())
 
     result = CliRunner().invoke(
-        cli, ["trust"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+        cli, ["trust", "install"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
     )
 
     assert result.exit_code != 0
@@ -554,9 +574,7 @@ def test_enable_https_forces_mkcert_reinstall_on_root_rotation(
     (tmp_path / "root-fingerprint").write_text(old_fingerprint)
     certificate = PublicCertificate.parse(CERTIFICATE_PEM)
     monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
-    monkeypatch.setattr(
-        "localghost.cli._bootstrap_public_root", lambda: certificate
-    )
+    monkeypatch.setattr("localghost.cli._bootstrap_public_root", lambda: certificate)
     calls = []
 
     class Mkcert:
@@ -574,7 +592,7 @@ def test_enable_https_forces_mkcert_reinstall_on_root_rotation(
     monkeypatch.setattr("localghost.cli.ZenNssInstaller", lambda path, **kwargs: Zen())
 
     result = CliRunner().invoke(
-        cli, ["trust"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
+        cli, ["trust", "install"], env={"LOCALGHOST_STATE_DIR": str(tmp_path)}
     )
 
     assert result.exit_code == 0, result.output

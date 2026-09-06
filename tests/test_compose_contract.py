@@ -59,6 +59,7 @@ def test_proxy_compose_matches_the_public_contract() -> None:
         "--providers.docker=true",
         "--providers.docker.exposedbydefault=false",
         "--providers.docker.network=localghost",
+        "--experimental.localplugins.localghostFallback.modulename=github.com/SmileyChris/traefik-localghost-fallback",
     }
     assert traefik["healthcheck"]["test"] == [
         "CMD",
@@ -99,6 +100,86 @@ def test_proxy_compose_matches_the_public_contract() -> None:
     assert labels[
         "traefik.http.middlewares.localghost-dashboard-redirect.redirectregex.replacement"
     ] == "http://$${1}/dashboard/"
+    assert labels["traefik.http.routers.localghost-fallback.rule"] == "HostRegexp(`.+`)"
+    assert labels["traefik.http.routers.localghost-fallback.priority"] == "1"
+    assert labels["traefik.http.routers.localghost-fallback.entrypoints"] == "web"
+    assert labels["traefik.http.routers.localghost-fallback.service"] == "noop@internal"
+    assert (
+        labels["traefik.http.routers.localghost-fallback.middlewares"]
+        == "localghost-fallback"
+    )
+    assert (
+        labels[
+            "traefik.http.middlewares.localghost-fallback.plugin.localghostFallback.registryPath"
+        ]
+        == "/var/lib/localghost-registry"
+    )
+    # The self-contained hub carries no user state.
+    assert not any(
+        "localghost-registry" in str(volume) for volume in traefik["volumes"]
+    )
+
+
+def test_packaged_proxy_mounts_registry_and_serves_fallback(tmp_path) -> None:
+    model = compose_model(
+        ROOT / "src" / "localghost" / "proxy_compose.yaml",
+        LOCALGHOST_HTTP_PORT="18081",
+        LOCALGHOST_IMAGE_TAG=f"v{LOCALGHOST_VERSION}",
+        LOCALGHOST_REGISTRY_DIR=str(tmp_path),
+    )
+    traefik = model["services"]["traefik"]
+    assert (
+        "--experimental.localplugins.localghostFallback.modulename="
+        "github.com/SmileyChris/traefik-localghost-fallback" in traefik["command"]
+    )
+    labels = traefik["labels"]
+    assert labels["traefik.http.routers.localghost-fallback.priority"] == "1"
+    mounts = {
+        (volume["source"], volume["target"], not volume.get("read_only", False))
+        for volume in traefik["volumes"]
+        if volume["target"] == "/var/lib/localghost-registry"
+    }
+    assert mounts == {(str(tmp_path), "/var/lib/localghost-registry", False)}
+
+
+def test_https_proxy_adds_secure_fallback_router(tmp_path) -> None:
+    model = compose_model(
+        ROOT / "src" / "localghost" / "proxy_compose.yaml",
+        ROOT / "src" / "localghost" / "proxy_compose_https.yaml",
+        LOCALGHOST_HTTP_PORT="18081",
+        LOCALGHOST_IMAGE_TAG=f"v{LOCALGHOST_VERSION}",
+        LOCALGHOST_REGISTRY_DIR=str(tmp_path),
+    )
+    labels = model["services"]["traefik"]["labels"]
+    assert (
+        labels["traefik.http.routers.localghost-fallback-secure.entrypoints"]
+        == "websecure"
+    )
+    assert (
+        labels["traefik.http.routers.localghost-fallback-secure.rule"]
+        == "HostRegexp(`.+`)"
+    )
+    assert labels["traefik.http.routers.localghost-fallback-secure.priority"] == "1"
+    assert labels["traefik.http.routers.localghost-fallback-secure.tls"] == "true"
+    assert (
+        labels["traefik.http.routers.localghost-fallback-secure.service"]
+        == "noop@internal"
+    )
+    assert (
+        labels["traefik.http.routers.localghost-fallback-secure.middlewares"]
+        == "localghost-fallback"
+    )
+    command = model["services"]["traefik"]["command"]
+    assert (
+        "--experimental.localplugins.localghostFallback.modulename="
+        "github.com/SmileyChris/traefik-localghost-fallback" in command
+    )
+    # The CA provider reads the same registry so remembered hostnames keep
+    # certificates after their containers stop.
+    assert (
+        "--providers.plugin.localghostCA.registrypath=/var/lib/localghost-registry"
+        in command
+    )
 
 
 def test_https_proxy_adds_loopback_dashboard_with_secure_redirect() -> None:

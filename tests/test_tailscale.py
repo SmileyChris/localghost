@@ -916,7 +916,7 @@ def test_disable_notes_that_other_machines_still_trust_the_root(monkeypatch) -> 
     result = CliRunner().invoke(cli, ["tailscale", "disable"])
     assert result.exit_code == 0, result.output
     assert "still trust" in result.output
-    assert "localghost trust --remove" in result.output
+    assert "localghost trust remove" in result.output
 
 
 def test_disable_requires_enabled_state(monkeypatch) -> None:
@@ -1077,7 +1077,7 @@ def test_trust_continues_when_the_tailnet_root_is_unreachable(monkeypatch) -> No
         cli_module, "_run_proxy", lambda *args, **kwargs: ups.append(kwargs)
     )
 
-    result = CliRunner().invoke(cli, ["trust"])
+    result = CliRunner().invoke(cli, ["trust", "install"])
     assert result.exit_code == 0, result.output
     assert "Tailnet trust was not installed" in result.output
     assert ups and ups[0]["https_enabled"] is True
@@ -1101,7 +1101,7 @@ def test_remove_trust_keeps_the_hub_on_https_for_the_tailnet(monkeypatch) -> Non
         cli_module, "_run_proxy", lambda *args, **kwargs: downgrades.append(kwargs)
     )
 
-    result = CliRunner().invoke(cli, ["trust", "--remove"])
+    result = CliRunner().invoke(cli, ["trust", "remove"])
     assert result.exit_code == 0, result.output
     assert downgrades == []
     assert "tailnet" in result.output.lower()

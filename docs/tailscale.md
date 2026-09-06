@@ -147,7 +147,7 @@ Normal commands continue to own the hub:
 ```sh
 localghost tailscale status
 localghost                 # reconciles localhost and tailnet hosting
-localghost down            # stops both
+localghost hub down        # stops both
 ```
 
 A foreground `localghost run` pins both URLs to the bottom of the terminal —
@@ -175,9 +175,9 @@ localghost tailscale disable
 Disabling deliberately does not delete the offline machine record. Remove the
 tagged `localghost-<suffix>` device from the Tailscale admin console after you
 have confirmed it is the expected node. Trust installed on other clients is
-also left in place; run `localghost trust --remove` on each to revoke it.
+also left in place; run `localghost trust remove` on each to revoke it.
 
-While tailnet hosting is enabled, `localghost trust --remove` on the hosting
+While tailnet hosting is enabled, `localghost trust remove` on the hosting
 machine removes local trust but the hub keeps serving HTTPS — tailnet TLS
 terminates on Traefik — so a full downgrade needs `localghost tailscale
 disable` first.

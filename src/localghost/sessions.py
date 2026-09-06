@@ -61,7 +61,7 @@ def sessions() -> list[Session]:
             result.append(Session(**json.loads(path.read_text(encoding="utf-8"))))
         except (OSError, ValueError, TypeError) as exc:
             # Dropping the record silently would hide a still-running
-            # application from `manage list`, `stop`, and `clean`.
+            # application from `sessions list`, `stop`, and `clean`.
             unreadable.append(f"{path.name}: {exc}")
     if unreadable:
         warning("Unreadable session records", unreadable)
