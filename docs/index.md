@@ -72,3 +72,10 @@ uvx localghost trust install
 
 See [Security and trust](security.md) for certificate handling and
 [Operations](operations.md) for lifecycle, status, ports, and upgrades.
+
+## Optional tailnet hosting
+
+To make the same routes available inside a Tailscale tailnet, enable the
+opt-in tagged gateway and split DNS with `uvx localghost tailscale enable`.
+The ordinary `.localhost` routes stay local. See
+[Host on a tailnet](tailscale.md) for setup, trust, and scope.

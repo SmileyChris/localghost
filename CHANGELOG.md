@@ -37,8 +37,6 @@ uses [Semantic Versioning](https://semver.org/).
   rest) instead of ignoring them, and both `summon` and `forget` complete
   remembered project names in the shell.
 
-### Added
-
 - Added opt-in tailnet hosting with `localghost tailscale enable`, `status`,
   `trust`, and `disable`. A dedicated tagged userspace gateway, split DNS, and
   suffix-specific CA mirror every supported `.localhost` project, secondary,

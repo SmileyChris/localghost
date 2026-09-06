@@ -106,7 +106,7 @@ unrelated changes made later.
 Every client must trust this hub's development roots once:
 
 ```sh
-localghost trust
+localghost trust install
 ```
 
 When tailnet hosting is enabled, the standard trust command installs both the

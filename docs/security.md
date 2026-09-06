@@ -132,7 +132,7 @@ PATCH, so unrelated DNS mappings are untouched. Treat the saved map as
 administrative metadata, even though it contains no secret.
 
 The tailnet suffix has its own CA and signer volumes. Each participating client
-explicitly installs that public root with `localghost trust` while tailnet
+explicitly installs that public root with `localghost trust install` while tailnet
 hosting is enabled.
 This grants the development hub authority for names under that suffix on the
 client, so a suffix naming a public TLD or reserved zone (`dev`, `com`, any
