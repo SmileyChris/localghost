@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import click
+import pytest
 from click.testing import CliRunner
 
 from localghost.cli import cli
@@ -522,3 +524,44 @@ def test_bare_save_ambiguity_names_the_save_host_subcommand(monkeypatch) -> None
         assert "save host --type django" in result.output
         assert "save host --type php" in result.output
         assert "dockerfile" not in result.output.lower()
+
+
+def test_save_dockerfile_rejects_an_invalid_service_name() -> None:
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        Path("Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+        result = runner.invoke(
+            cli,
+            ["save", "dockerfile", "--no-input", "--port", "80", "--service", "-bad"],
+            env={"COMPOSE_PROJECT_NAME": "dockerfile-fixture"},
+        )
+
+        assert result.exit_code != 0
+        assert "'-bad' is not a valid service name" in result.output
+
+
+def test_save_dockerfile_refuses_to_overwrite_an_existing_compose_file() -> None:
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        Path("Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+        Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
+        result = runner.invoke(
+            cli,
+            ["save", "dockerfile", "--no-input", "--port", "80"],
+            env={"COMPOSE_PROJECT_NAME": "dockerfile-fixture"},
+        )
+
+        assert result.exit_code != 0
+        assert "refusing to overwrite existing" in result.output
+        assert Path("compose.yaml").read_text() == "services: {}\n"
+
+
+def test_save_host_rejects_the_compose_type_with_the_host_choices() -> None:
+    """`save host --type compose` is refused by Click; a direct caller asking
+    for a type outside the allowed set gets the same advice by message."""
+    from localghost.runner import discover_type
+
+    with pytest.raises(click.ClickException, match="not available here"):
+        discover_type(Path.cwd(), "compose", allowed=("django", "php"))

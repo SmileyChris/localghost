@@ -2449,3 +2449,93 @@ def test_save_subcommand_hint_names_each_project_kind() -> None:
     assert _save_subcommand_hint("compose") == "`localghost save compose`"
     assert _save_subcommand_hint("dockerfile") == "`localghost save dockerfile`"
     assert _save_subcommand_hint("vite") == "`localghost save host --type vite`"
+
+
+def test_run_with_explicit_settings_refuses_a_live_session(
+    monkeypatch, tmp_path
+) -> None:
+    from localghost.runner import RunPlan
+    from localghost.sessions import create
+
+    root = tmp_path / "app"
+    root.mkdir()
+    plan = RunPlan(
+        name="demo",
+        type="custom",
+        port=3000,
+        command=("run",),
+        project="localghost-demo",
+        bridge_yaml="services: {}\n",
+        project_root=root,
+        working_directory=root,
+    )
+    monkeypatch.setattr("localghost.cli.build_plan", lambda *args, **kwargs: plan)
+    monkeypatch.setattr(
+        "localghost.cli.execute", lambda *args, **kwargs: pytest.fail("ran")
+    )
+    create(
+        mode="host",
+        name="demo",
+        port=3000,
+        cwd=root,
+        command=("run",),
+        log=tmp_path / "demo.log",
+        pid=os.getpid(),
+    )
+
+    result = CliRunner().invoke(
+        cli, ["run", "-C", str(root), "--port", "3000", "--", "run"]
+    )
+
+    assert result.exit_code != 0
+    assert "is already running" in result.output
+
+
+def test_run_honours_compose_file_from_the_environment(monkeypatch) -> None:
+    started = []
+    monkeypatch.setattr("localghost.cli._check_compose_routing", lambda *a: None)
+    monkeypatch.setattr(
+        "localghost.cli.compose_dry_run", lambda **kwargs: started.append(kwargs)
+    )
+    monkeypatch.setattr("localghost.cli._proxy_origin", lambda name: f"http://{name}")
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli, ["run", "--dry-run"], env={"COMPOSE_FILE": "custom.yaml"}
+        )
+
+    assert result.exit_code == 0, result.output
+    assert started and started[0]["url"].startswith("http://")
+
+
+def test_remove_superseded_root_treats_a_corrupt_previous_root_as_replaced(
+    monkeypatch, tmp_path
+) -> None:
+    from localghost.cli import _remove_superseded_root
+    from localghost.trust import PublicCertificate
+
+    previous = tmp_path / "rootCA.pem"
+    previous.write_text("not a certificate", encoding="utf-8")
+    uninstalled = []
+
+    class Installer:
+        def __init__(self, path, scope=None, label=""):
+            self.label = label
+
+        def uninstall(self):
+            uninstalled.append(self.label)
+
+    monkeypatch.setattr(
+        "localghost.cli.ZenNssInstaller",
+        lambda path, scope: Installer(path, scope, label="nss"),
+    )
+    monkeypatch.setattr(
+        "localghost.cli.MkcertInstaller", lambda path: Installer(path, label="mkcert")
+    )
+    certificate = PublicCertificate.parse(
+        b"-----BEGIN CERTIFICATE-----\nMAA=\n-----END CERTIFICATE-----\n"
+    )
+
+    assert _remove_superseded_root(previous, certificate, scope="localhost") is True
+    assert uninstalled == ["nss", "mkcert"]

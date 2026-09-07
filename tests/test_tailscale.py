@@ -1627,3 +1627,27 @@ def test_gateway_health_survives_a_missing_docker(monkeypatch) -> None:
         lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError()),
     )
     assert cli_module._tailscale_gateway_health() == "unknown"
+
+
+def test_fetch_public_root_falls_back_to_the_trust_hostname(monkeypatch) -> None:
+    requests = []
+
+    def open_root(request, **kwargs):
+        requests.append(request)
+        return Response(CERTIFICATE_PEM)
+
+    monkeypatch.setattr(tailscale_module.urllib.request, "urlopen", open_root)
+
+    assert tailscale_module.fetch_public_root("tail1234") == CERTIFICATE_PEM
+    assert requests[0].full_url.startswith("http://trust.tail1234/")
+
+
+def test_create_auth_key_reraises_unexpected_api_errors(monkeypatch) -> None:
+    from localghost.tailscale import APIError
+
+    def rejected(*args, **kwargs):
+        raise APIError(500, "boom")
+
+    monkeypatch.setattr(tailscale_module, "_request", rejected)
+    with pytest.raises(APIError, match="boom"):
+        tailscale_module.API("token").create_auth_key("example.com", "tag:localghost")

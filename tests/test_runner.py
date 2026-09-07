@@ -1573,3 +1573,40 @@ def test_execute_is_quiet_when_the_port_is_free(monkeypatch):
     runner.execute(plan, lambda: None, public_origin="http://demo.localhost")
 
     assert warnings == []
+
+
+def test_find_route_collision_error_paths(monkeypatch) -> None:
+    from subprocess import CompletedProcess
+
+    from localghost.runner import find_route_collision
+
+    def failing_ps(command, **kwargs):
+        return CompletedProcess(command, 1, "", "daemon down")
+
+    monkeypatch.setattr("localghost.runner.subprocess.run", failing_ps)
+    with pytest.raises(click.ClickException, match="daemon down"):
+        find_route_collision("demo")
+
+    monkeypatch.setattr(
+        "localghost.runner.subprocess.run",
+        lambda command, **kwargs: CompletedProcess(command, 0, "", ""),
+    )
+    assert find_route_collision("demo") is None
+
+    def inspect_fails(command, **kwargs):
+        if command[:2] == ["docker", "ps"]:
+            return CompletedProcess(command, 0, "abc\n", "")
+        return CompletedProcess(command, 1, "", "")
+
+    monkeypatch.setattr("localghost.runner.subprocess.run", inspect_fails)
+    with pytest.raises(click.ClickException, match="could not inspect"):
+        find_route_collision("demo")
+
+    def inspect_garbage(command, **kwargs):
+        if command[:2] == ["docker", "ps"]:
+            return CompletedProcess(command, 0, "abc\n", "")
+        return CompletedProcess(command, 0, "not json", "")
+
+    monkeypatch.setattr("localghost.runner.subprocess.run", inspect_garbage)
+    with pytest.raises(click.ClickException, match="invalid container inspection"):
+        find_route_collision("demo")

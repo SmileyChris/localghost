@@ -311,3 +311,29 @@ def test_stop_ignores_a_process_that_disappeared(tmp_path, monkeypatch) -> None:
 
     with pytest.raises(click.ClickException, match="did not stop"):
         stop(session)
+
+
+def test_sessions_logs_follow_tails_until_the_session_exits(
+    tmp_path, monkeypatch
+) -> None:
+    log = tmp_path / "demo.log"
+    log.write_text("first line\n")
+    session = _session(tmp_path, log=log)
+    polls = iter([True, False])
+
+    def alive(_session):
+        # Append a line while the follower thinks the session is alive, so
+        # the tail loop has to pick it up before noticing the exit.
+        if next(polls):
+            with log.open("a") as handle:
+                handle.write("second line\n")
+            return True
+        return False
+
+    monkeypatch.setattr("localghost.cli.session_alive", alive)
+    monkeypatch.setattr("localghost.cli.time.sleep", lambda _seconds: None)
+
+    result = CliRunner().invoke(cli, ["sessions", "logs", session.id, "--follow"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output == "first line\nsecond line\n"
