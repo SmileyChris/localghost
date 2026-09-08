@@ -345,7 +345,10 @@ def forget(name: str | None, forget_everything: bool) -> None:
         success(f"Forgot {removed} project(s).")
         return
     if name is None:
-        raise click.UsageError("provide NAME or --all")
+        names = ", ".join(sorted(entry.name for entry in registry.entries()))
+        if not names:
+            raise click.UsageError("nothing is remembered; provide NAME or --all")
+        raise click.UsageError(f"provide NAME or --all; remembered: {names}")
     if not registry.forget(name):
         raise click.ClickException(f"no ghost page entry for '{name}'")
     success(f"Forgot {name}.")

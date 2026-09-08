@@ -103,6 +103,17 @@ def test_forget_requires_name_or_all(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
     result = CliRunner().invoke(cli, ["forget"])
     assert result.exit_code != 0
+    assert "nothing is remembered" in result.output
+
+
+def test_bare_forget_lists_the_remembered_names(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    registry.record("blog", tmp_path, "django")
+    registry.record("shop", tmp_path, "compose")
+    result = CliRunner().invoke(cli, ["forget"])
+    assert result.exit_code != 0
+    assert "blog, shop" in result.output
+    assert "--all" in result.output
 
 
 def test_project_name_completion_filters_by_prefix(tmp_path):

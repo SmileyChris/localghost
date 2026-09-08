@@ -22,6 +22,8 @@ uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `localghost forget` with no name now lists the remembered project names in
+  its usage error instead of only asking for one.
 - With tailnet hosting enabled, the hub's Traefik command dropped the ghost
   page fallback plugin and the certificate registry that the HTTPS overlay
   adds. The tailnet HTTPS overlay now carries both.
