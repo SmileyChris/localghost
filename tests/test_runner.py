@@ -1031,7 +1031,7 @@ def test_requesting_a_type_the_command_rejects_says_so(tmp_path):
         runner.discover_type(tmp_path, "dockerfile")
 
     assert "'dockerfile' cannot be run" in str(error.value)
-    assert "localghost save dockerfile --port" in str(error.value)
+    assert "localghost save --type dockerfile --port" in str(error.value)
 
 
 def test_search_path_stops_at_any_vcs_directory(tmp_path, monkeypatch):

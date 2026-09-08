@@ -104,7 +104,7 @@ def test_title_keeps_the_gap_without_a_welcome_message(monkeypatch):
 
 
 def test_title_shows_the_wordmark_only_once_per_process(monkeypatch):
-    """Commands compose -- `save host --run` re-enters `run`, which prints
+    """Commands compose -- `save --run` re-enters `run`, which prints
     a title of its own -- so the wordmark has to be a per-invocation mark
     rather than a per-command one, or a single command line prints it
     twice."""
@@ -181,3 +181,34 @@ def test_routes_are_plain_or_a_table(monkeypatch):
     monkeypatch.setattr(feedback, "_rich_terminal", lambda err: True)
     feedback.routes([("demo.localhost", "/work/demo")])
     assert len(standard.items) == 5
+
+
+class KwargsConsole:
+    def __init__(self):
+        self.calls = []
+
+    def print(self, item="", **kwargs):
+        self.calls.append((item, kwargs))
+
+
+def test_plain_blocks_never_hard_wrap(monkeypatch):
+    """Piped output must keep long paths on one line."""
+    console = KwargsConsole()
+    monkeypatch.setattr(feedback, "_rich_terminal", lambda err: False)
+    monkeypatch.setattr(feedback, "_console", lambda err: console)
+
+    feedback.run_plan(
+        type="custom",
+        command=("./server",),
+        port=8080,
+        url="http://demo.localhost",
+        dry_run=True,
+        project_root=__import__("pathlib").Path("/" + "x" * 120),
+    )
+    feedback.compose_dry_run(project="demo", url="http://demo.localhost")
+    feedback.choices("Services", [("web", "ports 8000", True)])
+    feedback.routes([("demo.localhost", "/" + "y" * 120)])
+
+    assert console.calls, "nothing printed"
+    for item, kwargs in console.calls:
+        assert kwargs.get("soft_wrap") is True, item

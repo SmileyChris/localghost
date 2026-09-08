@@ -21,7 +21,7 @@ directory; `--type` resolves ambiguity or skips detection entirely.
 
 `dockerfile` is an eighth type, but it is save-only — see
 [Saving project setup](saving-setup.md). Running a Dockerfile
-project first needs `localghost save dockerfile` to produce a
+project first needs `localghost save --type dockerfile` to produce a
 Compose file; after that the project is `compose`.
 
 Within PHP, `cakephp` and `laravel` are specializations of `php` rather than
@@ -68,7 +68,7 @@ Before starting anything, a Compose run checks that the project is actually
 wired to the hub — the `localghost` network is present, and at least one
 service carries `traefik.enable=true` on that network. A project that has not
 saved its setup is refused with an exact `localghost save` next action, rather
-than starting and printing a URL that would never route. `save compose --run`
+than starting and printing a URL that would never route. `save --run`
 runs the same check before starting, so a misconfigured save is caught
 immediately rather than deferred to the next `run`. A saved
 `type = "compose"` resolves ambiguity but never bypasses this routing check.
@@ -120,8 +120,8 @@ file.
 the same setup and then starts it:
 
 ```sh
-uvx localghost save host --port 8080 -- ./server --port 8080
-uvx localghost save host --port 8080 --run -- ./server --port 8080
+uvx localghost save --port 8080 -- ./server --port 8080
+uvx localghost save --port 8080 --run -- ./server --port 8080
 ```
 
 It refuses to overwrite an existing `.localghost.toml` unless `--extend` is

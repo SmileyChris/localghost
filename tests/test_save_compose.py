@@ -29,15 +29,14 @@ def compose_model(*paths: Path, project_name: str) -> dict:
     return json.loads(result.stdout)
 
 
-def test_saved_compose_files_resolve_correctly(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_saved_compose_files_resolve_correctly(tmp_path: Path, monkeypatch) -> None:
     runner = CliRunner()
     override = tmp_path / "compose.override.yaml"
     result = runner.invoke(
         cli,
         [
             "save",
+            "--type",
             "compose",
             "--no-input",
             "--file",
@@ -49,9 +48,7 @@ def test_saved_compose_files_resolve_correctly(
     )
 
     assert result.exit_code == 0, result.output
-    model = compose_model(
-        GENERATOR_FIXTURE, override, project_name="generator-fixture"
-    )
+    model = compose_model(GENERATOR_FIXTURE, override, project_name="generator-fixture")
     web = model["services"]["web"]
     assert set(web["networks"]) == {"application", "localghost"}
     assert web["labels"]["traefik.enable"] == "true"
@@ -59,9 +56,12 @@ def test_saved_compose_files_resolve_correctly(
     assert web["labels"]["traefik.http.routers.generator-fixture-web.rule"] == (
         "Host(`generator-fixture.localhost`)"
     )
-    assert web["labels"][
-        "traefik.http.services.generator-fixture-web.loadbalancer.server.port"
-    ] == "8000"
+    assert (
+        web["labels"][
+            "traefik.http.services.generator-fixture-web.loadbalancer.server.port"
+        ]
+        == "8000"
+    )
     assert model["networks"]["localghost"]["external"] is True
     assert "localghost" not in model["services"]["worker"]["networks"]
 
@@ -71,7 +71,7 @@ def test_saved_compose_files_resolve_correctly(
     monkeypatch.chdir(dockerfile_dir)
     result = runner.invoke(
         cli,
-        ["save", "dockerfile", "--no-input", "--port", "80"],
+        ["save", "--type", "dockerfile", "--no-input", "--port", "80"],
         env={"COMPOSE_PROJECT_NAME": "dockerfile-fixture"},
     )
     assert result.exit_code == 0, result.output
@@ -86,9 +86,12 @@ def test_saved_compose_files_resolve_correctly(
     assert app["labels"]["traefik.http.routers.dockerfile-fixture-app.rule"] == (
         "Host(`dockerfile-fixture.localhost`)"
     )
-    assert app["labels"][
-        "traefik.http.services.dockerfile-fixture-app.loadbalancer.server.port"
-    ] == "80"
+    assert (
+        app["labels"][
+            "traefik.http.services.dockerfile-fixture-app.loadbalancer.server.port"
+        ]
+        == "80"
+    )
 
     extended_override = tmp_path / "existing.override.yaml"
     fixture_override = (
@@ -99,6 +102,7 @@ def test_saved_compose_files_resolve_correctly(
         cli,
         [
             "save",
+            "--type",
             "compose",
             "--no-input",
             "--extend",
@@ -120,6 +124,7 @@ def test_saved_compose_files_resolve_correctly(
         cli,
         [
             "save",
+            "--type",
             "compose",
             "--no-input",
             "--file",
@@ -152,29 +157,12 @@ def test_save_compose_subcommand_writes_an_override(monkeypatch) -> None:
 
     with runner.isolated_filesystem():
         Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
-        result = runner.invoke(cli, ["save", "compose", "--no-input"])
+        result = runner.invoke(cli, ["save", "--type", "compose", "--no-input"])
 
         assert result.exit_code == 0, result.output
         override = Path("compose.override.yaml").read_text(encoding="utf-8")
         assert "web:" in override
         assert "loadbalancer.server.port=8000" in override
-
-
-def test_save_compose_help_lists_only_compose_options() -> None:
-    result = CliRunner().invoke(cli, ["save", "compose", "--help"])
-
-    assert result.exit_code == 0, result.output
-    assert "--file" in result.output
-    assert "--service" in result.output
-    assert "--output" in result.output
-    # Host-only options must not appear on the compose subcommand.
-    assert "--config" not in result.output
-    assert "--project-root" not in result.output
-    # --name is gone entirely: _save_compose_project derives router names
-    # from the resolved Compose model and never sees it, so
-    # `save compose --name foo` would write routers for the Compose
-    # project's own name while registering a ghost page for foo.localhost.
-    assert "--name" not in result.output
 
 
 def test_bare_save_detects_compose_from_a_subdirectory_and_writes_at_the_root(
@@ -231,7 +219,7 @@ def test_save_compose_from_a_subdirectory_writes_at_the_compose_root(
 
     result = CliRunner().invoke(
         cli,
-        ["save", "compose", "--no-input"],
+        ["save", "--type", "compose", "--no-input"],
         env={"COMPOSE_PROJECT_NAME": "nested-compose-project"},
     )
 
@@ -264,7 +252,14 @@ def test_save_compose_with_an_explicit_file_stack_stays_where_it_was_invoked(
 
     result = CliRunner().invoke(
         cli,
-        ["save", "compose", "--no-input", "--file", str(root / "compose.yaml")],
+        [
+            "save",
+            "--type",
+            "compose",
+            "--no-input",
+            "--file",
+            str(root / "compose.yaml"),
+        ],
         env={"COMPOSE_PROJECT_NAME": "explicit-stack-project"},
     )
 
@@ -290,7 +285,7 @@ def test_save_compose_pins_the_type_so_later_runs_need_no_flag(monkeypatch) -> N
     with runner.isolated_filesystem():
         Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
         Path("manage.py").touch()
-        result = runner.invoke(cli, ["save", "compose", "--no-input"])
+        result = runner.invoke(cli, ["save", "--type", "compose", "--no-input"])
 
         assert result.exit_code == 0, result.output
         assert 'type = "compose"' in Path(".localghost.toml").read_text(
@@ -313,7 +308,7 @@ def test_save_compose_continues_when_an_existing_config_refuses_the_type_pin(
         )
         result = runner.invoke(
             cli,
-            ["save", "compose", "--no-input"],
+            ["save", "--type", "compose", "--no-input"],
             env={"COMPOSE_PROJECT_NAME": "sample-project"},
         )
 
@@ -334,7 +329,7 @@ def test_save_compose_with_explicit_output_does_not_pin_the_type(monkeypatch) ->
         Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
         result = runner.invoke(
             cli,
-            ["save", "compose", "--no-input", "--output", "custom.yaml"],
+            ["save", "--type", "compose", "--no-input", "--output", "custom.yaml"],
         )
 
         assert result.exit_code == 0, result.output
@@ -374,7 +369,16 @@ def test_save_compose_run_rejects_a_nonstandard_output(monkeypatch) -> None:
     with runner.isolated_filesystem():
         Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
         result = runner.invoke(
-            cli, ["save", "compose", "--no-input", "--output", "custom.yaml", "--run"]
+            cli,
+            [
+                "save",
+                "--type",
+                "compose",
+                "--no-input",
+                "--output",
+                "custom.yaml",
+                "--run",
+            ],
         )
 
         assert result.exit_code != 0
@@ -406,20 +410,13 @@ def test_save_compose_run_starts_an_ambiguous_compose_project(
 
     result = CliRunner().invoke(
         cli,
-        ["save", "compose", "--no-input", "--run"],
+        ["save", "--type", "compose", "--no-input", "--run"],
         env={"COMPOSE_PROJECT_NAME": "ambiguous-project"},
     )
 
     assert result.exit_code == 0, result.output
     assert (tmp_path / "compose.override.yaml").exists()
     assert started, "save compose --run must start the application after saving"
-
-
-def test_bare_save_rejects_type_specific_flags() -> None:
-    result = CliRunner().invoke(cli, ["save", "--service", "web"])
-
-    assert result.exit_code != 0
-    assert "no such option" in result.output.lower()
 
 
 def test_save_compose_refuses_to_shadow_a_projects_existing_override() -> None:
@@ -435,7 +432,7 @@ def test_save_compose_refuses_to_shadow_a_projects_existing_override() -> None:
         Path("docker-compose.override.yml").write_text(
             "services:\n  web:\n    environment:\n      KEEP: me\n", encoding="utf-8"
         )
-        result = runner.invoke(cli, ["save", "compose", "--no-input"])
+        result = runner.invoke(cli, ["save", "--type", "compose", "--no-input"])
 
         assert result.exit_code != 0
         assert "compose.override.yaml" in result.output
@@ -459,7 +456,14 @@ def test_save_compose_refuses_an_output_compose_would_ignore() -> None:
         Path("compose.override.yml").write_text("services: {}\n", encoding="utf-8")
         result = runner.invoke(
             cli,
-            ["save", "compose", "--no-input", "--output", "compose.override.yaml"],
+            [
+                "save",
+                "--type",
+                "compose",
+                "--no-input",
+                "--output",
+                "compose.override.yaml",
+            ],
         )
 
         assert result.exit_code != 0
@@ -491,8 +495,13 @@ def test_save_compose_run_accepts_another_auto_loaded_override(
     result = CliRunner().invoke(
         cli,
         [
-            "save", "compose", "--no-input",
-            "--output", "docker-compose.override.yml", "--run",
+            "save",
+            "--type",
+            "compose",
+            "--no-input",
+            "--output",
+            "docker-compose.override.yml",
+            "--run",
         ],
     )
 
@@ -504,8 +513,7 @@ def test_save_compose_run_accepts_another_auto_loaded_override(
 def test_save_compose_port_error_names_a_command_that_accepts_the_flag(
     monkeypatch,
 ) -> None:
-    """Bare `save` stops at -C/--dry-run/--no-input/--run, so advising
-    "rerun with --port" sent the reader straight into "No such option"."""
+    """The hint names the whole command so it can be pasted as is."""
     model = {
         "name": "sample-project",
         "networks": {"default": {"name": "sample-project_default"}},
@@ -520,4 +528,29 @@ def test_save_compose_port_error_names_a_command_that_accepts_the_flag(
 
         assert result.exit_code != 0
         assert "no declared container ports" in result.output
-        assert "localghost save compose --port" in result.output
+        assert "localghost save --port" in result.output
+
+
+def test_save_compose_dry_run_labels_each_file_it_would_write(monkeypatch) -> None:
+    """A direct `save compose` previews two files; the reader must be able
+    to tell where the override ends and the type pin begins."""
+    monkeypatch.setattr(
+        "localghost.cli.resolve_compose", lambda files: _fake_compose_model()
+    )
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        Path("compose.yaml").write_text("services: {}\n", encoding="utf-8")
+        Path("manage.py").touch()
+        result = runner.invoke(
+            cli, ["save", "--type", "compose", "--no-input", "--dry-run"]
+        )
+
+        assert result.exit_code == 0, result.output
+        override_label = result.output.index("Would write compose.override.yaml")
+        toml_label = result.output.index("Would write .localghost.toml")
+        assert override_label < result.output.index("traefik.enable=true")
+        assert result.output.index("traefik.enable=true") < toml_label
+        assert toml_label < result.output.index('type = "compose"')
+        # File contents alone on stdout so `> file` stays usable.
+        assert "Would write" not in result.stdout

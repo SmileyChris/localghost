@@ -113,32 +113,29 @@ uses [Semantic Versioning](https://semver.org/).
   recorded in `.localghost.toml`, Compose integration is written to
   `compose.override.yaml`, and Dockerfile-only projects can be saved as a new
   `compose.yaml`.
-- `localghost save` is now a command group with one subcommand per project
-  type — `save host`, `save compose`, `save dockerfile`. Bare `save` still
-  detects the type and dispatches, but type-specific options now live on the
-  subcommand that accepts them, so `--help` is accurate for the project in
-  front of you.
+- `localghost save` takes the same `--type` as `run` — `compose`,
+  `dockerfile`, or a host framework — and detects it when omitted. Options
+  that only apply to one kind of project (`--file`, `--service`, `--output`
+  for Compose and Dockerfile; `--name`, `--config`, and a trailing command
+  for host runs) are rejected with a message naming the resolved type.
+  `--project-root` pins a Compose directory just as it does for `run`.
 - `localghost run` is now strictly read-only. `run --save` is replaced by
-  `save --run`, and `run --service` moves to `save compose --service`.
-- `save compose` has no `--name` option: a Compose project's name always
-  comes from Docker (`COMPOSE_PROJECT_NAME`, the `.env` file, or the
-  directory name), never from a flag — a `--name` there would have moved only
-  the ghost-page registry entry, leaving it pointing at a hostname no router
-  serves.
-- `save host --type` no longer accepts `compose`; use `save compose` for a
-  Compose project.
-- `save compose --run` now validates the Compose routing before starting,
-  where the removed `run --save` skipped that check.
+  `save --run`, and `run --service` moves to `save --service`.
+- `save` rejects `--name` for a Compose project: its name always comes from
+  Docker (`COMPOSE_PROJECT_NAME`, the `.env` file, or the directory name),
+  never from a flag — a `--name` there would have moved only the ghost-page
+  registry entry, leaving it pointing at a hostname no router serves.
+- `save --run` now validates the Compose routing before starting, where the
+  removed `run --save` skipped that check.
 - `--root` is renamed `--project-root` so it stops reading as a synonym of
   `--directory`.
 - Explicit `type = "compose"` run configuration now resolves type ambiguity
   without bypassing validation of the resolved Compose routing model.
-- `save compose`, named directly, now writes `type = "compose"` into
-  `.localghost.toml` as well as the override, so a Compose project that shares
-  a directory with a framework can be pinned once instead of needing
-  `run --type compose` every time. Bare `save` dispatching to the same
-  subcommand writes no pin: it only gets there when detection was already
-  unambiguous.
+- An explicit `save --type` is remembered in `.localghost.toml`, so a Compose
+  project that shares a directory with a framework can be pinned once with
+  `save --type compose` instead of needing `run --type compose` every time.
+  A detected type writes no pin: detection only succeeds when there is
+  nothing to remember.
 - A bare `localghost` now reports status instead of starting the hub. Use
   `localghost hub up`, or just `localghost run`, which starts the hub itself.
 - `localghost down` is now `localghost hub down`. The old spelling read as
@@ -152,13 +149,13 @@ uses [Semantic Versioning](https://semver.org/).
 
 - `run --project-root` now discovers `.localghost.toml` inside the explicitly
   pinned root, including when that root is below the invocation directory.
-- `save compose` no longer aborts after writing its override when an existing
+- A Compose save no longer aborts after writing its override when an existing
   `.localghost.toml` refuses the supplementary Compose type pin; it warns and
   still records the saved project.
-- `save compose --output` no longer pins `type = "compose"`: the flag names an
+- `save --output` no longer pins `type = "compose"`: the flag names an
   output file rather than a project root, so there is no root the pin can be
   sure of.
-- `save compose` now refuses to write an override that Docker Compose would
+- A Compose save now refuses to write an override that Docker Compose would
   ignore, or one that would silence the override a project already uses.
   Compose merges only the first override name it finds — `compose.override.yml`,
   then `compose.override.yaml`, then `docker-compose.override.yml`, then
@@ -172,19 +169,28 @@ uses [Semantic Versioning](https://semver.org/).
 - `--extend` no longer rewraps long lines in services it does not touch. The
   refolded text parsed back to the same value, but it filled the diff under
   review with churn and trailing whitespace.
-- The error raised when a service's port cannot be guessed now names
-  `localghost save compose --port`, rather than a bare `--port` that the bare
-  `save` it is usually read from does not accept.
+- The error raised when a service's port cannot be guessed now names the
+  whole `localghost save --port` command so it can be pasted as is.
+- `--dry-run` now labels each file it would write on stderr, so a save that
+  previews two files (a Compose override and its type pin) reads as two
+  files. File contents alone still go to stdout.
+- Plain (piped) output no longer hard-wraps long paths at 80 columns.
+- The foreground `run` banner no longer mentions terminal-multiplexer keys;
+  it says to press Ctrl+C.
+- `localghost status` suggests `localghost run` when the hub is stopped or
+  serving no routes.
+- An unconfigured Compose project's error now names `localghost save --run`
+  as the single next step.
+- `run --detach` on a Compose stack that is already detached now points at
+  the live session instead of recording a second one for the same
+  containers, where stopping either record took the whole stack down. Both
+  branches now also name the `sessions stop` command.
 
 ### Removed
 
 - `run --save`, `run --service`, and the deprecated `--framework` alias.
 - The `localghost generate` command; use `localghost save`.
 - The `--root` spelling; use `--project-root`.
-- Bare `localghost save` no longer accepts `--type`, `--file`, `--service`,
-  `--output`, `--name`, `--config`, or `--project-root`. Each now lives on the
-  `save host`, `save compose`, or `save dockerfile` subcommand that actually
-  accepts it, which is what makes `save --help` truthful per project type.
 - `localghost --status`, `trust --status`, and `trust --remove`.
 - Top-level `localghost down`; use `localghost hub down`.
 - The `localghost manage` group; use `localghost sessions`. Its `attach`

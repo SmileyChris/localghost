@@ -23,11 +23,10 @@ def title(*, welcome: bool = False) -> None:
     """Show the Localghost wordmark in interactive terminals, once.
 
     The wordmark is a per-invocation brand mark, not a per-command one, and
-    commands compose: `save host --run` re-enters `run`, `save compose
-    --run` re-enters `_run_compose`, and each of those prints a title of
-    its own. Guarding here, rather than threading a suppression flag
-    through three subcommands, keeps the mark at the top of the output and
-    closes every future double print for free.
+    commands compose: `save --run` re-enters `run`, which prints a title
+    of its own. Guarding here, rather than threading a suppression flag
+    through every branch of `save`, keeps the mark at the top of the
+    output and closes every future double print for free.
     """
     global _wordmark_shown
     if _wordmark_shown or not _rich_terminal(False):
@@ -126,7 +125,7 @@ def choices(title: str, items: Iterable[tuple[str, str, bool]]) -> None:
     for name, description, is_likely in entries:
         marker = " (likely)" if is_likely else ""
         lines.append(f"  {name}: {description}{marker}")
-    console.print("\n".join(lines))
+    console.print("\n".join(lines), soft_wrap=True)
 
 
 def info(message: str, *, err: bool = False) -> None:
@@ -158,7 +157,7 @@ def _labeled_block(rows: list[tuple[str, str]], *, title: str, err: bool) -> Non
         _console(err).print(Panel(table, title=title, border_style=MINT))
         return
     lines = [f"{title}:", *(f"  {label}: {value}" for label, value in rows)]
-    _console(err).print("\n".join(lines))
+    _console(err).print("\n".join(lines), soft_wrap=True)
 
 
 def run_plan(
@@ -221,7 +220,7 @@ def routes(items: Iterable[tuple[str, str]]) -> None:
         console.print()
         return
     lines = ["Active routes:", *(f"  {host}: {location}" for host, location in entries)]
-    _console(False).print("\n".join(lines))
+    _console(False).print("\n".join(lines), soft_wrap=True)
 
 
 def _message(message: str, color: str, *, err: bool, symbol: str = "•") -> None:

@@ -22,7 +22,7 @@ the application's `.localhost` URL. An unconfigured Compose project tells you
 to save its routing setup and continue with:
 
 ```sh
-uvx localghost save compose --run
+uvx localghost save --run
 ```
 
 ## Run, save, or do both
@@ -46,9 +46,8 @@ The three forms share the same detection and planning:
 - `localghost save` resolves and persists; and
 - `localghost save --run` persists and then executes.
 
-`save` is a command group — `save host`, `save compose`, and `save dockerfile`
-carry the options specific to each project type, and bare `save` still
-detects the type and dispatches to the right one.
+`save` takes the same `--type` as `run`. Detection fills it in when omitted;
+an explicit `--type` is remembered so later runs need no flag.
 
 The project type is auto-detected, searching upward to the nearest project
 root. `--detach` runs the application in the background and

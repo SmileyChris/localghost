@@ -51,13 +51,13 @@ visible while the application runs. Press Ctrl+C to stop the application.
 An unconfigured Compose project asks you to save its routing setup first:
 
 ```sh
-uvx localghost save compose --run
+uvx localghost save --run
 ```
 
 Save a custom command the same way:
 
 ```sh
-uvx localghost save host --port 8080 --run -- ./server --port 8080
+uvx localghost save --port 8080 --run -- ./server --port 8080
 ```
 
 Use `save` when you want to persist setup without starting anything:
