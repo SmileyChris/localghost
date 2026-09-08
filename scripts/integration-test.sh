@@ -342,7 +342,7 @@ cp "${ROOT_DIR}/tests/fixtures/dockerfile-app/Dockerfile" \
   cd "${DOCKERFILE_DIR}"
   COMPOSE_PROJECT_NAME="${DOCKERFILE_PROJECT}" \
     uv run --frozen --project "${ROOT_DIR}" localghost save \
-    dockerfile --no-input --port 80
+    --type dockerfile --no-input --port 80
 )
 dockerfile_app up -d --build
 dockerfile_app_id=$(dockerfile_app ps -q app)
