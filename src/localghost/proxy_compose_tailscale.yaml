@@ -1,10 +1,14 @@
+# Applied whenever tailnet hosting is enabled. On its own the gateway answers
+# *.${suffix} over plain HTTP inside the WireGuard tunnel; the
+# proxy_compose_tailscale_https.yaml overlay adds the tailnet authority for
+# private suffixes.
 services:
-  bootstrap:
-    volumes:
-      - localghost-tailnet-ca-root:/var/lib/localghost-tailnet-root
-      - localghost-tailnet-ca-signer:/var/lib/localghost-tailnet-ca
-
   traefik:
+    # Compose replaces `command` outright, so this list repeats the HTTPS
+    # overlay's command in full and adds the tailnet provider. Both CA
+    # providers take their mode from the CLI: `http` mirrors routers without
+    # a signer, so the localhost provider is a no-op on an HTTP-only hub and
+    # the tailnet provider never mints certificates for a public suffix.
     command:
       - --api.dashboard=true
       - --api.insecure=false
@@ -23,6 +27,8 @@ services:
       - --providers.plugin.localghostCA.domainsuffix=localhost
       - --providers.plugin.localghostCA.leaflifetime=24h
       - --providers.plugin.localghostCA.renewbefore=6h
+      - --providers.plugin.localghostCA.registrypath=/var/lib/localghost-registry
+      - --providers.plugin.localghostCA.mode=${LOCALGHOST_LOCALHOST_CA_MODE:-tls}
       - --providers.plugin.localghostTailnetCA.dockerendpoint=unix:///var/run/docker.sock
       - --providers.plugin.localghostTailnetCA.network=localghost
       - --providers.plugin.localghostTailnetCA.storagepath=/var/lib/localghost-tailnet-ca
@@ -30,11 +36,11 @@ services:
       - --providers.plugin.localghostTailnetCA.domainsuffix=${LOCALGHOST_TAILSCALE_SUFFIX:?set LOCALGHOST_TAILSCALE_SUFFIX}
       - --providers.plugin.localghostTailnetCA.leaflifetime=24h
       - --providers.plugin.localghostTailnetCA.renewbefore=6h
+      - --providers.plugin.localghostTailnetCA.mode=${LOCALGHOST_TAILNET_CA_MODE:-tls}
       - --experimental.abortonpluginfailure=true
       - --experimental.localplugins.localghostCA.modulename=github.com/SmileyChris/traefik-localghost-ca
       - --experimental.localplugins.localghostTailnetCA.modulename=github.com/SmileyChris/traefik-localghost-tailnet-ca
-    volumes:
-      - localghost-tailnet-ca-signer:/var/lib/localghost-tailnet-ca
+      - --experimental.localplugins.localghostFallback.modulename=github.com/SmileyChris/traefik-localghost-fallback
 
   tailscale-gateway:
     build:
@@ -51,9 +57,7 @@ services:
       - --suffix=${LOCALGHOST_TAILSCALE_SUFFIX:?LOCALGHOST_TAILSCALE_SUFFIX is required}
       - --hostname=localghost-${LOCALGHOST_TAILSCALE_SUFFIX}
       - --state-dir=/var/lib/localghost-tailscale
-      - --root-ca=/var/lib/localghost-root/rootCA.pem
       - --http-target=traefik:80
-      - --https-target=traefik:443
     healthcheck:
       # The health listener starts only after the tsnet node is enrolled and
       # every tailnet listener is up, so healthy means reachable, not merely
@@ -66,10 +70,6 @@ services:
       start_period: 90s
     volumes:
       - localghost-tailscale-state:/var/lib/localghost-tailscale
-      # The signer volume contains only the exported public root plus the
-      # constrained online signer. The offline root volume must never be
-      # mounted into this network-facing service.
-      - localghost-tailnet-ca-signer:/var/lib/localghost-root:ro
     networks:
       - localghost
     depends_on:
@@ -79,7 +79,3 @@ services:
 volumes:
   localghost-tailscale-state:
     name: localghost-tailscale-state-${LOCALGHOST_TAILSCALE_SUFFIX}
-  localghost-tailnet-ca-root:
-    name: localghost-tailnet-ca-root-v2-${LOCALGHOST_TAILSCALE_SUFFIX}
-  localghost-tailnet-ca-signer:
-    name: localghost-tailnet-ca-signer-v2-${LOCALGHOST_TAILSCALE_SUFFIX}

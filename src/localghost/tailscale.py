@@ -50,6 +50,16 @@ class TailscaleState:
     previous_split_dns: dict[str, list[str]]
     tag: str = "tag:localghost"
 
+    @property
+    def https(self) -> bool:
+        """Whether the tailnet routes terminate TLS.
+
+        A root name-constrained to a public suffix could still sign leaves for
+        real websites, so such suffixes never get a tailnet authority and the
+        gateway serves plain HTTP inside the WireGuard tunnel instead.
+        """
+        return not suffix_is_public(self.suffix)
+
 
 def state_path() -> Path:
     return state_directory() / "tailscale.json"
@@ -134,7 +144,7 @@ _SUFFIX_LIMIT = 63 - len("localghost-")
 # remaining way to mint a root for real websites is choosing a real TLD as
 # the suffix. Every ccTLD is exactly two letters, and this best-effort list
 # covers the reserved names and common gTLDs; MagicDNS labels like tail1234
-# are unaffected.
+# are unaffected. Such suffixes still route, but over HTTP only.
 _PUBLIC_OR_RESERVED = frozenset(
     "localhost local internal home corp lan mail arpa onion test example "  # noqa: SIM905
     "invalid alt zip mov "
@@ -147,21 +157,28 @@ _PUBLIC_OR_RESERVED = frozenset(
 )
 
 
+def suffix_is_public(value: str) -> bool:
+    """Whether the suffix is (or plausibly is) a public or reserved DNS name."""
+    value = value.removesuffix(".").lower()
+    return len(value) == 2 or value in _PUBLIC_OR_RESERVED
+
+
 def validate_suffix(value: str) -> str:
     value = value.removesuffix(".").lower()
     if not _SUFFIX.fullmatch(value):
         raise ValueError("suffix must be one DNS label (for example, tail1234)")
-    if len(value) == 2 or value in _PUBLIC_OR_RESERVED:
-        raise ValueError(
-            f"suffix .{value} is a public or reserved DNS name; a root "
-            "scoped to it could impersonate real websites — choose a "
-            "private label such as tail1234"
-        )
     if len(value) > _SUFFIX_LIMIT:
         raise ValueError(
             f"suffix must be at most {_SUFFIX_LIMIT} characters so the "
             f"localghost-{{suffix}} gateway hostname stays one DNS label"
         )
+    return value
+
+
+def _private_suffix(value: str) -> str:
+    value = validate_suffix(value)
+    if suffix_is_public(value):
+        raise ValueError(f"suffix .{value} is a public or reserved DNS name")
     return value
 
 
@@ -171,7 +188,8 @@ def detect_suffix() -> str:
     An explicit one-label search domain wins, then the tailnet's own MagicDNS
     label (``taildc3ac3`` for ``taildc3ac3.ts.net``), which is stable and
     collides with no device's short name. This machine's own hostname is the
-    last resort.
+    last resort. Public or reserved labels are skipped: they would silently
+    downgrade the tailnet routes to HTTP, so they must be chosen explicitly.
     """
     try:
         result = subprocess.run(
@@ -193,18 +211,14 @@ def detect_suffix() -> str:
         for candidate in candidates:
             candidate = str(candidate).removesuffix(".")
             if "." not in candidate:
-                try:
-                    return validate_suffix(candidate)
-                except ValueError:
-                    pass
+                with suppress(ValueError):
+                    return _private_suffix(candidate)
         tailnet = payload.get("CurrentTailnet") or {}
         for name in (tailnet.get("MagicDNSSuffix"), tailnet.get("SelfDNSName")):
             if not name:
                 continue
-            try:
-                return validate_suffix(str(name).split(".", 1)[0])
-            except ValueError:
-                pass
+            with suppress(ValueError):
+                return _private_suffix(str(name).split(".", 1)[0])
     raise TailscaleError("could not detect a short tailnet suffix; pass --suffix")
 
 

@@ -46,14 +46,22 @@ type configuration struct {
 	bootstrap   bool
 }
 
+// servesHTTPS reports whether the gateway fronts a TLS-terminating Traefik.
+// Without a root there is no tailnet authority to trust, so the trust host
+// and the 443 proxy stay off and *.suffix answers over plain HTTP inside the
+// WireGuard tunnel.
+func (cfg configuration) servesHTTPS() bool {
+	return cfg.rootCA != ""
+}
+
 func main() {
 	var cfg configuration
 	flag.StringVar(&cfg.suffix, "suffix", "", "private DNS suffix")
 	flag.StringVar(&cfg.hostname, "hostname", "", "tailnet node hostname")
 	flag.StringVar(&cfg.stateDir, "state-dir", "/var/lib/localghost-tailscale", "tsnet state directory")
-	flag.StringVar(&cfg.rootCA, "root-ca", "/var/lib/localghost-root/rootCA.pem", "public root certificate")
+	flag.StringVar(&cfg.rootCA, "root-ca", "", "public root certificate; empty serves HTTP only")
 	flag.StringVar(&cfg.httpTarget, "http-target", "traefik:80", "HTTP proxy target")
-	flag.StringVar(&cfg.httpsTarget, "https-target", "traefik:443", "HTTPS TCP target")
+	flag.StringVar(&cfg.httpsTarget, "https-target", "", "HTTPS TCP target; required with --root-ca")
 	flag.BoolVar(&cfg.bootstrap, "bootstrap", false, "enroll from an auth key on stdin, then exit")
 	healthProbe := flag.Bool("health-probe", false, "check the running gateway's health listener, then exit")
 	flag.Parse()
@@ -122,9 +130,12 @@ func validateConfiguration(cfg configuration) error {
 	if len(cfg.hostname) > 63 {
 		return fmt.Errorf("hostname %q exceeds 63 characters", cfg.hostname)
 	}
-	for name, target := range map[string]string{"HTTP": cfg.httpTarget, "HTTPS": cfg.httpsTarget} {
-		if _, _, err := net.SplitHostPort(target); err != nil {
-			return fmt.Errorf("invalid %s target: %w", name, err)
+	if _, _, err := net.SplitHostPort(cfg.httpTarget); err != nil {
+		return fmt.Errorf("invalid HTTP target: %w", err)
+	}
+	if cfg.servesHTTPS() {
+		if _, _, err := net.SplitHostPort(cfg.httpsTarget); err != nil {
+			return fmt.Errorf("invalid HTTPS target: %w", err)
 		}
 	}
 	return nil
@@ -147,12 +158,14 @@ func run(ctx context.Context, cfg configuration) error {
 	if !ip4.IsValid() {
 		return errors.New("tsnet did not receive an IPv4 address")
 	}
-	log.Printf("tailnet gateway ready hostname=%s IPv4=%s IPv6=%s suffix=%s", cfg.hostname, ip4, ip6, cfg.suffix)
+	log.Printf("tailnet gateway ready hostname=%s IPv4=%s IPv6=%s suffix=%s https=%t", cfg.hostname, ip4, ip6, cfg.suffix, cfg.servesHTTPS())
 
 	errCh := make(chan error, 6)
 	startDNS(ctx, server, cfg.suffix, ip4, ip6, errCh)
 	startHTTP(ctx, server, cfg, errCh)
-	startTCPProxy(ctx, server, ":443", cfg.httpsTarget, errCh)
+	if cfg.servesHTTPS() {
+		startTCPProxy(ctx, server, ":443", cfg.httpsTarget, errCh)
+	}
 	startHealth(ctx, errCh)
 
 	select {
@@ -355,6 +368,9 @@ func startHTTP(ctx context.Context, server *tsnet.Server, cfg configuration, err
 // machine-readable root, and a help page carrying the pinned trust command.
 // Other hosts belong to the reverse proxy.
 func serveTrust(w http.ResponseWriter, request *http.Request, cfg configuration) bool {
+	if !cfg.servesHTTPS() {
+		return false
+	}
 	host := request.Host
 	if parsed, _, err := net.SplitHostPort(host); err == nil {
 		host = parsed

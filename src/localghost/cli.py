@@ -113,6 +113,9 @@ from .tailscale import (
     store_credential as store_tailscale_credential,
 )
 from .tailscale import (
+    suffix_is_public as tailscale_suffix_is_public,
+)
+from .tailscale import (
     validate_suffix as validate_tailscale_suffix,
 )
 from .trust import MkcertInstaller, PublicCertificate, TrustError, ZenNssInstaller
@@ -293,6 +296,10 @@ def hub_up(rebuild: bool) -> None:
     first_launch = not _managed_image_is_available()
     title(welcome=first_launch)
     https_enabled = _ensure_https_or_warn() or _tailnet_forces_https()
+    with suppress(TailscaleError):
+        tailnet = load_tailscale_state()
+        if tailnet is not None and not tailnet.https:
+            _public_suffix_notice(tailnet.suffix)
     _run_proxy(
         "up",
         already_running=was_running,
@@ -578,7 +585,7 @@ def trust_install() -> None:
     info("Preparing HTTPS trust…")
     _enable_https()
     tailnet = load_tailscale_state()
-    if tailnet is not None:
+    if tailnet is not None and tailnet.https:
         # An unreachable gateway must not strand the localhost half of trust
         # or skip the hub reconcile below.
         try:
@@ -675,7 +682,9 @@ def _trust_status() -> None:
             ("Managed stores", "system,nss; Zen profiles when present"),
         ]
     tailnet = load_tailscale_state()
-    if tailnet is not None:
+    if tailnet is not None and not tailnet.https:
+        rows.append((f"Tailnet .{tailnet.suffix}", "HTTP only (public DNS name)"))
+    elif tailnet is not None:
         tailnet_path = _tailnet_root_path(tailnet.suffix)
         tailnet_state = "not installed"
         if tailnet_path.exists():
@@ -717,6 +726,10 @@ def _tailscale_status() -> None:
             ("Tailnet hosting", "enabled"),
             ("Tailnet", state.tailnet),
             ("Route suffix", f".{state.suffix}"),
+            (
+                "Tailnet HTTPS",
+                "enabled" if state.https else "HTTP only (public DNS name)",
+            ),
             ("Gateway", ", ".join(state.gateway_ips)),
             ("Gateway health", _tailscale_gateway_health()),
             ("Device tag", state.tag),
@@ -729,7 +742,7 @@ def _tailscale_status() -> None:
         title="Tailscale status",
     )
     root_path = _tailnet_root_path(state.suffix)
-    if root_path.is_file():
+    if state.https and root_path.is_file():
         with suppress(TrustError):
             certificate = PublicCertificate.parse(root_path.read_bytes())
             action(
@@ -867,15 +880,19 @@ def tailscale_enable(
         chosen_suffix = validate_tailscale_suffix(
             suffix or detect_tailscale_suffix()
         )
+        https = not tailscale_suffix_is_public(chosen_suffix)
         details(
             [
                 ("Tailnet", "credential's own tailnet" if tailnet == "-" else tailnet),
                 ("Route suffix", f".{chosen_suffix}"),
+                ("Tailnet HTTPS", "enabled" if https else "HTTP only"),
                 ("Gateway", f"localghost-{chosen_suffix}"),
                 ("Device tag", tag),
             ],
             title="Tailnet hosting",
         )
+        if not https:
+            _public_suffix_notice(chosen_suffix)
         info("Authenticating with the Tailscale API…")
         api = TailscaleAPI.authenticate(client_id, client_secret)
         info("Reading the existing split-DNS configuration…")
@@ -888,15 +905,18 @@ def tailscale_enable(
                 "suffix. Choose a different --suffix, or pass --takeover to "
                 "replace the mapping."
             )
-        # Tailnet TLS terminates on Traefik's websecure entrypoint. Bootstrap
-        # its localhost signer as well, but do not install localhost trust as
-        # an implicit side effect of enabling a remote route.
-        info("Preparing the localhost and tailnet HTTPS authorities…")
-        _bootstrap_public_root()
-        certificate = _bootstrap_tailnet_root(chosen_suffix)
-        # Keep the tailnet root beside the state so `tailscale status` can
-        # repeat the share command without a running gateway.
-        _write_public_root(_tailnet_root_path(chosen_suffix), certificate.pem)
+        certificate: PublicCertificate | None = None
+        if https:
+            # Tailnet TLS terminates on Traefik's websecure entrypoint.
+            # Bootstrap its localhost signer as well, but do not install
+            # localhost trust as an implicit side effect of enabling a remote
+            # route.
+            info("Preparing the localhost and tailnet HTTPS authorities…")
+            _bootstrap_public_root()
+            certificate = _bootstrap_tailnet_root(chosen_suffix)
+            # Keep the tailnet root beside the state so `tailscale status` can
+            # repeat the share command without a running gateway.
+            _write_public_root(_tailnet_root_path(chosen_suffix), certificate.pem)
         # The auth key lives ten minutes; the first gateway image build can
         # take longer, so build before minting the key rather than after.
         info("Preparing the gateway image…")
@@ -917,7 +937,9 @@ def tailscale_enable(
             info(f"Routing *.{chosen_suffix} DNS to the gateway…")
             api.update_split_dns(tailnet, {chosen_suffix: list(gateway_ips)})
             info("Starting the mirrored localhost and tailnet routes…")
-            _run_proxy("up", https_enabled=True, force_recreate=True)
+            _run_proxy(
+                "up", https_enabled=https or localhost_trusted, force_recreate=True
+            )
         except Exception:
             _rollback_enable(api, tailnet, chosen_suffix, previous)
             raise
@@ -928,7 +950,9 @@ def tailscale_enable(
             "The OAuth credential was not stored",
             ["no usable system keyring; disable will ask for the credential again"],
         )
-    success(f"Tailnet routes are enabled at https://<project>.{chosen_suffix}.")
+    success(f"Tailnet routes are enabled at {_tailnet_url(state, '<project>')}.")
+    if certificate is None:
+        return
     action(
         "Trust on other tailnet machines",
         _share_command(chosen_suffix, certificate),
@@ -1028,6 +1052,11 @@ def tailscale_trust(suffix: str | None, fingerprint: str | None) -> None:
         state = load_tailscale_state()
         if state is None:
             raise click.ClickException("tailnet hosting is not enabled")
+        if not state.https:
+            raise click.ClickException(
+                f"tailnet routes for .{state.suffix} are HTTP only, so there "
+                "is no root to trust"
+            )
         suffix = state.suffix
     _install_tailnet_trust(suffix, expected_fingerprint=fingerprint)
 
@@ -1601,10 +1630,12 @@ def _reclaim_route(container_id: str, name: str) -> None:
 
 
 def _tailnet_forces_https() -> bool:
-    """The hub serves HTTPS whenever tailnet hosting is enabled, even after
-    local trust is removed, because tailnet TLS terminates on Traefik."""
+    """The hub serves HTTPS whenever a private-suffix tailnet is enabled, even
+    after local trust is removed, because tailnet TLS terminates on Traefik.
+    A public suffix serves HTTP only and leaves the localhost side alone."""
     with suppress(TailscaleError):
-        return load_tailscale_state() is not None
+        state = load_tailscale_state()
+        return state is not None and state.https
     return False
 
 
@@ -1624,7 +1655,7 @@ def _report_tailnet_origin(hostname: str, *, err: bool = False) -> None:
         warning("Tailnet URL unavailable", [str(exc)])
         return
     if state is not None:
-        info(f"Tailnet URL: https://{hostname}.{state.suffix}", err=err)
+        info(f"Tailnet URL: {_tailnet_url(state, hostname)}", err=err)
 
 
 def _tailnet_origin(hostname: str) -> str | None:
@@ -1632,8 +1663,25 @@ def _tailnet_origin(hostname: str) -> str | None:
     with suppress(TailscaleError):
         state = load_tailscale_state()
         if state is not None:
-            return f"https://{hostname}.{state.suffix}"
+            return _tailnet_url(state, hostname)
     return None
+
+
+def _tailnet_url(state: TailscaleState, hostname: str) -> str:
+    scheme = "https" if state.https else "http"
+    return f"{scheme}://{hostname}.{state.suffix}"
+
+
+def _public_suffix_notice(suffix: str) -> None:
+    """Explain once per command why a public suffix routes without TLS."""
+    warning(
+        f"Tailnet routes for .{suffix} are HTTP only",
+        [
+            f".{suffix} is a public or reserved DNS name, so no root is minted "
+            "for it; the tailnet still encrypts traffic, and a private label "
+            "such as tail1234 would get trusted HTTPS"
+        ],
+    )
 
 
 def _run_proxy(
@@ -1654,7 +1702,7 @@ def _run_proxy(
             raise click.ClickException(str(exc)) from exc
         warning("Ignoring unreadable tailnet state for teardown", [str(exc)])
         tailscale_state = None
-    if tailscale_state is not None:
+    if tailscale_state is not None and tailscale_state.https:
         https_enabled = True
     with _proxy_resource_directory() as resource_root:
         compose_file = resource_root / "proxy_compose.yaml"
@@ -1674,6 +1722,11 @@ def _run_proxy(
                 "--file",
                 str(resource_root / "proxy_compose_tailscale.yaml"),
             ]
+            if tailscale_state.https:
+                insertion += [
+                    "--file",
+                    str(resource_root / "proxy_compose_tailscale_https.yaml"),
+                ]
             command[8:8] = insertion
         if action == "down":
             # `bootstrap` sits behind a profile, so a plain `down` leaves its
@@ -1708,6 +1761,14 @@ def _run_proxy(
             environment["LOCALGHOST_IMAGE_TAG"] = f"v{LOCALGHOST_VERSION}"
             if tailscale_state is not None:
                 environment["LOCALGHOST_TAILSCALE_SUFFIX"] = tailscale_state.suffix
+                # The tailnet overlay owns Traefik's command, so it also has
+                # to be told which CA providers have a signer to run with.
+                environment["LOCALGHOST_LOCALHOST_CA_MODE"] = (
+                    "tls" if https_enabled else "http"
+                )
+                environment["LOCALGHOST_TAILNET_CA_MODE"] = (
+                    "tls" if tailscale_state.https else "http"
+                )
             try:
                 registry.registry_dir().mkdir(parents=True, exist_ok=True)
             except OSError as exc:
@@ -1773,7 +1834,7 @@ def _repair_authorities(tailscale_state: TailscaleState | None) -> bool:
     info("Hub start failed; repairing the certificate authorities…")
     try:
         _bootstrap_public_root()
-        if tailscale_state is not None:
+        if tailscale_state is not None and tailscale_state.https:
             _bootstrap_tailnet_root(tailscale_state.suffix)
     except (TailscaleError, click.ClickException):
         return False
@@ -1786,6 +1847,7 @@ def _bootstrap_tailnet_root(suffix: str) -> PublicCertificate:
             resource_root / "proxy_compose.yaml",
             resource_root / "proxy_compose_https.yaml",
             resource_root / "proxy_compose_tailscale.yaml",
+            resource_root / "proxy_compose_tailscale_https.yaml",
         ]
         # Build progress goes to stdout, which must carry only the public root.
         command = [

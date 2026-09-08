@@ -136,9 +136,11 @@ explicitly installs that public root with `localghost trust install` while tailn
 hosting is enabled.
 This grants the development hub authority for names under that suffix on the
 client, so a suffix naming a public TLD or reserved zone (`dev`, `com`, any
-two-letter country code, `internal`, …) is refused at validation — a root
-scoped to a real TLD could impersonate real websites on every client — and it
-should not double as a general organizational DNS suffix either.
+two-letter country code, `internal`, …) never gets a tailnet authority — a
+root scoped to a real TLD could impersonate real websites on every client.
+Such a suffix routes over plain HTTP inside the tailnet instead, with nothing
+to trust. A private suffix should not double as a general organizational DNS
+suffix either.
 
 A tailnet root is itself name-constrained to its suffix, not only the online
 signer beneath it, so the anchor a colleague installs cannot vouch for any

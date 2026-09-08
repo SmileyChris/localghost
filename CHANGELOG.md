@@ -3,6 +3,29 @@
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- A tailnet suffix that names a public TLD or reserved zone (`work`, `dev`,
+  two-letter country codes, …) is no longer refused. It routes over HTTP only:
+  no tailnet root is minted for it, the gateway skips the `trust.<suffix>`
+  page and the 443 proxy, and `enable`, `hub up` and `tailscale status` say
+  so. State saved by earlier releases with such a suffix loads again instead
+  of blocking `hub up` and `tailscale disable`. Suffix detection never picks
+  a public label; pass one with `--suffix` deliberately.
+- The bundled CA provider plugin gained a `mode` option: `http` mirrors
+  routers onto its suffix without a signer and publishes no certificates.
+  The tailnet Traefik command now selects each provider's mode from the
+  `LOCALGHOST_LOCALHOST_CA_MODE` and `LOCALGHOST_TAILNET_CA_MODE` variables,
+  so one command covers every combination of localhost and tailnet HTTPS.
+
+### Fixed
+
+- With tailnet hosting enabled, the hub's Traefik command dropped the ghost
+  page fallback plugin and the certificate registry that the HTTPS overlay
+  adds. The tailnet HTTPS overlay now carries both.
+
 ## [3.0.0] - 2026-09-08
 
 ### Added

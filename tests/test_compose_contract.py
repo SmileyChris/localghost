@@ -313,8 +313,11 @@ def test_tailscale_overlay_adds_unpublished_gateway_and_suffix_provider() -> Non
         ROOT / "src" / "localghost" / "proxy_compose.yaml",
         ROOT / "src" / "localghost" / "proxy_compose_https.yaml",
         ROOT / "src" / "localghost" / "proxy_compose_tailscale.yaml",
+        ROOT / "src" / "localghost" / "proxy_compose_tailscale_https.yaml",
         LOCALGHOST_IMAGE_TAG="test",
         LOCALGHOST_TAILSCALE_SUFFIX="tail1234",
+        LOCALGHOST_LOCALHOST_CA_MODE="tls",
+        LOCALGHOST_TAILNET_CA_MODE="tls",
     )
 
     gateway = model["services"]["tailscale-gateway"]
@@ -354,10 +357,65 @@ def test_tailscale_overlay_adds_unpublished_gateway_and_suffix_provider() -> Non
     command = set(model["services"]["traefik"]["command"])
     assert "--providers.plugin.localghostCA.domainsuffix=localhost" in command
     assert "--providers.plugin.localghostTailnetCA.domainsuffix=tail1234" in command
+    assert "--providers.plugin.localghostTailnetCA.mode=tls" in command
+    assert "--providers.plugin.localghostCA.mode=tls" in command
     assert (
         "--experimental.localplugins.localghostTailnetCA.modulename="
         "github.com/SmileyChris/traefik-localghost-tailnet-ca"
     ) in command
+    # The overlay replaces the whole Traefik command, so it must carry the
+    # ghost-page pieces the HTTPS overlay adds or the fallback middleware
+    # references a plugin that was never loaded.
+    assert (
+        "--providers.plugin.localghostCA.registrypath=/var/lib/localghost-registry"
+    ) in command
+    assert (
+        "--experimental.localplugins.localghostFallback.modulename="
+        "github.com/SmileyChris/traefik-localghost-fallback"
+    ) in command
+
+
+def test_public_suffix_tailscale_overlay_serves_http_only() -> None:
+    model = compose_model(
+        ROOT / "src" / "localghost" / "proxy_compose.yaml",
+        ROOT / "src" / "localghost" / "proxy_compose_tailscale.yaml",
+        LOCALGHOST_IMAGE_TAG="test",
+        LOCALGHOST_TAILSCALE_SUFFIX="work",
+        LOCALGHOST_LOCALHOST_CA_MODE="http",
+        LOCALGHOST_TAILNET_CA_MODE="http",
+    )
+
+    gateway = model["services"]["tailscale-gateway"]
+    assert gateway["command"] == [
+        "--suffix=work",
+        "--hostname=localghost-work",
+        "--state-dir=/var/lib/localghost-tailscale",
+        "--http-target=traefik:80",
+    ]
+    assert all(
+        mount["target"] != "/var/lib/localghost-root" for mount in gateway["volumes"]
+    )
+    assert model["volumes"]["localghost-tailscale-state"]["name"] == (
+        "localghost-tailscale-state-work"
+    )
+    assert "localghost-tailnet-ca-signer" not in model["volumes"]
+    assert "localghost-tailnet-ca-root" not in model["volumes"]
+    assert "bootstrap" not in model["services"]
+
+    # Routers are still mirrored onto .work by the tailnet provider, but both
+    # providers run without a signer: no certificates, nothing to trust.
+    command = set(model["services"]["traefik"]["command"])
+    assert "--providers.plugin.localghostTailnetCA.domainsuffix=work" in command
+    assert "--providers.plugin.localghostTailnetCA.mode=http" in command
+    assert "--providers.plugin.localghostCA.mode=http" in command
+    assert (
+        "--experimental.localplugins.localghostFallback.modulename="
+        "github.com/SmileyChris/traefik-localghost-fallback"
+    ) in command
+    assert all(
+        mount["target"] != "/var/lib/localghost-tailnet-ca"
+        for mount in model["services"]["traefik"].get("volumes", [])
+    )
 
 
 def test_example_compose_exercises_consumer_contract() -> None:

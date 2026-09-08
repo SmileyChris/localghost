@@ -1,0 +1,34 @@
+# Applied on top of the HTTPS and tailscale overlays for a private suffix: it
+# mints a tailnet root name-constrained to the suffix, has Traefik terminate
+# TLS for *.${suffix}, and lets the gateway publish the root on
+# trust.${suffix}. Public suffixes never get this overlay, because a root
+# scoped to a real TLD could impersonate real websites.
+services:
+  bootstrap:
+    volumes:
+      - localghost-tailnet-ca-root:/var/lib/localghost-tailnet-root
+      - localghost-tailnet-ca-signer:/var/lib/localghost-tailnet-ca
+
+  traefik:
+    volumes:
+      - localghost-tailnet-ca-signer:/var/lib/localghost-tailnet-ca
+
+  tailscale-gateway:
+    command:
+      - --suffix=${LOCALGHOST_TAILSCALE_SUFFIX:?LOCALGHOST_TAILSCALE_SUFFIX is required}
+      - --hostname=localghost-${LOCALGHOST_TAILSCALE_SUFFIX}
+      - --state-dir=/var/lib/localghost-tailscale
+      - --root-ca=/var/lib/localghost-root/rootCA.pem
+      - --http-target=traefik:80
+      - --https-target=traefik:443
+    volumes:
+      # The signer volume contains only the exported public root plus the
+      # constrained online signer. The offline root volume must never be
+      # mounted into this network-facing service.
+      - localghost-tailnet-ca-signer:/var/lib/localghost-root:ro
+
+volumes:
+  localghost-tailnet-ca-root:
+    name: localghost-tailnet-ca-root-v2-${LOCALGHOST_TAILSCALE_SUFFIX}
+  localghost-tailnet-ca-signer:
+    name: localghost-tailnet-ca-signer-v2-${LOCALGHOST_TAILSCALE_SUFFIX}

@@ -21,6 +21,7 @@ from localghost.tailscale import (
     detect_suffix,
     load_state,
     save_state,
+    suffix_is_public,
     validate_suffix,
 )
 from localghost.trust import PublicCertificate, TrustError
@@ -64,9 +65,34 @@ def test_suffix_rejects_unsafe_values(value) -> None:
 @pytest.mark.parametrize(
     "value", ["localhost", "dev", "com", "app", "internal", "io", "uk", "test", "corp"]
 )
-def test_suffix_rejects_public_and_reserved_names(value) -> None:
-    with pytest.raises(ValueError, match="public or reserved"):
-        validate_suffix(value)
+def test_public_and_reserved_names_are_accepted_but_flagged(value) -> None:
+    assert validate_suffix(value) == value
+    assert suffix_is_public(value)
+
+
+@pytest.mark.parametrize("value", ["tail1234", "taildc3ac3", "chris-laptop"])
+def test_private_labels_are_not_public(value) -> None:
+    assert not suffix_is_public(value)
+
+
+def test_public_suffix_state_loads_as_http_only(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    save_state(TailscaleState("-", "work", ("100.64.0.1",), {}))
+
+    state = load_state()
+
+    assert state is not None
+    assert state.https is False
+
+
+def test_private_suffix_state_serves_https(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    save_state(TailscaleState("-", "tail1234", ("100.64.0.1",), {}))
+
+    state = load_state()
+
+    assert state is not None
+    assert state.https is True
 
 
 def test_detect_suffix_uses_short_search_domain(monkeypatch) -> None:
@@ -571,6 +597,35 @@ def test_enable_uses_ephemeral_credentials_and_saves_public_state(
     assert saved[0].suffix == "tail1234"
     assert not hasattr(saved[0], "client_secret")
     assert events[-1] == {"https_enabled": True, "force_recreate": True}
+
+
+def test_enable_with_a_public_suffix_skips_the_tailnet_authority(
+    monkeypatch, tmp_path
+) -> None:
+    events: list = []
+    saved: list = []
+    _patch_enable(monkeypatch, events, saved, tmp_path)
+    monkeypatch.setattr(
+        cli_module,
+        "_bootstrap_tailnet_root",
+        lambda suffix: pytest.fail("a public suffix must not get a root"),
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "_install_tailnet_trust",
+        lambda *args, **kwargs: pytest.fail("nothing to trust"),
+    )
+
+    args = ["tailscale", "enable", "--tailnet", "example.com", "--suffix", "work"]
+    result = CliRunner().invoke(cli, args + CREDENTIAL_ARGS)
+    assert result.exit_code == 0, result.output
+    assert saved[0].suffix == "work"
+    assert saved[0].https is False
+    assert events[-1] == {"https_enabled": False, "force_recreate": True}
+    assert "http://<project>.work" in result.output
+    assert "HTTP only" in result.output
+    assert "tailscale trust" not in result.output
+    assert not (tmp_path / "tailscale-work-rootCA.pem").exists()
 
 
 def test_enable_stores_the_credential_in_the_keyring(monkeypatch, tmp_path) -> None:
@@ -1202,7 +1257,110 @@ def test_run_proxy_adds_tailnet_overlay(monkeypatch) -> None:
     )
     assert "proxy_compose_https.yaml" in " ".join(command)
     assert "proxy_compose_tailscale.yaml" in " ".join(command)
+    assert "proxy_compose_tailscale_https.yaml" in " ".join(command)
     assert kwargs["env"]["LOCALGHOST_TAILSCALE_SUFFIX"] == "tail1234"
+    assert kwargs["env"]["LOCALGHOST_LOCALHOST_CA_MODE"] == "tls"
+    assert kwargs["env"]["LOCALGHOST_TAILNET_CA_MODE"] == "tls"
+
+
+PUBLIC_STATE = TailscaleState("example.com", "work", ("100.64.0.1",), {})
+
+
+def test_run_proxy_keeps_a_public_suffix_on_http(monkeypatch) -> None:
+    commands = []
+    monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: PUBLIC_STATE)
+    monkeypatch.setattr(
+        cli_module.subprocess,
+        "run",
+        lambda command, **kwargs: (
+            commands.append((command, kwargs)) or CompletedProcess(command, 0, "", "")
+        ),
+    )
+
+    cli_module._run_proxy("up")
+
+    command, kwargs = next(
+        entry for entry in commands if entry[0][:2] == ["docker", "compose"]
+    )
+    joined = " ".join(command)
+    assert "proxy_compose_tailscale.yaml" in joined
+    assert "proxy_compose_https.yaml" not in joined
+    assert "proxy_compose_tailscale_https.yaml" not in joined
+    assert kwargs["env"]["LOCALGHOST_TAILSCALE_SUFFIX"] == "work"
+    assert kwargs["env"]["LOCALGHOST_LOCALHOST_CA_MODE"] == "http"
+    assert kwargs["env"]["LOCALGHOST_TAILNET_CA_MODE"] == "http"
+
+
+def test_run_proxy_keeps_localhost_https_beside_a_public_suffix(monkeypatch) -> None:
+    commands = []
+    monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: PUBLIC_STATE)
+    monkeypatch.setattr(
+        cli_module.subprocess,
+        "run",
+        lambda command, **kwargs: commands.append((command, kwargs))
+        or CompletedProcess(command, 0, "", ""),
+    )
+
+    cli_module._run_proxy("up", https_enabled=True)
+
+    command, kwargs = next(
+        entry for entry in commands if entry[0][:2] == ["docker", "compose"]
+    )
+    joined = " ".join(command)
+    assert "proxy_compose_https.yaml" in joined
+    assert "proxy_compose_tailscale.yaml" in joined
+    assert "proxy_compose_tailscale_https.yaml" not in joined
+    assert kwargs["env"]["LOCALGHOST_LOCALHOST_CA_MODE"] == "tls"
+    assert kwargs["env"]["LOCALGHOST_TAILNET_CA_MODE"] == "http"
+
+
+def test_public_suffix_does_not_force_localhost_https(monkeypatch) -> None:
+    monkeypatch.setattr(cli_module, "_https_configured", lambda: False)
+    monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: PUBLIC_STATE)
+    assert cli_module._tailnet_forces_https() is False
+    assert cli_module._proxy_origin("shop") == "http://shop.localhost"
+    assert cli_module._tailnet_origin("shop") == "http://shop.work"
+
+
+def test_public_suffix_status_reports_http_only(monkeypatch) -> None:
+    monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: PUBLIC_STATE)
+    monkeypatch.setattr(cli_module, "_tailscale_gateway_health", lambda: "healthy")
+    monkeypatch.setattr(cli_module, "_unmirrored_router_names", lambda: [])
+    result = CliRunner().invoke(cli, ["tailscale", "status"])
+    assert result.exit_code == 0, result.output
+    assert "Route suffix: .work" in result.output
+    assert "HTTP only" in result.output
+    assert "public" in result.output
+    assert "tailscale trust" not in result.output
+
+
+def test_trust_alias_has_nothing_to_install_for_a_public_suffix(monkeypatch) -> None:
+    monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: PUBLIC_STATE)
+    monkeypatch.setattr(
+        cli_module,
+        "_install_tailnet_trust",
+        lambda *args, **kwargs: pytest.fail("no root exists to install"),
+    )
+    result = CliRunner().invoke(cli, ["tailscale", "trust"])
+    assert result.exit_code != 0
+    assert "HTTP only" in result.output
+
+
+def test_hub_up_notes_a_public_suffix(monkeypatch) -> None:
+    monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: PUBLIC_STATE)
+    monkeypatch.setattr(cli_module, "_https_configured", lambda: False)
+    monkeypatch.setattr(cli_module, "_ensure_https_or_warn", lambda: False)
+    monkeypatch.setattr(cli_module, "proxy_is_running", lambda: False)
+    monkeypatch.setattr(cli_module, "_managed_image_is_available", lambda: True)
+    events: list = []
+    monkeypatch.setattr(
+        cli_module, "_run_proxy", lambda *args, **kwargs: events.append(kwargs)
+    )
+    result = CliRunner().invoke(cli, ["hub", "up"])
+    assert result.exit_code == 0, result.output
+    assert events[0]["https_enabled"] is False
+    assert "HTTP only" in result.output
+    assert "http://traefik.work" in result.output
 
 
 def test_bootstrap_tailnet_root_builds_the_expected_one_shot(monkeypatch) -> None:

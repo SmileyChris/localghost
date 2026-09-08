@@ -205,3 +205,27 @@ func TestProbeHealthReportsListenerState(t *testing.T) {
 		t.Fatal("expected probe of an unhealthy listener to fail")
 	}
 }
+
+func TestHTTPOnlyGatewayLeavesTheTrustHostToTheProxy(t *testing.T) {
+	cfg := configuration{suffix: "work"}
+	if cfg.servesHTTPS() {
+		t.Fatal("expected an empty root path to mean HTTP only")
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest("GET", "http://trust.work/", nil)
+	if serveTrust(recorder, request, cfg) {
+		t.Fatal("expected no trust page without a root")
+	}
+}
+
+func TestHTTPOnlyConfigurationNeedsNoHTTPSTarget(t *testing.T) {
+	cfg := configuration{suffix: "work", hostname: "localghost-work", httpTarget: "traefik:80"}
+	if err := validateConfiguration(cfg); err != nil {
+		t.Fatal(err)
+	}
+	withRoot := cfg
+	withRoot.rootCA = "/var/lib/localghost-root/rootCA.pem"
+	if err := validateConfiguration(withRoot); err == nil {
+		t.Fatal("expected an HTTPS target to be required alongside a root")
+	}
+}

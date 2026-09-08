@@ -81,10 +81,17 @@ machine, or pass `--takeover` to replace the mapping deliberately. When a
 later enable step fails, the split-DNS entry and saved state are rolled back
 so the command can simply be run again.
 
-A suffix that names a public TLD or reserved zone (`dev`, `com`, any
-two-letter country code, `internal`, …) is refused outright: even though the
-root is name-constrained, an anchor scoped to a real TLD could impersonate
-real websites on every machine that trusts it.
+A suffix that names a public TLD or reserved zone (`dev`, `com`, `work`, any
+two-letter country code, `internal`, …) still routes, but over HTTP only:
+even though the root is name-constrained, an anchor scoped to a real TLD could
+impersonate real websites on every machine that trusts it, so no tailnet
+authority is minted for such a suffix. Requests are still encrypted by the
+tailnet's WireGuard tunnel; what is lost is the browser's secure context
+(service workers, `crypto.subtle`, camera access) and the `trust.<suffix>`
+page. `enable` and `hub up` say so, and `localghost tailscale status` reports
+`Tailnet HTTPS: HTTP only`. Detection never picks a public label; one has to
+be passed as `--suffix` deliberately. Choose a private label such as
+`tail1234` for trusted HTTPS.
 
 Enable performs four bounded operations:
 

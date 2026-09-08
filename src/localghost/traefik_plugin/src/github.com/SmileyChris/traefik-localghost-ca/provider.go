@@ -38,6 +38,12 @@ type Config struct {
 	// containers stop, so ghost pages serve warning-free over HTTPS.
 	// Empty disables the lookup.
 	RegistryPath string `json:"registryPath,omitempty"`
+	// Mode is "tls" (the default) or "http". In HTTP mode the provider never
+	// touches a signer: it only mirrors plain routers onto DomainSuffix and
+	// publishes no certificates. localghost uses it for tailnet suffixes that
+	// name a public TLD, where a name-constrained root would still be able to
+	// impersonate real websites.
+	Mode string `json:"mode,omitempty"`
 }
 
 func CreateConfig() *Config {
@@ -78,6 +84,7 @@ type Provider struct {
 	storagePath    string
 	domainSuffix   string
 	registryPath   string
+	httpOnly       bool
 
 	dockerClient   *DockerClient
 	listContainers func(context.Context) ([]ContainerInfo, error) // test override; nil in Traefik/Yaegi
@@ -109,12 +116,20 @@ func New(_ context.Context, config *Config, name string) (*Provider, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid renewBefore %q: %w", rbValue, err)
 	}
+	var httpOnly bool
+	switch config.Mode {
+	case "", "tls":
+	case "http":
+		httpOnly = true
+	default:
+		return nil, fmt.Errorf("invalid mode %q: expected \"tls\" or \"http\"", config.Mode)
+	}
 	return &Provider{
 		name: name, pollInterval: pi, leafLifetime: ll, renewBefore: rb,
 		dockerEndpoint: config.DockerEndpoint, network: config.Network,
 		storagePath: config.StoragePath, domainSuffix: config.DomainSuffix,
-		registryPath: config.RegistryPath,
-		storedCerts:  make(map[string]*projectCert), activeCerts: make(map[string]*projectCert),
+		registryPath: config.RegistryPath, httpOnly: httpOnly,
+		storedCerts: make(map[string]*projectCert), activeCerts: make(map[string]*projectCert),
 	}, nil
 }
 
@@ -131,7 +146,7 @@ func (p *Provider) Init() error {
 	if !ValidateProjectName(p.domainSuffix) {
 		return fmt.Errorf("domainSuffix must be one lowercase DNS label, got %q", p.domainSuffix)
 	}
-	if p.storagePath == "" {
+	if p.storagePath == "" && !p.httpOnly {
 		return fmt.Errorf("storagePath must not be empty")
 	}
 	if !strings.HasPrefix(p.dockerEndpoint, "unix://") {
@@ -149,6 +164,10 @@ func (p *Provider) Init() error {
 	// triggers a reflect.Set panic in Traefik's Yaegi runtime.
 	p.dockerClient = client
 
+	if p.httpOnly {
+		fmt.Fprintf(os.Stderr, "localghostCA[%s]: initialized in HTTP mode (mirroring routers onto .%s, no certificates)\n", p.name, p.domainSuffix)
+		return nil
+	}
 	if err := validateStorageDirectory(p.storagePath); err != nil {
 		return err
 	}
@@ -228,33 +247,35 @@ func (p *Provider) publish(ctx context.Context, cfgChan chan<- json.Marshaler) {
 		p.dockerLost = false
 	}
 
-	if err := p.ensureBaseline(true); err != nil {
-		fmt.Fprintf(os.Stderr, "localghostCA[%s]: baseline renewal failed: %v; retaining last snapshot\n", p.name, err)
-		p.mu.Unlock()
-		return
-	}
-	desired, err := p.desiredSpecs(containers)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "localghostCA[%s]: discovery rejected: %v; retaining last snapshot\n", p.name, err)
-		p.mu.Unlock()
-		return
-	}
-	newActive := make(map[string]*projectCert, len(desired))
-	for _, spec := range desired {
-		cert, err := p.ensureSpec(spec, true)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "localghostCA[%s]: certificate update failed for %s %q: %v; retaining last snapshot\n", p.name, spec.kind, spec.name, err)
+	if !p.httpOnly {
+		if err := p.ensureBaseline(true); err != nil {
+			fmt.Fprintf(os.Stderr, "localghostCA[%s]: baseline renewal failed: %v; retaining last snapshot\n", p.name, err)
 			p.mu.Unlock()
 			return
 		}
-		newActive[spec.key] = cert
-	}
-	for key := range p.activeCerts {
-		if _, ok := newActive[key]; !ok {
-			fmt.Fprintf(os.Stderr, "localghostCA[%s]: removed %s from active snapshot\n", p.name, key)
+		desired, err := p.desiredSpecs(containers)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "localghostCA[%s]: discovery rejected: %v; retaining last snapshot\n", p.name, err)
+			p.mu.Unlock()
+			return
 		}
+		newActive := make(map[string]*projectCert, len(desired))
+		for _, spec := range desired {
+			cert, err := p.ensureSpec(spec, true)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "localghostCA[%s]: certificate update failed for %s %q: %v; retaining last snapshot\n", p.name, spec.kind, spec.name, err)
+				p.mu.Unlock()
+				return
+			}
+			newActive[spec.key] = cert
+		}
+		for key := range p.activeCerts {
+			if _, ok := newActive[key]; !ok {
+				fmt.Fprintf(os.Stderr, "localghostCA[%s]: removed %s from active snapshot\n", p.name, key)
+			}
+		}
+		p.activeCerts = newActive
 	}
-	p.activeCerts = newActive
 	payload := &tlsPayload{certs: p.buildSnapshot(), routers: p.mirroredRouters(containers)}
 	snapshot, err := payload.MarshalJSON()
 	if err != nil {
@@ -652,6 +673,11 @@ func (p *Provider) mirroredRouters(containers []ContainerInfo) map[string]flatRo
 			priority, _ := strconv.Atoi(container.Labels[base+"priority"])
 			router := flatRouter{EntryPoints: entryPoints, Middlewares: middlewares, Service: service, Rule: mirrored, Priority: priority}
 			if strings.EqualFold(container.Labels[base+"tls"], "true") {
+				if p.httpOnly {
+					// Nothing terminates TLS for this suffix, so the secure
+					// twin of a router has no entrypoint to serve.
+					continue
+				}
 				router.TLS = &flatTLS{}
 			}
 			// A name defined differently by two containers would otherwise be

@@ -493,3 +493,68 @@ func TestMissingRegistryPathIsIgnored(t *testing.T) {
 		t.Fatalf("unexpected specs: %#v", specs)
 	}
 }
+
+func TestHTTPModeMirrorsOnlyPlainRouters(t *testing.T) {
+	p := &Provider{domainSuffix: "work", httpOnly: true}
+	containers := []ContainerInfo{{
+		Labels: map[string]string{
+			"traefik.http.routers.demo.rule":               "Host(`demo.localhost`)",
+			"traefik.http.routers.demo.service":            "demo",
+			"traefik.http.routers.demo.entrypoints":        "web",
+			"traefik.http.routers.demo-secure.rule":        "Host(`demo.localhost`)",
+			"traefik.http.routers.demo-secure.service":     "demo",
+			"traefik.http.routers.demo-secure.entrypoints": "websecure",
+			"traefik.http.routers.demo-secure.tls":         "true",
+		},
+	}}
+	routers := p.mirroredRouters(containers)
+	if len(routers) != 1 {
+		t.Fatalf("HTTP mode must skip TLS routers: %#v", routers)
+	}
+	router := routers["demo"]
+	if router.Rule != "Host(`demo.work`)" || router.TLS != nil {
+		t.Fatalf("unexpected plain router %#v", router)
+	}
+}
+
+func TestHTTPModeNeedsNoSignerAndPublishesNoCertificates(t *testing.T) {
+	config := CreateConfig()
+	config.Mode = "http"
+	config.StoragePath = ""
+	config.DomainSuffix = "work"
+	config.PollInterval = "100ms"
+	p, err := New(context.Background(), config, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Init(); err != nil {
+		t.Fatalf("HTTP mode must initialize without a bootstrapped signer: %v", err)
+	}
+	p.listContainers = func(context.Context) ([]ContainerInfo, error) {
+		return []ContainerInfo{{
+			ProjectName: "demo",
+			Labels: map[string]string{
+				"traefik.http.routers.demo.rule":        "Host(`demo.localhost`)",
+				"traefik.http.routers.demo.service":     "demo",
+				"traefik.http.routers.demo.entrypoints": "web",
+			},
+		}}, nil
+	}
+	ch := make(chan json.Marshaler, 1)
+	p.publish(context.Background(), ch)
+	payload := (<-ch).(*tlsPayload)
+	if len(payload.certs) != 0 {
+		t.Fatalf("HTTP mode must not issue certificates: %#v", payload.certs)
+	}
+	if _, ok := payload.routers["demo"]; !ok {
+		t.Fatalf("HTTP mode must still mirror routers: %#v", payload.routers)
+	}
+}
+
+func TestModeRejectsUnknownValues(t *testing.T) {
+	config := CreateConfig()
+	config.Mode = "plain"
+	if _, err := New(context.Background(), config, "test"); err == nil {
+		t.Fatal("unknown mode was accepted")
+	}
+}
