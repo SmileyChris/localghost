@@ -6,9 +6,9 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
-import socket
 import subprocess
 import time
 import uuid
@@ -19,7 +19,7 @@ from pathlib import Path
 import click
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
-from . import statusbar
+from . import ports, statusbar
 from .feedback import info, warning
 from .generator import (
     DNS_SAFE_PROJECT,
@@ -178,7 +178,7 @@ def build_plan(
         if port is None:
             raise click.ClickException("a custom command requires --port")
         selected_type = "custom"
-        selected_port = select_port(port, strict=True)
+        selected_port = ports.select_port(port, strict=True)
         selected_command = tuple(
             part.replace("{port}", str(selected_port)) for part in command
         )
@@ -208,7 +208,9 @@ def build_plan(
             )
         else:  # Click validates the public option; retain this for direct callers.
             raise click.ClickException(type_choices("--type"))
-        selected_port = select_port(port or default_port, strict=port is not None)
+        selected_port = ports.select_port(
+            port or default_port, strict=port is not None
+        )
         selected_command = tuple(
             part.format(port=selected_port) for part in selected_command
         )
@@ -503,6 +505,7 @@ def astro_command(cwd: Path, requested_port: int | None) -> tuple[int, tuple[str
         )
     manager = package_manager(cwd, manifest)
     _require_executable(manager, "Astro package manager")
+    _warn_if_flags_cannot_reach(manifest, "astro")
     commands = {
         "npm": ("npm", "run", "dev", "--"),
         # pnpm forwards the separator itself to the script. Yarn 1 forwards
@@ -549,19 +552,6 @@ def package_manager(cwd: Path, manifest: dict[str, object]) -> str:
     # are all unavailable, while preferring an installed fallback when there is
     # one.
     return found[0]
-
-
-def select_port(port: int, strict: bool) -> int:
-    if _port_available(port):
-        return port
-    if strict:
-        raise click.ClickException(f"host port {port} is already in use")
-    for candidate in range(port + 1, min(port + 100, 65536)):
-        if _port_available(candidate):
-            return candidate
-    raise click.ClickException(
-        f"no free host port found from {port} through {min(port + 99, 65535)}"
-    )
 
 
 def create_run_bridge_compose(
@@ -713,19 +703,12 @@ def execute(
             bridge_attempted = True
             start_bridge(plan)
             bar.status("starting")
-            if statusbar.tcp_probe(plan.port)():
+            if not ports.port_available(plan.port):
                 # Sampled before the child exists, so this is somebody else.
-                # The application is about to fail to bind, and until it does
-                # the readiness probe cannot tell the squatter apart from a
-                # fast start.
-                warning(
-                    "Port already in use",
-                    [
-                        f"Something is already serving on port {plan.port}; "
-                        "the application may fail to start, and the status "
-                        "bar cannot tell it apart from the application."
-                    ],
-                )
+                # Starting anyway would leave the readiness probe unable to
+                # tell the squatter apart from the application, so the run
+                # ends here rather than at a URL serving the wrong thing.
+                raise click.ClickException(ports.in_use_message(plan.port))
             try:
                 child = subprocess.Popen(
                     list(plan.command),
@@ -977,6 +960,32 @@ def _package_json_with_dev_script_and_dep(
     return value
 
 
+def _dev_script_runs(script: str, tool: str) -> bool:
+    """Does the `dev` script invoke `tool` itself, rather than something else?
+
+    Only a script that runs the tool directly can be handed `--port`/`--host`:
+    npm forwards them to whatever `dev` names, and a wrapper script or task
+    runner is free to drop them on the floor.
+    """
+    return re.search(rf"(?<![\w-]){re.escape(tool)}(?![\w-])", script) is not None
+
+
+def _warn_if_flags_cannot_reach(manifest: dict[str, object], tool: str) -> None:
+    script = manifest["scripts"]["dev"]
+    if _dev_script_runs(script, tool):
+        return
+    warning(
+        "Dev script may ignore the port",
+        [
+            f"package.json runs `{script}` for `dev`, which does not invoke "
+            f"{tool} directly, so --port and --host cannot be enforced through "
+            f"it. If {tool} then chooses another port or binds only loopback, "
+            "the public URL will not reach it; start the dev server directly "
+            "with `localghost run --port <port> -- <command>` if that happens."
+        ],
+    )
+
+
 def vite_command(cwd: Path, requested_port: int | None) -> tuple[int, tuple[str, ...]]:
     manifest = _vite_manifest(cwd)
     if manifest is None:
@@ -985,6 +994,7 @@ def vite_command(cwd: Path, requested_port: int | None) -> tuple[int, tuple[str,
         )
     manager = package_manager(cwd, manifest)
     _require_executable(manager, "Vite package manager")
+    _warn_if_flags_cannot_reach(manifest, "vite")
     commands = {
         "npm": ("npm", "run", "dev", "--"),
         "pnpm": ("pnpm", "run", "dev"),
@@ -999,16 +1009,6 @@ def vite_command(cwd: Path, requested_port: int | None) -> tuple[int, tuple[str,
         "{port}",
         "--strictPort",
     )
-
-
-def _port_available(port: int) -> bool:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            probe.bind(("0.0.0.0", port))
-        except OSError:
-            return False
-    return True
 
 
 def _require_executable(executable: str, description: str) -> None:

@@ -3,6 +3,35 @@
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- `run` refuses to start when something is already listening on the planned
+  port, instead of warning and starting anyway onto a URL that then serves
+  whatever was already there. On Linux the error names the process holding the
+  port and its working directory, so the project to go and stop is identified
+  rather than left as a dead end, and the message says how to get past it
+  either way.
+- A `vite` or `astro` project whose `dev` script does not invoke the tool
+  itself -- a wrapper script or a task runner -- now warns that `--port` and
+  `--host` cannot be enforced through it. npm forwards those flags to the
+  script, which is free to drop them, and the dev server then picks its own
+  port or binds loopback where the public URL cannot reach it.
+
+### Fixed
+
+- A host port held only over IPv6 was reported free, because availability was
+  checked by binding the IPv4 wildcard alone. `run` planned that port anyway
+  and aimed the bridge at it while the application started somewhere else.
+  Both address families are now checked, so a port taken over either one is
+  stepped past exactly as an IPv4 one always was.
+- Setting or releasing the status bar's scrolling region left the cursor at
+  the top of the screen, so the application's own output overwrote the
+  wordmark and the run configuration block from row 1 instead of continuing
+  below them. Resizing the window did the same thing mid-run, and ending a run
+  handed the shell back a prompt at row 1.
+
 ## [3.1.0] - 2026-09-08
 
 ### Changed

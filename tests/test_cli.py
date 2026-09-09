@@ -661,7 +661,7 @@ def test_run_pins_the_root_with_the_flag(monkeypatch, tmp_path) -> None:
 def test_run_project_root_discovers_config_inside_the_pinned_root(
     tmp_path, monkeypatch
 ) -> None:
-    monkeypatch.setattr("localghost.runner._port_available", lambda port: True)
+    monkeypatch.setattr("localghost.ports.port_available", lambda port: True)
     root = tmp_path / "backend"
     root.mkdir()
     (root / ".localghost.toml").write_text(

@@ -7,7 +7,7 @@ from subprocess import CompletedProcess
 import click
 import pytest
 
-from localghost import runner
+from localghost import ports, runner
 
 
 def executable(monkeypatch, *names):
@@ -222,7 +222,7 @@ def test_framework_ambiguity_and_custom_plan(monkeypatch, tmp_path):
     )
     with pytest.raises(click.ClickException, match="both django and vite"):
         runner.discover_type(tmp_path)
-    monkeypatch.setattr(runner, "_port_available", lambda _: True)
+    monkeypatch.setattr(ports, "port_available", lambda _: True)
     plan = runner.build_plan(tmp_path, "hello", None, 3000, ("echo", "ok"))
     assert plan.type == "custom" and plan.command == ("echo", "ok")
     with pytest.raises(click.ClickException, match="requires --port"):
@@ -230,7 +230,7 @@ def test_framework_ambiguity_and_custom_plan(monkeypatch, tmp_path):
 
 
 def test_custom_plan_interpolates_configured_port_placeholder(monkeypatch, tmp_path):
-    monkeypatch.setattr(runner, "_port_available", lambda _: True)
+    monkeypatch.setattr(ports, "port_available", lambda _: True)
 
     plan = runner.build_plan(
         tmp_path, "hello", None, 8123, ("server", "--port", "{port}", "{}")
@@ -240,13 +240,13 @@ def test_custom_plan_interpolates_configured_port_placeholder(monkeypatch, tmp_p
 
 
 def test_port_selection(monkeypatch):
-    monkeypatch.setattr(runner, "_port_available", lambda port: port == 8002)
-    assert runner.select_port(8000, False) == 8002
+    monkeypatch.setattr(ports, "port_available", lambda port: port == 8002)
+    assert ports.select_port(8000, False) == 8002
     with pytest.raises(click.ClickException, match="already"):
-        runner.select_port(8000, True)
-    monkeypatch.setattr(runner, "_port_available", lambda _: False)
+        ports.select_port(8000, True)
+    monkeypatch.setattr(ports, "port_available", lambda _: False)
     with pytest.raises(click.ClickException, match="no free"):
-        runner.select_port(65535, False)
+        ports.select_port(65535, False)
 
 
 def test_bridge_model_is_ephemeral():
@@ -393,7 +393,7 @@ def test_astro_plan_with_detection(monkeypatch, tmp_path):
         })
     )
     executable(monkeypatch, "npm")
-    monkeypatch.setattr(runner, "_port_available", lambda _: True)
+    monkeypatch.setattr(ports, "port_available", lambda _: True)
     plan = runner.build_plan(tmp_path, "astro-site", None, None, ())
     assert plan.type == "astro"
     assert plan.port == 4321
@@ -411,7 +411,7 @@ def test_astro_plan_explicit_framework(monkeypatch, tmp_path):
         })
     )
     executable(monkeypatch, "npm")
-    monkeypatch.setattr(runner, "_port_available", lambda _: True)
+    monkeypatch.setattr(ports, "port_available", lambda _: True)
     plan = runner.build_plan(tmp_path, "site", "astro", None, ())
     assert plan.type == "astro"
 
@@ -426,7 +426,7 @@ def test_nested_framework_root_drives_name_and_working_directory(
     (root / "manage.py").touch()
     (root / "uv.lock").touch()
     executable(monkeypatch, "uv")
-    monkeypatch.setattr(runner, "_port_available", lambda _: True)
+    monkeypatch.setattr(ports, "port_available", lambda _: True)
 
     plan = runner.build_plan(nested, None, None, None, ())
 
@@ -459,7 +459,7 @@ def test_modern_cakephp_detection_and_plan(monkeypatch, tmp_path):
     (root / "composer.json").write_text(
         json.dumps({"require": {"cakephp/cakephp": "^5.0"}})
     )
-    monkeypatch.setattr(runner, "_port_available", lambda _: True)
+    monkeypatch.setattr(ports, "port_available", lambda _: True)
 
     plan = runner.build_plan(webroot, None, None, None, ())
 
@@ -501,7 +501,7 @@ def test_legacy_cakephp_uses_webroot_without_naming_it_webroot(
     (webroot / "index.php").touch()
     (config / "core.php").touch()
     executable(monkeypatch, "php")
-    monkeypatch.setattr(runner, "_port_available", lambda _: True)
+    monkeypatch.setattr(ports, "port_available", lambda _: True)
 
     plan = runner.build_plan(webroot, None, None, None, ())
 
@@ -521,7 +521,7 @@ def test_laravel_detection_from_public_directory(monkeypatch, tmp_path):
         json.dumps({"require": {"laravel/framework": "^12.0"}})
     )
     executable(monkeypatch, "php")
-    monkeypatch.setattr(runner, "_port_available", lambda _: True)
+    monkeypatch.setattr(ports, "port_available", lambda _: True)
 
     plan = runner.build_plan(public, None, None, None, ())
 
@@ -571,7 +571,7 @@ def test_vite_plan_through_build_plan(monkeypatch, tmp_path):
         })
     )
     executable(monkeypatch, "npm")
-    monkeypatch.setattr(runner, "_port_available", lambda _: True)
+    monkeypatch.setattr(ports, "port_available", lambda _: True)
     plan = runner.build_plan(tmp_path, "vite-site", None, None, ())
     assert plan.type == "vite"
     assert plan.port == 5173
@@ -588,17 +588,23 @@ def test_django_virtualenv_active(monkeypatch, tmp_path):
     assert runner.django_command(tmp_path, None)[1][0] == str(python)
 
 
+@pytest.fixture
+def free_port(monkeypatch):
+    """execute() refuses a taken port; these tests are not about that check."""
+    monkeypatch.setattr(ports, "port_available", lambda _: True)
+
+
 def test_detected_plan_and_small_helpers(monkeypatch, tmp_path):
     (tmp_path / "manage.py").touch()
     (tmp_path / "uv.lock").touch()
     executable(monkeypatch, "uv")
-    monkeypatch.setattr(runner, "_port_available", lambda _: True)
+    monkeypatch.setattr(ports, "port_available", lambda _: True)
     plan = runner.build_plan(tmp_path, "demo", None, None, ())
     assert plan.port == 8000 and "0.0.0.0:8000" in plan.command[-1]
     (tmp_path / ".env").write_text("# comment\nCOMPOSE_PROJECT_NAME='fine'\n")
     assert runner._dotenv_name(tmp_path / ".env") == "fine"
     assert runner._dotenv_name(tmp_path / "none") is None
-    assert runner._port_available(0)
+    assert ports.port_available(0)
 
 
 def test_package_manager_and_compose_failures(monkeypatch, tmp_path):
@@ -643,7 +649,7 @@ def test_collision_and_compose_missing_docker(monkeypatch):
         runner.start_bridge(runner.RunPlan("x", "c", (), 1, "p", ""))
 
 
-def test_execute_cleanup_failure_returns_failure(monkeypatch):
+def test_execute_cleanup_failure_returns_failure(monkeypatch, free_port):
     monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
 
     def fail_stop(plan):
@@ -660,7 +666,7 @@ def test_execute_cleanup_failure_returns_failure(monkeypatch):
     assert runner.execute(plan, lambda: None) == 1
 
 
-def test_execute_prefers_planned_working_directory(monkeypatch, tmp_path):
+def test_execute_prefers_planned_working_directory(monkeypatch, tmp_path, free_port):
     monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
     monkeypatch.setattr(runner, "stop_bridge", lambda plan: None)
     recorded = {}
@@ -683,7 +689,7 @@ def test_execute_prefers_planned_working_directory(monkeypatch, tmp_path):
     assert recorded["cwd"] == planned
 
 
-def test_execute_interrupt_terminates_child(monkeypatch):
+def test_execute_interrupt_terminates_child(monkeypatch, free_port):
     monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
     monkeypatch.setattr(runner, "stop_bridge", lambda plan: None)
 
@@ -719,7 +725,7 @@ def test_termination_handler_grace_then_force_quit(monkeypatch):
         runner._restore_termination_handlers(old_handlers)
 
 
-def test_execute_force_quits_stuck_child(monkeypatch):
+def test_execute_force_quits_stuck_child(monkeypatch, free_port):
     monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
     monkeypatch.setattr(runner, "stop_bridge", lambda plan: None)
     received = []
@@ -745,7 +751,7 @@ def test_execute_force_quits_stuck_child(monkeypatch):
     assert received == [runner.signal.SIGINT, runner.signal.SIGKILL]
 
 
-def test_execute_bridge_cleanup_interrupted_by_force_quit(monkeypatch):
+def test_execute_bridge_cleanup_interrupted_by_force_quit(monkeypatch, free_port):
     monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
     attempts = []
 
@@ -765,7 +771,9 @@ def test_execute_bridge_cleanup_interrupted_by_force_quit(monkeypatch):
     assert len(attempts) == 1
 
 
-def test_execute_retries_bridge_cleanup_after_termination_signal(monkeypatch):
+def test_execute_retries_bridge_cleanup_after_termination_signal(
+    monkeypatch, free_port
+):
     monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
     attempts = []
 
@@ -789,13 +797,13 @@ def test_execute_retries_bridge_cleanup_after_termination_signal(monkeypatch):
 def test_port_in_use_and_vite_without_dependency(tmp_path):
     with socket.socket() as listener:
         listener.bind(("0.0.0.0", 0))
-        assert not runner._port_available(listener.getsockname()[1])
+        assert not ports.port_available(listener.getsockname()[1])
     (tmp_path / "package.json").write_text(json.dumps({"scripts": {"dev": "x"}}))
     assert runner._vite_manifest(tmp_path) is None
 
 
 def test_compose_uses_stdin(monkeypatch, tmp_path):
-    monkeypatch.setattr(runner, "_port_available", lambda _: True)
+    monkeypatch.setattr(ports, "port_available", lambda _: True)
     plan = runner.build_plan(tmp_path, "demo", None, 3000, ("echo",))
     recorded = {}
 
@@ -816,7 +824,7 @@ def test_compose_uses_stdin(monkeypatch, tmp_path):
     assert recorded["input"] == plan.bridge_yaml
 
 
-def test_execute_lifecycle_and_cleanup(monkeypatch, tmp_path):
+def test_execute_lifecycle_and_cleanup(monkeypatch, tmp_path, free_port):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
     stopped = []
@@ -832,7 +840,7 @@ def test_execute_lifecycle_and_cleanup(monkeypatch, tmp_path):
     assert stopped
 
 
-def test_execute_spawn_and_cleanup_failure(monkeypatch):
+def test_execute_spawn_and_cleanup_failure(monkeypatch, free_port):
     monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
 
     def fail_spawn(*args, **kwargs):
@@ -1241,7 +1249,7 @@ def test_pinned_root_accepts_a_weak_php_match(monkeypatch, tmp_path):
     root.mkdir()
     (root / "index.php").touch()
     monkeypatch.setattr(runner.shutil, "which", lambda name: "/usr/bin/php")
-    monkeypatch.setattr(runner, "_port_available", lambda _: True)
+    monkeypatch.setattr(ports, "port_available", lambda _: True)
 
     plan = runner.build_plan(root, "legacy-shop", None, None, (), pinned=root)
 
@@ -1525,17 +1533,13 @@ def _free_port() -> int:
     return port
 
 
-def test_execute_warns_when_the_port_is_already_serving(monkeypatch):
+def test_execute_refuses_a_port_that_is_already_serving(monkeypatch):
     """Something already on the port means the app is about to fail to bind."""
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen(1)
     port = listener.getsockname()[1]
 
-    warnings = []
-    monkeypatch.setattr(
-        runner, "warning", lambda title, messages: warnings.append(list(messages))
-    )
     monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
     monkeypatch.setattr(runner, "stop_bridge", lambda plan: None)
 
@@ -1547,12 +1551,12 @@ def test_execute_warns_when_the_port_is_already_serving(monkeypatch):
     plan = runner.RunPlan("demo", "custom", ("x",), port, "p", "")
 
     try:
-        runner.execute(plan, lambda: None, public_origin="http://demo.localhost")
+        with pytest.raises(click.ClickException) as caught:
+            runner.execute(plan, lambda: None, public_origin="http://demo.localhost")
     finally:
         listener.close()
 
-    assert warnings, "expected a warning about the occupied port"
-    assert str(port) in warnings[0][0]
+    assert str(port) in str(caught.value)
 
 
 def test_execute_is_quiet_when_the_port_is_free(monkeypatch):
@@ -1610,3 +1614,100 @@ def test_find_route_collision_error_paths(monkeypatch) -> None:
     monkeypatch.setattr("localghost.runner.subprocess.run", inspect_garbage)
     with pytest.raises(click.ClickException, match="invalid container inspection"):
         find_route_collision("demo")
+
+
+def test_execute_refuses_to_start_when_the_planned_port_is_taken(monkeypatch):
+    monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
+    monkeypatch.setattr(runner, "stop_bridge", lambda plan: None)
+    _pin_recorder(monkeypatch)
+    monkeypatch.setattr(ports, "port_available", lambda port: False)
+    monkeypatch.setattr(
+        ports,
+        "holder",
+        lambda port: ports.Holder(pid=4242, command="vite dev", directory="/tmp/other"),
+    )
+    started = []
+
+    class Child:
+        def wait(self):
+            return 0
+
+    def fake_popen(*args, **kwargs):
+        started.append(args)
+        return Child()
+
+    monkeypatch.setattr(runner.subprocess, "Popen", fake_popen)
+    plan = runner.RunPlan("demo", "custom", ("x",), 4321, "p", "")
+
+    with pytest.raises(click.ClickException) as caught:
+        runner.execute(plan, lambda: None, public_origin="http://demo.localhost")
+
+    # Starting anyway leaves the bar unable to tell the squatter apart from
+    # the application, which is the dead end this replaces.
+    assert not started, "the application must not be launched onto a taken port"
+    message = str(caught.value)
+    assert "4321" in message and "4242" in message and "/tmp/other" in message
+
+
+def _node_project(tmp_path, dev_script, dep="vite"):
+    (tmp_path / "package.json").write_text(
+        json.dumps({"scripts": {"dev": dev_script}, "devDependencies": {dep: "x"}})
+    )
+    return tmp_path
+
+
+def test_vite_warns_when_the_dev_script_cannot_carry_the_flags(monkeypatch, tmp_path):
+    _node_project(tmp_path, "./scripts/dev.sh")
+    executable(monkeypatch, "npm")
+    warnings = []
+    monkeypatch.setattr(
+        runner, "warning", lambda title, messages: warnings.append(list(messages))
+    )
+
+    runner.vite_command(tmp_path, None)
+
+    # npm hands the flags to the wrapper, which is free to drop them. Vite
+    # then picks its own port and binds loopback, and the public URL reaches
+    # nothing -- with no clue as to why.
+    assert warnings, "expected a warning that --port/--host cannot be enforced"
+    assert "./scripts/dev.sh" in " ".join(warnings[0])
+
+
+def test_vite_is_quiet_when_the_dev_script_runs_vite_itself(monkeypatch, tmp_path):
+    _node_project(tmp_path, "svelte-kit sync && vite dev")
+    executable(monkeypatch, "npm")
+    warnings = []
+    monkeypatch.setattr(
+        runner, "warning", lambda title, messages: warnings.append(list(messages))
+    )
+
+    runner.vite_command(tmp_path, None)
+
+    assert not warnings
+
+
+def test_a_script_naming_a_lookalike_tool_is_not_mistaken_for_it(monkeypatch, tmp_path):
+    _node_project(tmp_path, "vitest --watch")
+    executable(monkeypatch, "npm")
+    warnings = []
+    monkeypatch.setattr(
+        runner, "warning", lambda title, messages: warnings.append(list(messages))
+    )
+
+    runner.vite_command(tmp_path, None)
+
+    # "vitest" contains "vite" but does not run it.
+    assert warnings
+
+
+def test_astro_warns_when_the_dev_script_cannot_carry_the_flags(monkeypatch, tmp_path):
+    _node_project(tmp_path, "npm-run-all dev:*", dep="astro")
+    executable(monkeypatch, "npm")
+    warnings = []
+    monkeypatch.setattr(
+        runner, "warning", lambda title, messages: warnings.append(list(messages))
+    )
+
+    runner.astro_command(tmp_path, None)
+
+    assert warnings
