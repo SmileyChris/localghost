@@ -242,12 +242,16 @@ class _Bar:
     def resize(self) -> None:
         """Re-reserve the region after the window's height changed."""
         _, height = _terminal_size()
-        self._emit(f"\x1b[1;{height - 1}r")
+        self._emit(f"{_SAVE_CURSOR}\x1b[1;{height - 1}r{_RESTORE_CURSOR}")
         self.draw()
 
     def start(self) -> None:
         _, height = _terminal_size()
-        self._emit(f"\x1b[1;{height - 1}r")
+        # A leading newline scrolls one line up when the cursor is already on
+        # the row the bar is about to claim; stepping back onto it leaves the
+        # cursor unmoved in every other case. Without it, output restored to
+        # the last row would pile up there instead of scrolling in the region.
+        self._emit(f"\n\x1b[A{_SAVE_CURSOR}\x1b[1;{height - 1}r{_RESTORE_CURSOR}")
         self.draw()
         with contextlib.suppress(ValueError):
             # Signal handlers can only be installed from the main thread.
@@ -265,8 +269,9 @@ class _Bar:
             with contextlib.suppress(ValueError):
                 signal.signal(signal.SIGWINCH, self._previous_winch)
         _, height = _terminal_size()
-        # Release the region first, then wipe the row it was protecting.
-        self._emit(f"\x1b[r{_SAVE_CURSOR}\x1b[{height};1H\x1b[2K{_RESTORE_CURSOR}")
+        # Save before releasing: resetting the region homes the cursor too,
+        # so saving afterwards would restore the shell to row 1.
+        self._emit(f"{_SAVE_CURSOR}\x1b[r\x1b[{height};1H\x1b[2K{_RESTORE_CURSOR}")
 
     def _on_winch(self, signum: int, frame: object) -> None:
         del signum, frame

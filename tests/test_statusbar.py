@@ -457,3 +457,65 @@ def test_repaint_thread_ticks_the_spinner_then_stops(monkeypatch):
     assert ticked > 0, "the spinner should advance while loading"
     painter.join(1)
     assert not painter.is_alive()
+
+
+def emitted_with(stream: Stream, needle: str) -> str:
+    """The single write that carried `needle`, so ordering within it is testable."""
+    for chunk in stream.chunks:
+        if needle in chunk:
+            return chunk
+    raise AssertionError(f"no write contained {needle!r}")
+
+
+def test_reserving_the_region_puts_the_cursor_back():
+    stream = Stream()
+
+    with statusbar.pinned(URL, stream=stream):
+        pass
+
+    # DECSTBM homes the cursor as a side effect. Left homed, everything the
+    # application prints next overwrites the screen from the top -- including
+    # the run configuration block printed moments earlier.
+    chunk = emitted_with(stream, "\x1b[1;23r")
+    assert chunk.index(statusbar._SAVE_CURSOR) < chunk.index("\x1b[1;23r")
+    assert chunk.index("\x1b[1;23r") < chunk.index(statusbar._RESTORE_CURSOR)
+
+
+def test_reserving_the_region_frees_the_last_row_first():
+    stream = Stream()
+
+    with statusbar.pinned(URL, stream=stream):
+        pass
+
+    # When the screen is already full the cursor sits on the last row, which
+    # the bar is about to claim. Scrolling one line up first (and stepping
+    # back onto it) keeps the application's output inside the region instead
+    # of piling onto the reserved row.
+    chunk = emitted_with(stream, "\x1b[1;23r")
+    assert chunk.startswith("\n\x1b[A")
+
+
+def test_resizing_the_region_puts_the_cursor_back(monkeypatch):
+    stream = Stream()
+    size = [80, 24]
+    monkeypatch.setattr(statusbar, "_terminal_size", lambda: tuple(size))
+
+    with statusbar.pinned(URL, stream=stream) as bar:
+        size[1] = 40
+        bar.resize()
+
+    chunk = emitted_with(stream, "\x1b[1;39r")
+    assert chunk.index(statusbar._SAVE_CURSOR) < chunk.index("\x1b[1;39r")
+    assert chunk.index("\x1b[1;39r") < chunk.index(statusbar._RESTORE_CURSOR)
+
+
+def test_releasing_the_region_puts_the_cursor_back():
+    stream = Stream()
+
+    with statusbar.pinned(URL, stream=stream):
+        pass
+
+    # Resetting the region homes the cursor too, so the save has to happen
+    # before the reset -- otherwise the shell prompt lands back at row 1.
+    chunk = emitted_with(stream, RESET_REGION)
+    assert chunk.index(statusbar._SAVE_CURSOR) < chunk.index(RESET_REGION)
