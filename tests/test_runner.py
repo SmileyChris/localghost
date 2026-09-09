@@ -1711,3 +1711,52 @@ def test_astro_warns_when_the_dev_script_cannot_carry_the_flags(monkeypatch, tmp
     runner.astro_command(tmp_path, None)
 
     assert warnings
+
+
+def test_execute_breaks_the_line_after_a_ctrl_c(monkeypatch, free_port):
+    monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
+    monkeypatch.setattr(runner, "stop_bridge", lambda plan: None)
+    breaks = []
+    monkeypatch.setattr(runner, "interrupt_break", lambda: breaks.append(1))
+
+    class Child:
+        terminated = False
+
+        def wait(self):
+            if not self.terminated:
+                raise KeyboardInterrupt
+            return 0
+
+        def terminate(self):
+            self.terminated = True
+
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *args, **kwargs: Child())
+    runner.execute(runner.RunPlan("x", "c", (), 1, "p", ""), lambda: None)
+
+    assert breaks, "teardown output must not run on from the terminal's ^C echo"
+
+
+def test_execute_does_not_break_the_line_for_a_termination_signal(
+    monkeypatch, free_port
+):
+    monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
+    monkeypatch.setattr(runner, "stop_bridge", lambda plan: None)
+    breaks = []
+    monkeypatch.setattr(runner, "interrupt_break", lambda: breaks.append(1))
+
+    class Child:
+        terminated = False
+
+        def wait(self):
+            if not self.terminated:
+                raise runner._TerminationSignal(runner.signal.SIGTERM)
+            return 0
+
+        def terminate(self):
+            self.terminated = True
+
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *args, **kwargs: Child())
+    runner.execute(runner.RunPlan("x", "c", (), 1, "p", ""), lambda: None)
+
+    # SIGTERM echoes nothing, so a break would only add a stray blank line.
+    assert not breaks

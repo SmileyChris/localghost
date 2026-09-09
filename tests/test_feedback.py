@@ -1,3 +1,6 @@
+import io
+import sys
+
 from localghost import feedback
 
 
@@ -212,3 +215,39 @@ def test_plain_blocks_never_hard_wrap(monkeypatch):
     assert console.calls, "nothing printed"
     for item, kwargs in console.calls:
         assert kwargs.get("soft_wrap") is True, item
+
+
+class _Stream(io.StringIO):
+    """A stdout stand-in whose tty-ness the test decides."""
+
+    def __init__(self, tty):
+        super().__init__()
+        self._tty = tty
+
+    def isatty(self):
+        return self._tty
+
+
+def test_interrupt_break_gives_the_terminal_echo_its_own_line(monkeypatch):
+    stream = _Stream(tty=True)
+    monkeypatch.setattr(sys, "stdout", stream)
+
+    feedback.interrupt_break()
+
+    # The tty echoes ^C wherever the cursor is, so whatever is printed next
+    # runs on from it unless a line break separates them.
+    assert stream.getvalue() == "\n"
+
+
+def test_interrupt_break_is_quiet_when_output_is_redirected(monkeypatch):
+    stream = _Stream(tty=False)
+    monkeypatch.setattr(sys, "stdout", stream)
+
+    feedback.interrupt_break()
+
+    # No echo reaches a redirected stream, so a break would only be a stray
+    # blank line in the captured log. FORCE_COLOR must not sway this: it says
+    # to keep styling, not that a terminal is listening.
+    monkeypatch.setenv("FORCE_COLOR", "3")
+    feedback.interrupt_break()
+    assert stream.getvalue() == ""

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+import sys
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -221,6 +222,22 @@ def routes(items: Iterable[tuple[str, str]]) -> None:
         return
     lines = ["Active routes:", *(f"  {host}: {location}" for host, location in entries)]
     _console(False).print("\n".join(lines), soft_wrap=True)
+
+
+def interrupt_break() -> None:
+    """Give the terminal's own ^C echo a line to itself.
+
+    The tty echoes ^C wherever the cursor happens to be, so teardown output
+    runs straight on from it. Only a terminal shows that echo -- redirected
+    output would gain nothing but a stray blank line.
+
+    This asks the stream itself rather than `_rich_terminal`, which answers
+    "should this be styled" and is deliberately swayed by FORCE_COLOR. The
+    question here is whether a terminal echoed anything, which no environment
+    variable can make true.
+    """
+    if sys.stdout.isatty():
+        _console(False).print()
 
 
 def _message(message: str, color: str, *, err: bool, symbol: str = "•") -> None:

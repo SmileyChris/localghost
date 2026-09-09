@@ -20,7 +20,7 @@ import click
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
 from . import ports, statusbar
-from .feedback import info, warning
+from .feedback import info, interrupt_break, warning
 from .generator import (
     DNS_SAFE_PROJECT,
     HOST_BRIDGE_IMAGE,
@@ -727,6 +727,8 @@ def execute(
             else interrupted.signum
         )
         status = 128 + signum
+        if isinstance(interrupted, KeyboardInterrupt):
+            interrupt_break()
         if child is not None:
             _terminate_process_tree(child, signum)
             try:

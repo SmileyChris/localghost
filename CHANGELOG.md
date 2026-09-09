@@ -21,6 +21,9 @@ uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Teardown output after Ctrl+C ran on from the terminal's own `^C` echo
+  (`^CStopping bridge...`). The echo now gets a line of its own, on a
+  terminal only, so redirected output gains no stray blank line.
 - A host port held only over IPv6 was reported free, because availability was
   checked by binding the IPv4 wildcard alone. `run` planned that port anyway
   and aimed the bridge at it while the application started somewhere else.
