@@ -187,8 +187,9 @@ does not support account username-and-password uploads; use an API token.
    gh run watch <run-id>
    ```
 6. After those workflows pass, use a clean checkout of that exact commit to
-   build the final artifacts once, smoke-test the wheel, and record both
-   checksums:
+   build artifacts for the GitHub release, smoke-test the wheel, and record
+   both checksums. PyPI receives the workflow's own build rather than these,
+   so treat the checksums as a record of what was attached to the release:
    ```sh
    test -z "$(git status --porcelain)"
    rm -rf dist
@@ -211,7 +212,16 @@ does not support account username-and-password uploads; use an API token.
    gh release create v<version> "$wheel" "$sdist" \
      --draft --title "localghost v<version>" --notes-file <release-notes.md>
    ```
-8. Publish the exact artifacts from step 6 without rebuilding them:
+8. Pushing the tag publishes to PyPI: the `publish` job in `ci.yml` runs on
+   any `v*` tag once the integration job passes, builds on a clean checkout,
+   and uploads through Trusted Publishing from the `pypi` environment. Watch
+   that run rather than uploading by hand, and note that it rebuilds, so the
+   files on PyPI are not byte-identical to step 6's:
+   ```sh
+   gh run list --commit "$(git rev-parse v<version>)"
+   gh run watch <run-id>
+   ```
+   Publish by hand only if that workflow is unavailable:
    ```sh
    uv publish "$wheel" "$sdist"
    ```
