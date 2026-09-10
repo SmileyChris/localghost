@@ -588,3 +588,28 @@ def test_pinned_passes_its_diagnosis_through_to_the_watcher(monkeypatch):
         bar._watcher.join(1)
 
     assert seen["abort"] is marker
+
+
+def test_a_disabled_bar_still_watches_for_an_unreachable_application():
+    """Reachability is not a decoration; it has to be judged either way."""
+    asked = threading.Event()
+    stream = Stream(tty=False)
+
+    with statusbar.pinned(
+        URL,
+        stream=stream,
+        probe=lambda: False,
+        diagnose=lambda: asked.set() or False,
+    ):
+        # Piped output, a dumb terminal or --no-status-bar all land here.
+        # Without a watcher the run hangs with nothing to explain it.
+        assert asked.wait(2), "the diagnosis must run without a bar to draw"
+
+
+def test_a_disabled_bar_draws_nothing():
+    stream = Stream(tty=False)
+
+    with statusbar.pinned(URL, stream=stream, probe=lambda: False):
+        pass
+
+    assert stream.text == ""

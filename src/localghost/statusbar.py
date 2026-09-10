@@ -314,11 +314,26 @@ class _Bar:
 
 
 class _Disabled:
-    """The no-op the caller gets when the terminal cannot host a bar."""
+    """What the caller gets when the terminal cannot host a bar.
 
-    def __init__(self) -> None:
+    It draws nothing, but it still watches. Whether the application came up
+    somewhere the hub can reach is a fact about the run, not about the
+    terminal, and a piped run left unwatched simply hangs.
+    """
+
+    def __init__(self, diagnose: Callable[[], object] | None = None) -> None:
         self.ready_event = threading.Event()
         self.ready_event.set()
+        self._stop = threading.Event()
+        self._watcher: threading.Thread | None = None
+        if diagnose is not None:
+            self._watcher = threading.Thread(
+                target=_poll_until_ready,
+                args=(lambda: False, self._stop),
+                kwargs={"abort": diagnose},
+                daemon=True,
+            )
+            self._watcher.start()
 
     def resize(self) -> None:
         pass
@@ -328,6 +343,9 @@ class _Disabled:
 
     def status(self, message: str) -> None:
         pass
+
+    def stop(self) -> None:
+        self._stop.set()
 
 
 def supported(stream, *, enabled: bool = True) -> bool:
@@ -366,7 +384,11 @@ def pinned(
 
         stream = sys.stdout
     if not supported(stream, enabled=enabled):
-        yield _Disabled()
+        unwatched = _Disabled(diagnose)
+        try:
+            yield unwatched
+        finally:
+            unwatched.stop()
         return
     bar = _Bar(url, stream, probe, message, secondary_url, diagnose)
     bar.start()
