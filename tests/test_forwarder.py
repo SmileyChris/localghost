@@ -124,3 +124,58 @@ def test_gateway_is_none_when_the_output_is_not_an_address(monkeypatch):
     )
 
     assert forwarder.gateway() is None
+
+
+def test_available_needs_both_a_gateway_and_bind_detection(monkeypatch):
+    monkeypatch.setattr(forwarder, "gateway", lambda: "172.17.0.1")
+    monkeypatch.setattr(forwarder.sys, "platform", "linux")
+    assert forwarder.available()
+
+    # Without /proc nothing can tell that a bind needs relaying, so promising
+    # a relay would strand the application with no wider bind to fall back on.
+    monkeypatch.setattr(forwarder.sys, "platform", "darwin")
+    assert not forwarder.available()
+
+
+def test_available_is_false_without_a_gateway(monkeypatch):
+    monkeypatch.setattr(forwarder, "gateway", lambda: None)
+    monkeypatch.setattr(forwarder.sys, "platform", "linux")
+
+    assert not forwarder.available()
+
+
+def test_the_hub_cannot_reach_loopback_on_linux(monkeypatch):
+    monkeypatch.setattr(forwarder.sys, "platform", "linux")
+
+    # The bridge connects over the host gateway, which no loopback socket
+    # accepts, so a loopback bind genuinely cannot be served.
+    assert not forwarder.hub_reaches_loopback()
+
+
+def test_a_loopback_bind_is_left_alone_where_docker_runs_in_a_vm(monkeypatch):
+    monkeypatch.setattr(forwarder.sys, "platform", "darwin")
+
+    # There the connection is proxied by a process on the host itself, which
+    # reaches loopback. Condemning such a run would break what works today.
+    assert forwarder.hub_reaches_loopback()
+
+
+def test_a_long_lived_connection_survives_others_coming_and_going(echo):
+    """The HMR pattern: one socket held open while page requests churn."""
+    port = _free_port()
+
+    with (
+        forwarder.forwarding(echo, bind="127.0.0.1", port=port),
+        socket.create_connection(("127.0.0.1", port), timeout=5) as hmr,
+    ):
+        hmr.sendall(b"subscribe")
+        assert hmr.recv(4096) == b"SUBSCRIBE"
+
+        for index in range(10):
+            with socket.create_connection(("127.0.0.1", port), timeout=5) as page:
+                page.sendall(f"get {index}".encode())
+                assert page.recv(4096) == f"GET {index}".encode()
+
+        # Still the same socket, still relaying, after all of that.
+        hmr.sendall(b"update")
+        assert hmr.recv(4096) == b"UPDATE"

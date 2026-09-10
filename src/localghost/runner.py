@@ -521,8 +521,7 @@ def astro_command(cwd: Path, requested_port: int | None) -> tuple[int, tuple[str
         *commands[manager],
         "--port",
         "{port}",
-        "--host",
-        "0.0.0.0",
+        *_host_flags(),
     )
 
 
@@ -706,6 +705,8 @@ def execute(
         resolve, which also ends the wait blocking on it.
         """
         if child is None or unreachable or bridged:
+            return False
+        if forwarder.hub_reaches_loopback():
             return False
         found = ports.loopback_only(child.pid, plan.port)
         if found is None:
@@ -1056,6 +1057,16 @@ def _report_skipped_port(wanted: int, selected: int) -> None:
     warning("Port in use", [detail])
 
 
+def _host_flags() -> tuple[str, ...]:
+    """`--host 0.0.0.0` only where nothing else can reach the application.
+
+    The wider bind exposes the application port to the LAN. A relay reaches a
+    loopback bind without that, so where one can be raised the flag is not
+    worth asking for; where one cannot, it is the only thing that works.
+    """
+    return () if forwarder.available() else ("--host", "0.0.0.0")
+
+
 def _dev_script_runs(script: str, tool: str) -> bool:
     """Does the `dev` script invoke `tool` itself, rather than something else?
 
@@ -1099,8 +1110,7 @@ def vite_command(cwd: Path, requested_port: int | None) -> tuple[int, tuple[str,
     }
     return requested_port or 5173, (
         *commands[manager],
-        "--host",
-        "0.0.0.0",
+        *_host_flags(),
         "--port",
         "{port}",
         "--strictPort",

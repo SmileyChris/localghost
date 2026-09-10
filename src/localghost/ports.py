@@ -7,6 +7,7 @@ import glob
 import ipaddress
 import os
 import socket
+import subprocess
 import sys
 from dataclasses import dataclass
 
@@ -202,10 +203,47 @@ def _decode_address(packed: str) -> str:
     return socket.inet_ntop(socket.AF_INET6, ordered)
 
 
-def listeners(pgid: int) -> list[Listener]:
-    """Every address a process group is listening on, as far as /proc says."""
-    if not sys.platform.startswith("linux"):
+def _proc_available() -> bool:
+    return os.path.exists("/proc/net/tcp")
+
+
+# lsof ships with macOS and most Linux distributions, understands process
+# groups directly, and its -F output is designed to be parsed.
+_LSOF_QUERY = ("lsof", "-a", "-g", "{pgid}", "-iTCP", "-sTCP:LISTEN", "-nP", "-Fn")
+
+
+def _lsof_listeners(pgid: int) -> list[Listener]:
+    command = tuple(part.format(pgid=pgid) for part in _LSOF_QUERY)
+    try:
+        result = subprocess.run(
+            command, capture_output=True, text=True, check=False
+        )
+    except OSError:
         return []
+    found = []
+    for line in result.stdout.splitlines():
+        if not line.startswith("n"):
+            continue
+        host, _, port = line[1:].rpartition(":")
+        # lsof writes a wildcard bind as "*", which has to mean what the
+        # /proc reader calls 0.0.0.0 or the loopback verdict would flip.
+        host = "0.0.0.0" if host == "*" else host.strip("[]")
+        try:
+            found.append(Listener(host, int(port)))
+        except ValueError:
+            continue
+    return found
+
+
+def listeners(pgid: int) -> list[Listener]:
+    """Every address a process group is listening on, as far as it can be read.
+
+    /proc answers this without spawning anything, so it is preferred where it
+    exists. Elsewhere -- macOS above all -- lsof answers the same question,
+    which keeps a run diagnosable on hosts the /proc reader cannot serve.
+    """
+    if not _proc_available():
+        return _lsof_listeners(pgid)
     inodes = _group_socket_inodes(pgid)
     if not inodes:
         return []

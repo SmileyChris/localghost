@@ -8,19 +8,23 @@ uses [Semantic Versioning](https://semver.org/).
 ### Added
 
 - A foreground `run` whose application binds only loopback is now relayed to
-  rather than refused. The relay listens on the Docker gateway address alone,
-  on the same port the application took, so the hub reaches it while the LAN
-  and any tailnet address cannot -- narrower than the `--host 0.0.0.0` the
-  generated Vite and Astro commands pass. Dev scripts that swallow those flags
-  therefore work without being changed. Where the gateway cannot be determined
-  or bound, the run still ends with an explanation.
+  rather than left unreachable. The relay listens on the Docker gateway address
+  alone, on the same port the application took, so the hub reaches it while
+  the LAN and any tailnet address cannot. Dev scripts that swallow `--host`
+  therefore work without being changed. On Linux, where no gateway can be found
+  or bound, the run ends with an explanation instead of waiting forever.
 
 ### Changed
 
+- Where the relay is available, the generated Vite and Astro commands no
+  longer pass `--host 0.0.0.0`, which exposed the application port to the LAN.
+  They still pass it where no relay can be raised, since the wider bind is then
+  the only thing that works.
+- Relaying and diagnosing no longer depend on the status bar being drawn. A
+  piped run, a dumb terminal or `--no-status-bar` got neither, and waited.
 - The readiness probe resolves `localhost` rather than dialling 127.0.0.1, so
-  an application bound only to the IPv6 loopback is seen. A run is also ended
-  with an explanation when the application comes up on loopback alone, which
-  the hub cannot reach from its container; it previously waited forever.
+  an application bound only to the IPv6 loopback is seen. A loopback bind no
+  longer counts as ready on its own, since the hub cannot reach it unrelayed.
 - Choosing the next free port now says which port was passed over and what is
   holding it. Walking on silently hid the one fact that explains a dev server
   starting somewhere the public URL does not point.

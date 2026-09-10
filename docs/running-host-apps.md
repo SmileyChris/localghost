@@ -333,10 +333,13 @@ at `billing` rather than climbing to an unrelated top-level manifest.
 
 ### Wrapper scripts
 
-Localghost passes `--host 0.0.0.0` and `--port` through the package manager so
-the actual dev server listens on an interface the bridge can reach. If the
-`dev` script calls another script, that wrapper must forward the arguments or
-they will be silently discarded, leaving the server bound to localhost.
+Localghost passes `--port` through the package manager, with `--strictPort` for
+Vite, so the dev server takes the port the bridge points at rather than
+wandering off it. Where no relay is available it also passes `--host 0.0.0.0`
+(see [Loopback-bound servers](#loopback-bound-servers)). If the `dev` script
+calls another script, that wrapper must forward the arguments or they are
+silently discarded, and localghost warns when it can see a `dev` script that
+does not invoke the tool itself.
 
 For example:
 
@@ -355,13 +358,28 @@ The wrapper should pass its arguments to the nested package script:
 npm run dev:vite -- "$@"
 ```
 
-The `"$@"` passes Localghost's arguments through to Vite; without it, the
-bridge cannot reach the server.
+The `"$@"` passes Localghost's arguments through to Vite. Without it the server
+starts on its own default port, and binds loopback where localghost would have
+asked for a wider interface.
+
+### Loopback-bound servers
+
+The bridge reaches the host over the Docker gateway address, which a server
+bound to `127.0.0.1` or `[::1]` does not accept. On Linux, `run` notices when the
+application comes up on loopback alone and relays to it from the gateway address
+only, on the same port, so the bridge reaches it while the LAN does not. Because
+that relay can stand in for a wider bind, localghost does not ask Vite or Astro
+for `--host 0.0.0.0` where one is available.
+
+Where no relay can be raised, localghost passes `--host 0.0.0.0` instead. On
+Linux, an application that still comes up on loopback then ends the run with an
+explanation rather than leaving it waiting.
 
 ## Notes
 
-- The host process must listen on `0.0.0.0`, not `127.0.0.1`, so the Caddy
-  bridge can reach it.
+- The host process must be reachable from the Caddy bridge: on a Docker-reachable
+  interface, or on loopback where `run` can relay to it (see
+  [Loopback-bound servers](#loopback-bound-servers)).
 - The bridge container uses the pinned `caddy:2.11.4-alpine` image.
 - Django's `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS` may need updating for the
   `.localhost` hostname — localghost warns about missing values when possible.

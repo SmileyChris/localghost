@@ -7,7 +7,18 @@ from subprocess import CompletedProcess
 import click
 import pytest
 
-from localghost import ports, runner
+from localghost import forwarder, ports, runner
+
+
+@pytest.fixture(autouse=True)
+def no_relay(monkeypatch):
+    """Build plans as though no relay were possible, unless a test says so.
+
+    Whether the wider --host bind is asked for depends on it, so without
+    pinning this the generated command would vary with whether Docker
+    happens to be running on the machine under test.
+    """
+    monkeypatch.setattr(forwarder, "available", lambda: False)
 
 
 def executable(monkeypatch, *names):
@@ -1955,3 +1966,69 @@ def test_execute_ends_the_run_when_the_gateway_cannot_be_bound(monkeypatch, free
 
     with pytest.raises(click.ClickException):
         runner.execute(plan, lambda: None, public_origin="http://d.localhost")
+
+
+def test_vite_omits_the_host_flag_when_a_relay_can_replace_it(monkeypatch, tmp_path):
+    _node_project(tmp_path, "vite dev")
+    executable(monkeypatch, "npm")
+    monkeypatch.setattr(runner.forwarder, "available", lambda: True)
+
+    command = runner.vite_command(tmp_path, None)[1]
+
+    # --host 0.0.0.0 opens the port to the LAN. Where the relay can reach a
+    # loopback application instead, asking for the wider bind is the worse
+    # of the two, so it is not asked for.
+    assert "--host" not in command
+    assert "--strictPort" in command
+
+
+def test_vite_keeps_the_host_flag_when_no_relay_is_possible(monkeypatch, tmp_path):
+    _node_project(tmp_path, "vite dev")
+    executable(monkeypatch, "npm")
+    monkeypatch.setattr(runner.forwarder, "available", lambda: False)
+
+    command = runner.vite_command(tmp_path, None)[1]
+
+    # Without a relay, a loopback bind is unreachable and the wider bind is
+    # the only thing that works at all.
+    assert "--host" in command and "0.0.0.0" in command
+
+
+def test_astro_omits_the_host_flag_when_a_relay_can_replace_it(monkeypatch, tmp_path):
+    _node_project(tmp_path, "astro dev", dep="astro")
+    executable(monkeypatch, "npm")
+    monkeypatch.setattr(runner.forwarder, "available", lambda: True)
+
+    assert "--host" not in runner.astro_command(tmp_path, None)[1]
+
+
+def test_astro_keeps_the_host_flag_when_no_relay_is_possible(monkeypatch, tmp_path):
+    _node_project(tmp_path, "astro dev", dep="astro")
+    executable(monkeypatch, "npm")
+    monkeypatch.setattr(runner.forwarder, "available", lambda: False)
+
+    assert "--host" in runner.astro_command(tmp_path, None)[1]
+
+
+def test_execute_leaves_a_loopback_bind_alone_where_the_hub_can_reach_it(
+    monkeypatch, free_port
+):
+    calls = _loopback_run(monkeypatch, gateway=None)
+    monkeypatch.setattr(runner.forwarder, "hub_reaches_loopback", lambda: True)
+    terminated = []
+    monkeypatch.setattr(
+        runner, "_terminate_process_tree", lambda child, sig: terminated.append(sig)
+    )
+
+    class Child:
+        pid = 4321
+
+        def wait(self):
+            assert calls["diagnose"]() is False
+            return 0
+
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *a, **k: Child())
+    plan = runner.RunPlan("demo", "vite", ("x",), 5174, "p", "")
+
+    assert runner.execute(plan, lambda: None, public_origin="http://d.localhost") == 0
+    assert not terminated

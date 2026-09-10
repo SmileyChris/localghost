@@ -108,16 +108,20 @@ it. Nothing else on the network can reach that address: the hub can, while the
 LAN and any tailnet address cannot. The relay lives only as long as the
 foreground run.
 
-This is narrower than the alternative. The generated Vite and Astro commands
-pass `--host 0.0.0.0`, which does expose that application port to the LAN
-wherever the dev script honours the flag; prefer a Docker-specific host
-interface where you choose one yourself, and use a host firewall on untrusted
-networks.
+This is narrower than the alternative, a wildcard bind, which exposes the
+application port to the LAN. Where a relay is available, the generated Vite and
+Astro commands therefore no longer ask for `--host 0.0.0.0`; they still do where
+it is not, since the wider bind is then the only thing that works. When
+choosing a bind yourself, prefer a Docker-specific host interface, and use a
+host firewall on untrusted networks.
 
 The relay does not start where the gateway address cannot be determined or
-cannot be bound, which includes hosts where Docker runs inside a VM. There the
-application must listen on a Docker-reachable interface as before, and a run
-that cannot be reached ends with an explanation rather than waiting.
+cannot be bound. On Linux the application must then listen on a
+Docker-reachable interface as before, and a run that comes up unreachable ends
+with an explanation rather than waiting. Where Docker runs inside a VM, the
+bridge does not reach the host over a host gateway, so localghost neither
+relays nor refuses a loopback bind there; whether it is reachable depends on
+how that installation routes `host.docker.internal`.
 
 Relaying applies to tailnet hosting too. An application bound to loopback
 becomes reachable by authorized tailnet devices along with every other

@@ -1,6 +1,7 @@
 """Host port availability, selection, and diagnosing whoever holds one."""
 
 import os
+import shutil
 import signal
 import socket
 import subprocess
@@ -163,3 +164,43 @@ def test_loopback_only_ignores_a_sibling_bound_elsewhere():
         assert ports.loopback_only(child.pid, port + 1) is None
     finally:
         os.killpg(child.pid, signal.SIGKILL)
+
+
+@pytest.fixture
+def without_proc(monkeypatch):
+    """Force the portable backend, as a host without /proc would."""
+    monkeypatch.setattr(ports, "_proc_available", lambda: False)
+
+
+@pytest.mark.skipif(shutil.which("lsof") is None, reason="needs lsof")
+@pytest.mark.parametrize("host", ["127.0.0.1", "0.0.0.0", "::1"])
+def test_listeners_without_proc_reads_every_address_family(without_proc, host):
+    child, port = _listening_child(host)
+    try:
+        found = ports.listeners(child.pid)
+    finally:
+        os.killpg(child.pid, signal.SIGKILL)
+
+    # lsof writes a wildcard as "*", which has to mean the same thing the
+    # /proc reader means by 0.0.0.0 or the loopback verdict flips.
+    assert ports.Listener(host, port) in found
+
+
+@pytest.mark.skipif(shutil.which("lsof") is None, reason="needs lsof")
+def test_loopback_only_agrees_across_both_backends(without_proc):
+    child, port = _listening_child("0.0.0.0")
+    try:
+        assert ports.loopback_only(child.pid, port) is None
+    finally:
+        os.killpg(child.pid, signal.SIGKILL)
+
+
+def test_listeners_without_proc_is_empty_when_lsof_is_missing(
+    without_proc, monkeypatch
+):
+    def explode(command, **kwargs):
+        raise OSError("no lsof")
+
+    monkeypatch.setattr(ports.subprocess, "run", explode)
+
+    assert ports.listeners(1) == []

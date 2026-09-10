@@ -20,6 +20,7 @@ import contextlib
 import ipaddress
 import socket
 import subprocess
+import sys
 import threading
 from collections.abc import Iterator
 
@@ -38,6 +39,31 @@ _GATEWAY_QUERY = (
     "--format",
     "{{range .IPAM.Config}}{{.Gateway}}{{end}}",
 )
+
+
+def hub_reaches_loopback() -> bool:
+    """Does the hub's bridge reach a host application bound to loopback?
+
+    On Linux it connects over the host gateway address, which no loopback
+    socket accepts, so such an application genuinely cannot be served without
+    help. Where Docker runs in a VM the connection is instead proxied by a
+    process on the host itself, which can reach loopback -- so a loopback
+    bind is not known to be a problem there and is left alone rather than
+    condemned on a guess.
+    """
+    return not sys.platform.startswith("linux")
+
+
+def available() -> bool:
+    """Can a relay stand in for an application that binds only loopback?
+
+    Both halves have to hold. Reading what a process group bound needs
+    /proc, and the gateway address has to be knowable. Where either is
+    missing there is nothing to relay with, and an application must be asked
+    for the wider bind instead -- so this is what decides whether asking is
+    still necessary.
+    """
+    return sys.platform.startswith("linux") and gateway() is not None
 
 
 def gateway() -> str | None:
