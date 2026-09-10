@@ -1813,6 +1813,8 @@ def test_execute_stops_a_run_the_hub_could_never_reach(monkeypatch, free_port):
     monkeypatch.setattr(
         ports, "loopback_only", lambda pgid, port: ports.Listener("::1", port)
     )
+    # No gateway to relay from, so there is nothing left but to explain.
+    monkeypatch.setattr(runner.forwarder, "gateway", lambda: None)
     terminated = []
     monkeypatch.setattr(
         runner,
@@ -1859,3 +1861,97 @@ def test_execute_keeps_waiting_while_nothing_is_listening_yet(monkeypatch, free_
     assert (
         runner.execute(plan, lambda: None, public_origin="http://demo.localhost") == 0
     )
+
+
+def _loopback_run(monkeypatch, gateway="172.17.0.1"):
+    """A run whose application comes up on loopback alone."""
+    monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
+    monkeypatch.setattr(runner, "stop_bridge", lambda plan: None)
+    monkeypatch.setattr(
+        ports, "loopback_only", lambda pgid, port: ports.Listener("::1", port)
+    )
+    monkeypatch.setattr(runner.forwarder, "gateway", lambda: gateway)
+    return _pin_recorder(monkeypatch)
+
+
+def test_execute_forwards_a_loopback_application_instead_of_ending_the_run(
+    monkeypatch, free_port
+):
+    calls = _loopback_run(monkeypatch)
+    forwarded = {}
+
+    @contextlib.contextmanager
+    def fake_forwarding(target, *, bind, port):
+        forwarded.update(target=target, bind=bind, port=port)
+        yield
+
+    monkeypatch.setattr(runner.forwarder, "forwarding", fake_forwarding)
+    terminated = []
+    monkeypatch.setattr(
+        runner, "_terminate_process_tree", lambda child, sig: terminated.append(sig)
+    )
+
+    class Child:
+        pid = 4321
+
+        def wait(self):
+            # The watcher notices mid-wait; forwarding must make it workable.
+            assert calls["diagnose"]() is False
+            return 0
+
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *a, **k: Child())
+    plan = runner.RunPlan("demo", "vite", ("x",), 5174, "p", "")
+
+    assert runner.execute(plan, lambda: None, public_origin="http://d.localhost") == 0
+    assert not terminated, "a reachable route means there is nothing to abort"
+    # Same port, different interface: the bridge's route needs no change.
+    assert forwarded["bind"] == "172.17.0.1" and forwarded["port"] == 5174
+    assert forwarded["target"].host == "::1"
+
+
+def test_execute_ends_the_run_when_the_gateway_cannot_be_found(monkeypatch, free_port):
+    calls = _loopback_run(monkeypatch, gateway=None)
+    terminated = []
+    monkeypatch.setattr(
+        runner, "_terminate_process_tree", lambda child, sig: terminated.append(sig)
+    )
+
+    class Child:
+        pid = 4321
+
+        def wait(self):
+            assert calls["diagnose"]() is True
+            return 0
+
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *a, **k: Child())
+    plan = runner.RunPlan("demo", "vite", ("x",), 5174, "p", "")
+
+    with pytest.raises(click.ClickException):
+        runner.execute(plan, lambda: None, public_origin="http://d.localhost")
+    assert terminated
+
+
+def test_execute_ends_the_run_when_the_gateway_cannot_be_bound(monkeypatch, free_port):
+    calls = _loopback_run(monkeypatch)
+
+    @contextlib.contextmanager
+    def refuse(target, *, bind, port):
+        raise OSError("cannot assign requested address")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(runner.forwarder, "forwarding", refuse)
+    monkeypatch.setattr(runner, "_terminate_process_tree", lambda child, sig: None)
+
+    class Child:
+        pid = 4321
+
+        def wait(self):
+            # Binding is the real test of the gateway; failing it is decisive.
+            assert calls["diagnose"]() is True
+            return 0
+
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *a, **k: Child())
+    plan = runner.RunPlan("demo", "vite", ("x",), 5174, "p", "")
+
+    with pytest.raises(click.ClickException):
+        runner.execute(plan, lambda: None, public_origin="http://d.localhost")

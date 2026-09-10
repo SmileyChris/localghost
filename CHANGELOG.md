@@ -5,6 +5,16 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- A foreground `run` whose application binds only loopback is now relayed to
+  rather than refused. The relay listens on the Docker gateway address alone,
+  on the same port the application took, so the hub reaches it while the LAN
+  and any tailnet address cannot -- narrower than the `--host 0.0.0.0` the
+  generated Vite and Astro commands pass. Dev scripts that swallow those flags
+  therefore work without being changed. Where the gateway cannot be determined
+  or bound, the run still ends with an explanation.
+
 ### Changed
 
 - The readiness probe resolves `localhost` rather than dialling 127.0.0.1, so

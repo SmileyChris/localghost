@@ -97,10 +97,32 @@ for the dashboard, or a restricted socket proxy. The CLI's scaffolding is
 limited to local Compose integration.
 
 The optional host bridge uses a pinned Caddy image and connects to
-`host.docker.internal`. A host application must listen on a Docker-reachable
-interface; binding it to `0.0.0.0` may also expose that application port to the
-LAN. Prefer a Docker-specific host interface where available and use a host
-firewall on untrusted networks.
+`host.docker.internal`, reaching the host over the Docker gateway address. An
+application bound to `127.0.0.1` or `[::1]` does not accept that, so it cannot
+be reached through its public URL on its own.
+
+Rather than requiring such an application to widen what it bound, a foreground
+`run` relays to it. The relay listens on the Docker gateway address only, on
+the same port the application took on loopback, and forwards each connection to
+it. Nothing else on the network can reach that address: the hub can, while the
+LAN and any tailnet address cannot. The relay lives only as long as the
+foreground run.
+
+This is narrower than the alternative. The generated Vite and Astro commands
+pass `--host 0.0.0.0`, which does expose that application port to the LAN
+wherever the dev script honours the flag; prefer a Docker-specific host
+interface where you choose one yourself, and use a host firewall on untrusted
+networks.
+
+The relay does not start where the gateway address cannot be determined or
+cannot be bound, which includes hosts where Docker runs inside a VM. There the
+application must listen on a Docker-reachable interface as before, and a run
+that cannot be reached ends with an explanation rather than waiting.
+
+Relaying applies to tailnet hosting too. An application bound to loopback
+becomes reachable by authorized tailnet devices along with every other
+application the hub serves, so bind deliberately when a service is meant to
+stay on one machine.
 
 The foreground `run` command executes detected Django runners and Vite package
 scripts with the checkout user's normal host permissions. Review application

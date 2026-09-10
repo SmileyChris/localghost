@@ -19,7 +19,7 @@ from pathlib import Path
 import click
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
-from . import ports, statusbar
+from . import forwarder, ports, statusbar
 from .feedback import info, interrupt_break, warning
 from .generator import (
     DNS_SAFE_PROJECT,
@@ -688,20 +688,44 @@ def execute(
     status = 1
     cleanup_error: Exception | None = None
     unreachable: list[ports.Listener] = []
+    relays = contextlib.ExitStack()
+    bridged: list[ports.Listener] = []
     old_handlers = _install_termination_handlers()
 
     def hopeless() -> bool:
-        """Has the application come up somewhere the hub can never reach?
+        """Has the application come up somewhere the hub cannot reach?
 
-        Asked between failed readiness probes. The child is stopped rather
-        than left running behind a URL that cannot resolve, which also ends
-        the wait blocking on it.
+        Asked before each readiness probe, because an application bound to
+        loopback answers this process while staying unreachable by the hub.
+        Where the Docker gateway can be bound, relaying from it makes the
+        route work without asking the application to widen what it chose;
+        that is not a reason to keep waiting, so the answer stays False.
+
+        Only when no relay can be raised is the run hopeless. The child is
+        then stopped rather than left running behind a URL that cannot
+        resolve, which also ends the wait blocking on it.
         """
-        if child is None or unreachable:
+        if child is None or unreachable or bridged:
             return False
         found = ports.loopback_only(child.pid, plan.port)
         if found is None:
             return False
+        address = forwarder.gateway()
+        if address is not None:
+            try:
+                relays.enter_context(
+                    forwarder.forwarding(found, bind=address, port=plan.port)
+                )
+            except OSError:
+                # Binding is the only real test of the gateway address.
+                pass
+            else:
+                bridged.append(found)
+                info(
+                    f"Application bound {_address(found)}; relaying from "
+                    f"{address}:{plan.port} so the hub can reach it."
+                )
+                return False
         unreachable.append(found)
         _terminate_process_tree(child, signal.SIGTERM)
         return True
@@ -778,6 +802,7 @@ def execute(
                         cleanup_error = exc
                 except Exception as exc:  # preserve the child status below
                     cleanup_error = exc
+            relays.close()
             _restore_termination_handlers(old_handlers)
         except _ForceQuit:
             # A force-quit landed during the final bookkeeping; exit with
@@ -797,11 +822,16 @@ def execute(
     return status
 
 
+def _address(found: ports.Listener) -> str:
+    """Render a listener the way a reader expects to see it written."""
+    host = f"[{found.host}]" if ":" in found.host else found.host
+    return f"{host}:{found.port}"
+
+
 def _unreachable_message(plan: RunPlan, found: ports.Listener) -> str:
     """Explain an application that started somewhere the hub cannot reach."""
-    address = f"[{found.host}]" if ":" in found.host else found.host
     lines = [
-        f"the application is listening on {address}:{found.port}, which the "
+        f"the application is listening on {_address(found)}, which the "
         "hub cannot reach",
         "  it binds loopback only, and the hub connects from a container over "
         "the host gateway",
