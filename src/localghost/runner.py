@@ -208,9 +208,10 @@ def build_plan(
             )
         else:  # Click validates the public option; retain this for direct callers.
             raise click.ClickException(type_choices("--type"))
-        selected_port = ports.select_port(
-            port or default_port, strict=port is not None
-        )
+        wanted_port = port or default_port
+        selected_port = ports.select_port(wanted_port, strict=port is not None)
+        if selected_port != wanted_port:
+            _report_skipped_port(wanted_port, selected_port)
         selected_command = tuple(
             part.format(port=selected_port) for part in selected_command
         )
@@ -686,7 +687,24 @@ def execute(
     child: subprocess.Popen[bytes] | None = None
     status = 1
     cleanup_error: Exception | None = None
+    unreachable: list[ports.Listener] = []
     old_handlers = _install_termination_handlers()
+
+    def hopeless() -> bool:
+        """Has the application come up somewhere the hub can never reach?
+
+        Asked between failed readiness probes. The child is stopped rather
+        than left running behind a URL that cannot resolve, which also ends
+        the wait blocking on it.
+        """
+        if child is None or unreachable:
+            return False
+        found = ports.loopback_only(child.pid, plan.port)
+        if found is None:
+            return False
+        unreachable.append(found)
+        _terminate_process_tree(child, signal.SIGTERM)
+        return True
     try:
         # Opened before the hub is reconciled: that is the slowest step of a
         # cold start, and the URL is most wanted while waiting on it. Hub and
@@ -698,6 +716,7 @@ def execute(
             enabled=status_bar and public_origin is not None,
             probe=statusbar.tcp_probe(plan.port),
             message="starting hub",
+            diagnose=hopeless,
         ) as bar:
             start_proxy()
             bridge_attempted = True
@@ -771,7 +790,32 @@ def execute(
         )
         if status == 0:
             return 1
+    if unreachable:
+        # Raised only once the bar has been released and the bridge torn
+        # down, so the diagnosis is the last thing left on screen.
+        raise click.ClickException(_unreachable_message(plan, unreachable[0]))
     return status
+
+
+def _unreachable_message(plan: RunPlan, found: ports.Listener) -> str:
+    """Explain an application that started somewhere the hub cannot reach."""
+    address = f"[{found.host}]" if ":" in found.host else found.host
+    lines = [
+        f"the application is listening on {address}:{found.port}, which the "
+        "hub cannot reach",
+        "  it binds loopback only, and the hub connects from a container over "
+        "the host gateway",
+        f"  it must listen on all interfaces for http://{plan.name}.localhost "
+        "to resolve",
+    ]
+    if plan.type in ("vite", "astro"):
+        lines.append(
+            f"  the dev script appears to drop the --host localghost passes; "
+            f"forward \"$@\" to {plan.type}, or name the command directly: "
+            f"localghost run --port {plan.port} -- <command> --host 0.0.0.0 "
+            f"--port {plan.port}"
+        )
+    return "\n".join(lines)
 
 
 def django_settings_warnings(
@@ -960,6 +1004,26 @@ def _package_json_with_dev_script_and_dep(
     if not _has_dependency(value, dep):
         return None
     return value
+
+
+def _report_skipped_port(wanted: int, selected: int) -> None:
+    """Say which port was passed over, and to whom.
+
+    Walking on silently hides the one fact that explains a dev server coming
+    up somewhere the public URL does not point: an application that ignores
+    the port it is given starts from its own default, meets the same squatter
+    and picks its own replacement.
+    """
+    held = ports.holder(wanted)
+    detail = f"Port {wanted} is in use, so {selected} was chosen instead."
+    if held is not None and held.pid is not None:
+        detail += f" It is held by pid {held.pid}"
+        if held.command:
+            detail += f": {held.command}"
+        detail += "."
+        if held.directory:
+            detail += f" Working directory: {held.directory}."
+    warning("Port in use", [detail])
 
 
 def _dev_script_runs(script: str, tool: str) -> bool:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import errno
 import glob
+import ipaddress
 import os
 import socket
 import sys
@@ -150,3 +151,106 @@ def _directory(pid: int) -> str | None:
         return os.readlink(f"/proc/{pid}/cwd")
     except OSError:
         return None
+
+
+@dataclass(frozen=True)
+class Listener:
+    """A socket a process group is accepting connections on."""
+
+    host: str
+    port: int
+
+
+def _pids_in_group(pgid: int) -> list[int]:
+    found = []
+    for entry in glob.glob("/proc/[0-9]*/stat"):
+        try:
+            with open(entry, encoding="utf-8", errors="replace") as handle:
+                data = handle.read()
+        except OSError:
+            continue
+        try:
+            # comm can hold spaces and brackets; the fields after the last
+            # ")" are the only ones that can be split safely.
+            fields = data[data.rindex(")") + 2 :].split()
+            if int(fields[2]) == pgid:
+                found.append(int(entry.split("/")[2]))
+        except (ValueError, IndexError):
+            continue
+    return found
+
+
+def _group_socket_inodes(pgid: int) -> set[str]:
+    inodes = set()
+    for pid in _pids_in_group(pgid):
+        for descriptor in glob.glob(f"/proc/{pid}/fd/*"):
+            try:
+                target = os.readlink(descriptor)
+            except OSError:
+                continue
+            if target.startswith("socket:["):
+                inodes.add(target[8:-1])
+    return inodes
+
+
+def _decode_address(packed: str) -> str:
+    raw = bytes.fromhex(packed)
+    if len(raw) == 4:
+        return socket.inet_ntop(socket.AF_INET, raw[::-1])
+    # /proc stores IPv6 as four little-endian words.
+    ordered = b"".join(raw[index : index + 4][::-1] for index in range(0, 16, 4))
+    return socket.inet_ntop(socket.AF_INET6, ordered)
+
+
+def listeners(pgid: int) -> list[Listener]:
+    """Every address a process group is listening on, as far as /proc says."""
+    if not sys.platform.startswith("linux"):
+        return []
+    inodes = _group_socket_inodes(pgid)
+    if not inodes:
+        return []
+    found = []
+    for table in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            with open(table, encoding="ascii") as handle:
+                rows = handle.read().splitlines()[1:]
+        except OSError:
+            continue
+        for row in rows:
+            fields = row.split()
+            if len(fields) > 9 and fields[3] == _LISTEN and fields[9] in inodes:
+                packed, port = fields[1].rsplit(":", 1)
+                found.append(Listener(_decode_address(packed), int(port, 16)))
+    return found
+
+
+def loopback_only(pgid: int, port: int) -> Listener | None:
+    """A listener to blame when nothing the group opened is reachable.
+
+    The hub reaches the host from inside a container, over its gateway
+    address, which no loopback socket will accept. An application that binds
+    only loopback is therefore up and working for direct use while its public
+    URL can never resolve -- a state the readiness probe alone reports as
+    "still starting", forever.
+
+    Only `port` is judged. A run routinely has other processes in the group
+    binding loopback on purpose -- a database the application talks to over
+    127.0.0.1, say -- and one of those appearing first during boot must not
+    condemn the application that has not finished starting.
+
+    None means there is nothing to say: either nothing holds `port` yet, or
+    what holds it is reachable.
+    """
+    opened = [item for item in listeners(pgid) if item.port == port]
+    if not opened:
+        return None
+    if any(not _is_loopback(item.host) for item in opened):
+        return None
+    return opened[0]
+
+
+def _is_loopback(host: str) -> bool:
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False

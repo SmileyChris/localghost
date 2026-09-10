@@ -3,10 +3,17 @@
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 
-## [3.1.1] - 2026-09-10
+## [Unreleased]
 
 ### Changed
 
+- The readiness probe resolves `localhost` rather than dialling 127.0.0.1, so
+  an application bound only to the IPv6 loopback is seen. A run is also ended
+  with an explanation when the application comes up on loopback alone, which
+  the hub cannot reach from its container; it previously waited forever.
+- Choosing the next free port now says which port was passed over and what is
+  holding it. Walking on silently hid the one fact that explains a dev server
+  starting somewhere the public URL does not point.
 - `run` refuses to start when something is already listening on the planned
   port, instead of warning and starting anyway onto a URL that then serves
   whatever was already there. On Linux the error names the process holding the

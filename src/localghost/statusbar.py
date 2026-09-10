@@ -117,10 +117,21 @@ def _bar_line(
 
 
 def _poll_until_ready(
-    probe: Callable[[], bool], stop: threading.Event, interval: float = _PROBE_SECONDS
+    probe: Callable[[], bool],
+    stop: threading.Event,
+    interval: float = _PROBE_SECONDS,
+    abort: Callable[[], object] | None = None,
 ) -> bool:
-    """Retry `probe` until it succeeds, or `stop` is set. True means ready."""
+    """Retry `probe` until it succeeds, or `stop` is set. True means ready.
+
+    `abort` judges whether the wait is worth continuing, and is asked before
+    the probe rather than after it. An application bound to loopback answers
+    this process while remaining unreachable by anything else, so a probe
+    that succeeds is not on its own evidence that the run can work.
+    """
     while not stop.is_set():
+        if abort is not None and abort():
+            return False
         try:
             if probe():
                 return True
@@ -133,9 +144,15 @@ def _poll_until_ready(
 
 
 def tcp_probe(
-    port: int, host: str = "127.0.0.1", timeout: float = 0.25
+    port: int, host: str = "localhost", timeout: float = 0.25
 ) -> Callable[[], bool]:
-    """Readiness probe for a host application: is anything listening yet?"""
+    """Readiness probe for a host application: is anything listening yet?
+
+    The host resolves rather than being an address, so every family it names
+    is tried in turn. Node dev servers bind the IPv6 loopback by default, and
+    dialling 127.0.0.1 alone leaves the bar spinning for an application that
+    answered seconds ago.
+    """
 
     def probe() -> bool:
         try:
@@ -186,8 +203,10 @@ class _Bar:
         probe: Callable[[], bool] | None,
         message: str = "starting",
         secondary_url: str | None = None,
+        diagnose: Callable[[], object] | None = None,
     ) -> None:
         self._url = url
+        self._diagnose = diagnose
         self._secondary_url = secondary_url
         self._stream = stream
         self._probe = probe
@@ -279,7 +298,7 @@ class _Bar:
 
     def _watch(self) -> None:
         assert self._probe is not None
-        if _poll_until_ready(self._probe, self._stop):
+        if _poll_until_ready(self._probe, self._stop, abort=self._diagnose):
             self.ready()
 
     def _repaint(self) -> None:
@@ -329,12 +348,18 @@ def pinned(
     enabled: bool = True,
     probe: Callable[[], bool] | None = None,
     message: str = "starting",
+    diagnose: Callable[[], object] | None = None,
 ) -> Iterator[object]:
     """Pin `url` to the last terminal row for the duration of the block.
 
     With a `probe`, the bar opens in a loading state and flips to ready once
     the probe first succeeds. A `secondary_url` (the mirrored tailnet route)
     is shown beside the primary while the window is wide enough.
+
+    `diagnose` is asked, between failed probes, whether waiting is still
+    worth it; a truthy answer stops the watch. It exists so a caller can end
+    a wait that would otherwise never finish, without this module needing to
+    know anything about why.
     """
     if stream is None:
         import sys
@@ -343,7 +368,7 @@ def pinned(
     if not supported(stream, enabled=enabled):
         yield _Disabled()
         return
-    bar = _Bar(url, stream, probe, message, secondary_url)
+    bar = _Bar(url, stream, probe, message, secondary_url, diagnose)
     bar.start()
     try:
         yield bar

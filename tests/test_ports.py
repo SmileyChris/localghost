@@ -1,7 +1,9 @@
 """Host port availability, selection, and diagnosing whoever holds one."""
 
 import os
+import signal
 import socket
+import subprocess
 import sys
 
 import click
@@ -97,3 +99,67 @@ def test_an_unidentifiable_holder_still_says_what_to_do(monkeypatch):
     # Nothing to list, so the message stays a single sentence rather than
     # trailing a colon into an empty block.
     assert ":\n" not in message
+
+
+def _listening_child(host):
+    """A child in its own session, as runner spawns applications."""
+    code = (
+        "import socket, time;"
+        f"family = socket.AF_INET6 if {host!r}.count(':') else socket.AF_INET;"
+        "s = socket.socket(family);"
+        "s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1);"
+        f"s.bind(({host!r}, 0)); s.listen(5); print(s.getsockname()[1], flush=True);"
+        "time.sleep(30)"
+    )
+    child = subprocess.Popen(
+        [sys.executable, "-c", code], stdout=subprocess.PIPE, start_new_session=True
+    )
+    port = int(child.stdout.readline())  # blocks until it is actually listening
+    return child, port
+
+
+@LINUX_ONLY
+def test_loopback_only_names_an_application_the_hub_cannot_reach():
+    child, port = _listening_child("127.0.0.1")
+    try:
+        found = ports.loopback_only(child.pid, port)
+    finally:
+        os.killpg(child.pid, signal.SIGKILL)
+
+    # A container reaches the host over its gateway address, which no
+    # loopback socket accepts, so the public URL can never resolve here.
+    assert found is not None and found.host == "127.0.0.1"
+
+
+@LINUX_ONLY
+def test_loopback_only_is_none_when_the_application_binds_every_interface():
+    child, port = _listening_child("0.0.0.0")
+    try:
+        found = ports.loopback_only(child.pid, port)
+    finally:
+        os.killpg(child.pid, signal.SIGKILL)
+
+    assert found is None
+
+
+@LINUX_ONLY
+def test_loopback_only_is_none_before_anything_is_listening():
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"], start_new_session=True
+    )
+    try:
+        # Still booting is not a diagnosis; the bar must keep waiting.
+        assert ports.loopback_only(child.pid, 5173) is None
+    finally:
+        os.killpg(child.pid, signal.SIGKILL)
+
+
+@LINUX_ONLY
+def test_loopback_only_ignores_a_sibling_bound_elsewhere():
+    """A database on loopback must not condemn the application still booting."""
+    child, port = _listening_child("127.0.0.1")
+    try:
+        # The application's own port is not open yet; only a sibling's is.
+        assert ports.loopback_only(child.pid, port + 1) is None
+    finally:
+        os.killpg(child.pid, signal.SIGKILL)

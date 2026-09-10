@@ -519,3 +519,72 @@ def test_releasing_the_region_puts_the_cursor_back():
     # before the reset -- otherwise the shell prompt lands back at row 1.
     chunk = emitted_with(stream, RESET_REGION)
     assert chunk.index(statusbar._SAVE_CURSOR) < chunk.index(RESET_REGION)
+
+
+def test_tcp_probe_sees_an_application_bound_only_over_ipv6():
+    sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+    sock.bind(("::1", 0))
+    sock.listen(5)
+    port = sock.getsockname()[1]
+
+    try:
+        # Node dev servers bind the IPv6 loopback by default. Dialling only
+        # 127.0.0.1 never sees them, and the bar spins for an application
+        # that came up seconds ago.
+        assert statusbar.tcp_probe(port)()
+    finally:
+        sock.close()
+
+
+def test_poll_until_ready_gives_up_when_the_abort_check_fires():
+    probed = []
+
+    def probe():
+        probed.append(1)
+        return False
+
+    ready = statusbar._poll_until_ready(
+        probe, threading.Event(), interval=0, abort=lambda: True
+    )
+
+    # Something has decided this run cannot work, so the poll ends without
+    # asking the probe whose answer could only mislead.
+    assert not ready
+    assert not probed
+
+
+def test_poll_until_ready_ends_a_hopeless_wait_the_probe_would_call_ready():
+    ready = statusbar._poll_until_ready(
+        lambda: True, threading.Event(), interval=0, abort=lambda: True
+    )
+
+    # An application bound to loopback answers this process while staying
+    # unreachable by the hub, so a probe that succeeds is not on its own
+    # evidence that the run can work.
+    assert not ready
+
+
+def test_poll_until_ready_is_ready_when_nothing_objects():
+    assert statusbar._poll_until_ready(
+        lambda: True, threading.Event(), interval=0, abort=lambda: False
+    )
+
+
+def test_pinned_passes_its_diagnosis_through_to_the_watcher(monkeypatch):
+    seen = {}
+
+    def fake_poll(probe, stop, interval=0.0, abort=None):
+        seen["abort"] = abort
+        return False
+
+    monkeypatch.setattr(statusbar, "_poll_until_ready", fake_poll)
+    stream = Stream()
+    marker = lambda: None  # noqa: E731
+
+    with statusbar.pinned(
+        URL, stream=stream, probe=lambda: False, diagnose=marker
+    ) as bar:
+        bar._watcher.join(1)
+
+    assert seen["abort"] is marker

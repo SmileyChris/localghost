@@ -1338,7 +1338,9 @@ def _pin_recorder(monkeypatch):
         enabled=True,
         probe=None,
         message="starting",
+        diagnose=None,
     ):
+        calls["diagnose"] = diagnose
         calls["url"] = url
         calls["secondary_url"] = secondary_url
         calls["enabled"] = enabled
@@ -1486,6 +1488,7 @@ def test_execute_pins_before_the_hub_is_reconciled(monkeypatch):
         enabled=True,
         probe=None,
         message="starting",
+        diagnose=None,
     ):
         order.append(f"pin:{message}")
 
@@ -1760,3 +1763,99 @@ def test_execute_does_not_break_the_line_for_a_termination_signal(
 
     # SIGTERM echoes nothing, so a break would only add a stray blank line.
     assert not breaks
+
+
+def test_build_plan_reports_the_port_it_had_to_walk_past(monkeypatch, tmp_path):
+    (tmp_path / "package.json").write_text(
+        json.dumps({"scripts": {"dev": "vite"}, "devDependencies": {"vite": "x"}})
+    )
+    executable(monkeypatch, "npm")
+    monkeypatch.setattr(ports, "port_available", lambda port: port != 5173)
+    monkeypatch.setattr(
+        ports,
+        "holder",
+        lambda port: ports.Holder(pid=99, command="vite dev", directory="/other"),
+    )
+    warnings = []
+    monkeypatch.setattr(
+        runner, "warning", lambda title, messages: warnings.append(list(messages))
+    )
+
+    plan = runner.build_plan(tmp_path, "demo", None, None, ())
+
+    # Walking silently hides the one fact that explains a dev server landing
+    # somewhere the public URL does not point.
+    assert plan.port == 5174
+    assert warnings, "expected the skipped port to be reported"
+    said = " ".join(warnings[0])
+    assert "5173" in said and "5174" in said and "99" in said and "/other" in said
+
+
+def test_build_plan_is_quiet_when_the_default_port_was_free(monkeypatch, tmp_path):
+    (tmp_path / "package.json").write_text(
+        json.dumps({"scripts": {"dev": "vite"}, "devDependencies": {"vite": "x"}})
+    )
+    executable(monkeypatch, "npm")
+    monkeypatch.setattr(ports, "port_available", lambda port: True)
+    warnings = []
+    monkeypatch.setattr(
+        runner, "warning", lambda title, messages: warnings.append(list(messages))
+    )
+
+    assert runner.build_plan(tmp_path, "demo", None, None, ()).port == 5173
+    assert not warnings
+
+
+def test_execute_stops_a_run_the_hub_could_never_reach(monkeypatch, free_port):
+    monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
+    monkeypatch.setattr(runner, "stop_bridge", lambda plan: None)
+    calls = _pin_recorder(monkeypatch)
+    monkeypatch.setattr(
+        ports, "loopback_only", lambda pgid, port: ports.Listener("::1", port)
+    )
+    terminated = []
+    monkeypatch.setattr(
+        runner,
+        "_terminate_process_tree",
+        lambda child, signum: terminated.append(signum),
+    )
+
+    class Child:
+        pid = 4321
+
+        def wait(self):
+            # The watcher decides mid-wait that this run is hopeless.
+            assert calls["diagnose"]() is True
+            return 0
+
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *args, **kwargs: Child())
+    plan = runner.RunPlan("demo", "vite", ("x",), 5174, "p", "")
+
+    with pytest.raises(click.ClickException) as caught:
+        runner.execute(plan, lambda: None, public_origin="http://demo.localhost")
+
+    assert terminated, "the run must end rather than spin at a URL that cannot work"
+    message = str(caught.value)
+    assert "::1" in message and "5174" in message
+
+
+def test_execute_keeps_waiting_while_nothing_is_listening_yet(monkeypatch, free_port):
+    monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
+    monkeypatch.setattr(runner, "stop_bridge", lambda plan: None)
+    calls = _pin_recorder(monkeypatch)
+    monkeypatch.setattr(ports, "loopback_only", lambda pgid, port: None)
+
+    class Child:
+        pid = 4321
+
+        def wait(self):
+            # Still booting is not a diagnosis.
+            assert calls["diagnose"]() is False
+            return 0
+
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *args, **kwargs: Child())
+    plan = runner.RunPlan("demo", "vite", ("x",), 5174, "p", "")
+
+    assert (
+        runner.execute(plan, lambda: None, public_origin="http://demo.localhost") == 0
+    )
