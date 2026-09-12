@@ -55,9 +55,7 @@ RUN_TYPES = tuple(item for item in SUPPORTED_TYPES if item != "dockerfile")
 # Types the non-Compose save path can persist. Compose is handled separately
 # because it extends a resolved Compose model rather than writing run defaults
 # or scaffolding a Dockerfile project.
-SAVABLE_NON_COMPOSE_TYPES = tuple(
-    item for item in SUPPORTED_TYPES if item != "compose"
-)
+SAVABLE_NON_COMPOSE_TYPES = tuple(item for item in SUPPORTED_TYPES if item != "compose")
 
 DEFAULT_PORTS = {
     "django": 8000,
@@ -140,9 +138,7 @@ def resolve_pinned_type(
             available = ", ".join(detected) if detected else "nothing"
             hint = "drop --type to auto-detect"
             if from_flag:
-                hint += (
-                    ", or drop --project-root to search from the current directory"
-                )
+                hint += ", or drop --project-root to search from the current directory"
             raise click.ClickException(
                 f"no {requested} project at '{pinned}'; detected "
                 f"{available} there; {hint}"
@@ -428,8 +424,10 @@ def cakephp_command(
     """Return the appropriate modern or legacy CakePHP development server."""
     if _legacy_cakephp_root(cwd):
         _require_executable("php", "CakePHP project runner")
-        return requested_port or 8765, ("php", "-S", "0.0.0.0:{port}"), (
-            cwd / "app" / "webroot"
+        return (
+            requested_port or 8765,
+            ("php", "-S", "0.0.0.0:{port}"),
+            (cwd / "app" / "webroot"),
         )
 
     manifest = _composer_manifest(cwd)
@@ -587,18 +585,14 @@ def create_run_bridge_compose(
         f"traefik.http.services.{router}.loadbalancer.server.port=8080",
         "io.localghost.managed=true",
         "io.localghost.kind=host-run-bridge",
-        f"io.localghost.tls-domains={name}.localhost", 
+        f"io.localghost.tls-domains={name}.localhost",
     ]
     if source_path is not None:
         labels.append(f"io.localghost.source-path={source_path}")
     service["labels"] = CommentedSeq(labels)
     document = CommentedMap({"services": CommentedMap({"bridge": service})})
     document["networks"] = CommentedMap(
-        {
-            PROXY_NETWORK: CommentedMap(
-                {"external": True, "name": PROXY_NETWORK}
-            )
-        }
+        {PROXY_NETWORK: CommentedMap({"external": True, "name": PROXY_NETWORK})}
     )
     return document
 
@@ -706,10 +700,12 @@ def execute(
         """
         if child is None or unreachable or bridged:
             return False
-        if forwarder.hub_reaches_loopback():
-            return False
         found = ports.loopback_only(child.pid, plan.port)
         if found is None:
+            return False
+        # Asked only now: it consults Docker, which is not worth doing on
+        # every poll for an application that has not bound anything yet.
+        if forwarder.hub_reaches_loopback():
             return False
         address = forwarder.gateway()
         if address is not None:
@@ -730,6 +726,7 @@ def execute(
         unreachable.append(found)
         _terminate_process_tree(child, signal.SIGTERM)
         return True
+
     try:
         # Opened before the hub is reconciled: that is the slowest step of a
         # cold start, and the URL is most wanted while waiting on it. Hub and
@@ -842,7 +839,7 @@ def _unreachable_message(plan: RunPlan, found: ports.Listener) -> str:
     if plan.type in ("vite", "astro"):
         lines.append(
             f"  the dev script appears to drop the --host localghost passes; "
-            f"forward \"$@\" to {plan.type}, or name the command directly: "
+            f'forward "$@" to {plan.type}, or name the command directly: '
             f"localghost run --port {plan.port} -- <command> --host 0.0.0.0 "
             f"--port {plan.port}"
         )
@@ -974,10 +971,7 @@ _PACKAGE_MANAGER_PRIORITY = ("bun", "pnpm", "yarn", "npm")
 def _has_dependency(manifest: dict[str, object], name: str) -> bool:
     return any(
         isinstance(group, dict) and name in group
-        for group in (
-            manifest.get(key)
-            for key in _JSON_DEPENDENCY_KEYS
-        )
+        for group in (manifest.get(key) for key in _JSON_DEPENDENCY_KEYS)
     )
 
 

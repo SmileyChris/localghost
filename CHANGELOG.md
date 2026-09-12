@@ -11,15 +11,20 @@ uses [Semantic Versioning](https://semver.org/).
   rather than left unreachable. The relay listens on the Docker gateway address
   alone, on the same port the application took, so the hub reaches it while
   the LAN and any tailnet address cannot. Dev scripts that swallow `--host`
-  therefore work without being changed. On Linux, where no gateway can be found
-  or bound, the run ends with an explanation instead of waiting forever.
+  therefore work without being changed. With a native Linux daemon, where no
+  gateway can be found or bound, the run ends with an explanation instead of
+  waiting forever. Docker Desktop for Linux and rootless Docker report a
+  gateway that is not an address of the host; their route to the host reaches
+  loopback on its own, so a loopback bind is left alone there as on macOS.
 
 ### Changed
 
 - Where the relay is available, the generated Vite and Astro commands no
   longer pass `--host 0.0.0.0`, which exposed the application port to the LAN.
   They still pass it where no relay can be raised, since the wider bind is then
-  the only thing that works.
+  the only thing that works. Availability is proven by binding the gateway
+  address rather than taken from Docker's report of it, and a bridge with IPv6
+  enabled, which reports a gateway per family, yields the IPv4 one.
 - Relaying and diagnosing no longer depend on the status bar being drawn. A
   piped run, a dumb terminal or `--no-status-bar` got neither, and waited.
 - The readiness probe resolves `localhost` rather than dialling 127.0.0.1, so

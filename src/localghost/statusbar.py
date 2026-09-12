@@ -102,9 +102,7 @@ def _bar_line(
     rendered_hint = f"{_DIM}{hint}{_RESET}" if hint else ""
     url_style = _DIM if spinner else _fg(MINT)
     rendered_secondary = (
-        f"{_DIM}{_SEPARATOR}{_RESET}{url_style}{secondary}{_RESET}"
-        if secondary
-        else ""
+        f"{_DIM}{_SEPARATOR}{_RESET}{url_style}{secondary}{_RESET}" if secondary else ""
     )
     return (
         f"{_BOLD} local{_fg(LIME)}ghost{_RESET}  "
@@ -125,16 +123,20 @@ def _poll_until_ready(
     """Retry `probe` until it succeeds, or `stop` is set. True means ready.
 
     `abort` judges whether the wait is worth continuing, and is asked before
-    the probe rather than after it. An application bound to loopback answers
-    this process while remaining unreachable by anything else, so a probe
-    that succeeds is not on its own evidence that the run can work.
+    the probe and again once the probe succeeds. An application bound to
+    loopback answers this process while remaining unreachable by anything
+    else, so a probe that succeeds is not on its own evidence that the run
+    can work.
     """
     while not stop.is_set():
         if abort is not None and abort():
             return False
         try:
             if probe():
-                return True
+                # Asked again: the application may have come up between the
+                # check above and the probe, and a probe that succeeds says
+                # nothing about whether it came up somewhere reachable.
+                return not (abort is not None and abort())
         except OSError:
             # A refused connection is the expected answer while booting.
             pass

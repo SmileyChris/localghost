@@ -37,33 +37,66 @@ _GATEWAY_QUERY = (
     "inspect",
     "bridge",
     "--format",
-    "{{range .IPAM.Config}}{{.Gateway}}{{end}}",
+    '{{range .IPAM.Config}}{{.Gateway}}{{"\\n"}}{{end}}',
 )
 
 
 def hub_reaches_loopback() -> bool:
     """Does the hub's bridge reach a host application bound to loopback?
 
-    On Linux it connects over the host gateway address, which no loopback
-    socket accepts, so such an application genuinely cannot be served without
-    help. Where Docker runs in a VM the connection is instead proxied by a
-    process on the host itself, which can reach loopback -- so a loopback
-    bind is not known to be a problem there and is left alone rather than
-    condemned on a guess.
+    Where Docker is native to this host it connects over the host gateway
+    address, which no loopback socket accepts, so such an application
+    genuinely cannot be served without help. Where Docker runs in a VM, or
+    under rootless networking, the connection is instead proxied by a process
+    on the host itself, which can reach loopback -- so a loopback bind is not
+    known to be a problem there and is left alone rather than condemned on a
+    guess. The gateway tells the two apart: a native daemon's gateway is an
+    address of this host, and any other daemon's is not.
     """
-    return not sys.platform.startswith("linux")
+    if not sys.platform.startswith("linux"):
+        return True
+    address = gateway()
+    return address is not None and not local(address)
 
 
 def available() -> bool:
     """Can a relay stand in for an application that binds only loopback?
 
-    Both halves have to hold. Reading what a process group bound needs
-    /proc, and the gateway address has to be knowable. Where either is
-    missing there is nothing to relay with, and an application must be asked
-    for the wider bind instead -- so this is what decides whether asking is
-    still necessary.
+    All of it has to hold. Reading what a process group bound needs /proc,
+    the gateway address has to be knowable, and it has to be an address this
+    host can bind: Docker Desktop and rootless Docker report one that lives
+    inside a VM or a user namespace, on which no relay can be raised. Where
+    any of that is missing there is nothing to relay with, and an application
+    must be asked for the wider bind instead -- so this is what decides
+    whether asking is still necessary.
     """
-    return sys.platform.startswith("linux") and gateway() is not None
+    if not sys.platform.startswith("linux"):
+        return False
+    address = gateway()
+    return address is not None and local(address)
+
+
+def local(address: str) -> bool:
+    """Is `address` one this host can bind, and so relay from?
+
+    Docker reports the gateway from the daemon's side, which is only this
+    host's side when the daemon is native to it. Binding is the one test
+    that cannot be fooled by that.
+    """
+    try:
+        family = (
+            socket.AF_INET6
+            if ipaddress.ip_address(address).version == 6
+            else socket.AF_INET
+        )
+    except ValueError:
+        return False
+    with socket.socket(family) as probe:
+        try:
+            probe.bind((address, 0))
+        except OSError:
+            return False
+    return True
 
 
 def gateway() -> str | None:
@@ -82,12 +115,16 @@ def gateway() -> str | None:
         return None
     if result.returncode:
         return None
-    address = result.stdout.strip()
-    try:
-        ipaddress.ip_address(address)
-    except ValueError:
-        return None
-    return address
+    # A bridge with IPv6 enabled reports a gateway per family. The hub's
+    # route to the host is the IPv4 one.
+    for line in result.stdout.splitlines():
+        address = line.strip()
+        try:
+            if ipaddress.ip_address(address).version == 4:
+                return address
+        except ValueError:
+            continue
+    return None
 
 
 async def _shut(writer: asyncio.StreamWriter) -> None:

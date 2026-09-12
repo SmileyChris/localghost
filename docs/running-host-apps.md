@@ -372,8 +372,15 @@ that relay can stand in for a wider bind, localghost does not ask Vite or Astro
 for `--host 0.0.0.0` where one is available.
 
 Where no relay can be raised, localghost passes `--host 0.0.0.0` instead. On
-Linux, an application that still comes up on loopback then ends the run with an
-explanation rather than leaving it waiting.
+Linux with a native Docker daemon, an application that still comes up on
+loopback then ends the run with an explanation rather than leaving it waiting.
+
+A relay needs the Docker gateway to be an address of the host itself, which it
+is only for a native daemon. Docker Desktop for Linux and rootless Docker report
+a gateway that lives inside a VM or a user namespace, so no relay is raised
+there and Vite and Astro are still asked for `--host 0.0.0.0`. Those
+installations proxy the bridge's route to the host through a process that
+reaches loopback, so a loopback bind is left alone rather than refused.
 
 ## Notes
 

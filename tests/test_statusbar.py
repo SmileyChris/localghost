@@ -565,6 +565,19 @@ def test_poll_until_ready_ends_a_hopeless_wait_the_probe_would_call_ready():
     assert not ready
 
 
+def test_poll_until_ready_asks_again_once_the_probe_succeeds():
+    verdicts = iter([False, True])
+
+    ready = statusbar._poll_until_ready(
+        lambda: True, threading.Event(), interval=0, abort=lambda: next(verdicts)
+    )
+
+    # The application can bind between the check and the probe. A probe that
+    # then succeeds must not settle the matter on its own, or the very state
+    # the check exists to catch slips through in the gap.
+    assert not ready
+
+
 def test_poll_until_ready_is_ready_when_nothing_objects():
     assert statusbar._poll_until_ready(
         lambda: True, threading.Event(), interval=0, abort=lambda: False

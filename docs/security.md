@@ -115,13 +115,16 @@ it is not, since the wider bind is then the only thing that works. When
 choosing a bind yourself, prefer a Docker-specific host interface, and use a
 host firewall on untrusted networks.
 
-The relay does not start where the gateway address cannot be determined or
-cannot be bound. On Linux the application must then listen on a
-Docker-reachable interface as before, and a run that comes up unreachable ends
-with an explanation rather than waiting. Where Docker runs inside a VM, the
-bridge does not reach the host over a host gateway, so localghost neither
-relays nor refuses a loopback bind there; whether it is reachable depends on
-how that installation routes `host.docker.internal`.
+The relay does not start where the gateway address cannot be determined or is
+not an address of this host. Availability is proven by binding the address, not
+by taking Docker's word for it, so the wider bind is only dropped where the
+relay can actually be raised. With a native Linux daemon the application must
+otherwise listen on a Docker-reachable interface as before, and a run that
+comes up unreachable ends with an explanation rather than waiting. Where Docker
+runs inside a VM or under rootless networking -- on macOS, Windows, Docker
+Desktop for Linux and rootless Docker -- the bridge's route to the host is
+proxied by a process that reaches loopback, so localghost neither relays nor
+refuses a loopback bind there.
 
 Relaying applies to tailnet hosting too. An application bound to loopback
 becomes reachable by authorized tailnet devices along with every other

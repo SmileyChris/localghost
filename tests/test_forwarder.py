@@ -93,6 +93,20 @@ def test_gateway_reads_the_default_bridge_address(monkeypatch):
     assert "bridge" in seen["command"]
 
 
+def test_gateway_picks_the_ipv4_address_when_the_bridge_is_dual_stack(monkeypatch):
+    monkeypatch.setattr(
+        forwarder.subprocess,
+        "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(
+            command, 0, "172.17.0.1\nfd00:dead:beef::1\n", ""
+        ),
+    )
+
+    # A bridge with IPv6 enabled reports two gateways. The hub's route to the
+    # host is the IPv4 one, and two addresses run together are not an address.
+    assert forwarder.gateway() == "172.17.0.1"
+
+
 def test_gateway_is_none_when_docker_cannot_answer(monkeypatch):
     monkeypatch.setattr(
         forwarder.subprocess,
@@ -127,7 +141,7 @@ def test_gateway_is_none_when_the_output_is_not_an_address(monkeypatch):
 
 
 def test_available_needs_both_a_gateway_and_bind_detection(monkeypatch):
-    monkeypatch.setattr(forwarder, "gateway", lambda: "172.17.0.1")
+    monkeypatch.setattr(forwarder, "gateway", lambda: "127.0.0.1")
     monkeypatch.setattr(forwarder.sys, "platform", "linux")
     assert forwarder.available()
 
@@ -144,12 +158,44 @@ def test_available_is_false_without_a_gateway(monkeypatch):
     assert not forwarder.available()
 
 
+def test_available_is_false_when_the_gateway_is_not_an_address_of_this_host(
+    monkeypatch,
+):
+    monkeypatch.setattr(forwarder, "gateway", lambda: "192.0.2.1")
+    monkeypatch.setattr(forwarder.sys, "platform", "linux")
+
+    # Docker Desktop and rootless Docker report a gateway that lives inside a
+    # VM or a user namespace. Promising a relay on it drops the wider bind
+    # the application needs, and the relay then cannot be raised.
+    assert not forwarder.available()
+
+
+def test_local_tells_an_address_of_this_host_from_one_that_is_not():
+    assert forwarder.local("127.0.0.1")
+    assert not forwarder.local("192.0.2.1")
+    assert not forwarder.local("not an address")
+
+
 def test_the_hub_cannot_reach_loopback_on_linux(monkeypatch):
     monkeypatch.setattr(forwarder.sys, "platform", "linux")
+    monkeypatch.setattr(forwarder, "gateway", lambda: "127.0.0.1")
 
     # The bridge connects over the host gateway, which no loopback socket
     # accepts, so a loopback bind genuinely cannot be served.
     assert not forwarder.hub_reaches_loopback()
+
+
+def test_the_hub_reaches_loopback_where_docker_is_not_native_to_this_host(
+    monkeypatch,
+):
+    monkeypatch.setattr(forwarder.sys, "platform", "linux")
+    monkeypatch.setattr(forwarder, "gateway", lambda: "192.0.2.1")
+
+    # A gateway this host cannot bind belongs to a VM or a user namespace:
+    # Docker Desktop for Linux, or rootless Docker. Both proxy the container's
+    # route to the host through a process that reaches loopback, so a
+    # loopback bind is served as it is on macOS.
+    assert forwarder.hub_reaches_loopback()
 
 
 def test_a_loopback_bind_is_left_alone_where_docker_runs_in_a_vm(monkeypatch):
