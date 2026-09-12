@@ -1,5 +1,6 @@
 """Host port availability, selection, and diagnosing whoever holds one."""
 
+import contextlib
 import os
 import shutil
 import signal
@@ -102,6 +103,20 @@ def test_an_unidentifiable_holder_still_says_what_to_do(monkeypatch):
     assert ":\n" not in message
 
 
+def _reap(child):
+    """Stop a test child's whole group, and collect it so nothing leaks.
+
+    Killing the group is not enough on its own: an unreaped child stays a
+    zombie, and its stdout pipe an open descriptor, until the Popen object
+    is collected -- which Python reports as a ResourceWarning.
+    """
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(child.pid, signal.SIGKILL)
+    child.wait()
+    if child.stdout is not None:
+        child.stdout.close()
+
+
 def _listening_child(host):
     """A child in its own session, as runner spawns applications."""
     code = (
@@ -125,7 +140,7 @@ def test_loopback_only_names_an_application_the_hub_cannot_reach():
     try:
         found = ports.loopback_only(child.pid, port)
     finally:
-        os.killpg(child.pid, signal.SIGKILL)
+        _reap(child)
 
     # A container reaches the host over its gateway address, which no
     # loopback socket accepts, so the public URL can never resolve here.
@@ -138,7 +153,7 @@ def test_loopback_only_is_none_when_the_application_binds_every_interface():
     try:
         found = ports.loopback_only(child.pid, port)
     finally:
-        os.killpg(child.pid, signal.SIGKILL)
+        _reap(child)
 
     assert found is None
 
@@ -152,7 +167,7 @@ def test_loopback_only_is_none_before_anything_is_listening():
         # Still booting is not a diagnosis; the bar must keep waiting.
         assert ports.loopback_only(child.pid, 5173) is None
     finally:
-        os.killpg(child.pid, signal.SIGKILL)
+        _reap(child)
 
 
 @LINUX_ONLY
@@ -163,7 +178,7 @@ def test_loopback_only_ignores_a_sibling_bound_elsewhere():
         # The application's own port is not open yet; only a sibling's is.
         assert ports.loopback_only(child.pid, port + 1) is None
     finally:
-        os.killpg(child.pid, signal.SIGKILL)
+        _reap(child)
 
 
 @pytest.fixture
@@ -179,7 +194,7 @@ def test_listeners_without_proc_reads_every_address_family(without_proc, host):
     try:
         found = ports.listeners(child.pid)
     finally:
-        os.killpg(child.pid, signal.SIGKILL)
+        _reap(child)
 
     # lsof writes a wildcard as "*", which has to mean the same thing the
     # /proc reader means by 0.0.0.0 or the loopback verdict flips.
@@ -192,7 +207,7 @@ def test_loopback_only_agrees_across_both_backends(without_proc):
     try:
         assert ports.loopback_only(child.pid, port) is None
     finally:
-        os.killpg(child.pid, signal.SIGKILL)
+        _reap(child)
 
 
 def test_listeners_without_proc_is_empty_when_lsof_is_missing(
