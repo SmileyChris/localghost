@@ -21,6 +21,17 @@ def no_relay(monkeypatch):
     monkeypatch.setattr(forwarder, "available", lambda: False)
 
 
+@pytest.fixture(autouse=True)
+def no_listeners(monkeypatch):
+    """Nothing is listening unless a test says so.
+
+    The real scan reads /proc for process groups these tests only pretend to
+    have spawned, and a real group that happened to share a fake pid would
+    make the outcome depend on the machine running them.
+    """
+    monkeypatch.setattr(ports, "listeners", lambda pgid: [])
+
+
 def executable(monkeypatch, *names):
     monkeypatch.setattr(
         runner.shutil, "which", lambda name: "/bin/x" if name in names else None
@@ -2032,3 +2043,208 @@ def test_execute_leaves_a_loopback_bind_alone_where_the_hub_can_reach_it(
 
     assert runner.execute(plan, lambda: None, public_origin="http://d.localhost") == 0
     assert not terminated
+
+
+def _misplaced_run(monkeypatch, *listening, gateway="172.17.0.1", grace=0):
+    """A run whose application listens somewhere other than the planned port."""
+    monkeypatch.setattr(runner, "start_bridge", lambda plan: None)
+    monkeypatch.setattr(runner, "stop_bridge", lambda plan: None)
+    monkeypatch.setattr(ports, "loopback_only", lambda pgid, port: None)
+    monkeypatch.setattr(ports, "listeners", lambda pgid: list(listening))
+    monkeypatch.setattr(runner.forwarder, "gateway", lambda: gateway)
+    monkeypatch.setattr(runner, "_RELAY_GRACE", grace)
+    monkeypatch.setattr(runner, "_WRONG_PORT_GRACE", grace)
+    return _pin_recorder(monkeypatch)
+
+
+def _judged_child(calls, verdicts):
+    """A child whose run is judged once per expected verdict while it waits."""
+
+    class Child:
+        pid = 4321
+
+        def wait(self):
+            for expected in verdicts:
+                assert calls["diagnose"]() is expected
+            return 0
+
+    return Child()
+
+
+@contextlib.contextmanager
+def _recorded_forwarding(record, target, *, bind, port):
+    record.update(target=target, bind=bind, port=port)
+    yield
+
+
+def test_execute_relays_to_an_application_that_ignored_its_port(
+    monkeypatch, free_port
+):
+    calls = _misplaced_run(monkeypatch, ports.Listener("::1", 5174))
+    forwarded, said = {}, []
+    monkeypatch.setattr(
+        runner.forwarder,
+        "forwarding",
+        lambda target, **kw: _recorded_forwarding(forwarded, target, **kw),
+    )
+    monkeypatch.setattr(runner, "info", said.append)
+    terminated = []
+    monkeypatch.setattr(
+        runner, "_terminate_process_tree", lambda child, sig: terminated.append(sig)
+    )
+    monkeypatch.setattr(
+        runner.subprocess, "Popen", lambda *a, **k: _judged_child(calls, [False])
+    )
+    plan = runner.RunPlan("demo", "vite", ("x",), 6100, "p", "")
+
+    assert runner.execute(plan, lambda: None, public_origin="http://d.localhost") == 0
+
+    # A dev script that dropped --port leaves Vite on its own walk from 5173.
+    # One listener there is unambiguously the application, so the planned
+    # port is relayed to it rather than left answering 502.
+    assert forwarded == {
+        "target": ports.Listener("::1", 5174),
+        "bind": "172.17.0.1",
+        "port": 6100,
+    }
+    assert not terminated
+    assert any("5174" in line and "6100" in line for line in said)
+
+
+def test_execute_explains_an_application_listening_in_several_places(
+    monkeypatch, free_port
+):
+    calls = _misplaced_run(
+        monkeypatch, ports.Listener("127.0.0.1", 8090), ports.Listener("::1", 5174)
+    )
+    monkeypatch.setattr(
+        runner.forwarder, "forwarding", lambda *a, **k: pytest.fail("must not relay")
+    )
+    terminated = []
+    monkeypatch.setattr(
+        runner, "_terminate_process_tree", lambda child, sig: terminated.append(sig)
+    )
+    monkeypatch.setattr(
+        runner.subprocess, "Popen", lambda *a, **k: _judged_child(calls, [True])
+    )
+    plan = runner.RunPlan("demo", "vite", ("x",), 6100, "p", "")
+
+    with pytest.raises(click.ClickException) as caught:
+        runner.execute(plan, lambda: None, public_origin="http://d.localhost")
+
+    # A database beside the dev server makes the application ambiguous;
+    # relaying the wrong one would serve it at the URL. Name them all instead.
+    message = str(caught.value)
+    assert "127.0.0.1:8090" in message and "[::1]:5174" in message
+    assert "6100" in message
+    assert "#the-application-is-listening-on-another-port" in message
+    assert terminated
+
+
+def test_execute_does_not_relay_a_listener_off_the_tools_own_port_walk(
+    monkeypatch, free_port
+):
+    calls = _misplaced_run(monkeypatch, ports.Listener("127.0.0.1", 8090))
+    monkeypatch.setattr(
+        runner.forwarder, "forwarding", lambda *a, **k: pytest.fail("must not relay")
+    )
+    monkeypatch.setattr(runner, "_terminate_process_tree", lambda child, sig: None)
+    monkeypatch.setattr(
+        runner.subprocess, "Popen", lambda *a, **k: _judged_child(calls, [True])
+    )
+    plan = runner.RunPlan("demo", "vite", ("x",), 6100, "p", "")
+
+    # Vite's own walk starts at 5173; a lone listener on 8090 is more likely
+    # a helper that came up first than the dev server.
+    with pytest.raises(click.ClickException):
+        runner.execute(plan, lambda: None, public_origin="http://d.localhost")
+
+
+def test_execute_explains_a_custom_command_that_ignored_its_port(
+    monkeypatch, free_port
+):
+    calls = _misplaced_run(monkeypatch, ports.Listener("127.0.0.1", 7100))
+    monkeypatch.setattr(runner, "_terminate_process_tree", lambda child, sig: None)
+    monkeypatch.setattr(
+        runner.subprocess, "Popen", lambda *a, **k: _judged_child(calls, [True])
+    )
+    plan = runner.RunPlan("demo", "custom", ("x",), 7000, "p", "")
+
+    with pytest.raises(click.ClickException) as caught:
+        runner.execute(plan, lambda: None, public_origin="http://d.localhost")
+
+    # There is no tool walk to recognise, and the fix is in the command.
+    assert "{port}" in str(caught.value)
+
+
+def test_execute_explains_when_the_relay_cannot_bind(monkeypatch, free_port):
+    calls = _misplaced_run(monkeypatch, ports.Listener("::1", 5174))
+
+    @contextlib.contextmanager
+    def refuse(target, *, bind, port):
+        raise OSError("cannot assign requested address")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(runner.forwarder, "forwarding", refuse)
+    monkeypatch.setattr(runner, "_terminate_process_tree", lambda child, sig: None)
+    monkeypatch.setattr(
+        runner.subprocess, "Popen", lambda *a, **k: _judged_child(calls, [True])
+    )
+    plan = runner.RunPlan("demo", "vite", ("x",), 6100, "p", "")
+
+    with pytest.raises(click.ClickException):
+        runner.execute(plan, lambda: None, public_origin="http://d.localhost")
+
+
+def test_execute_gives_a_misplaced_application_a_grace_before_judging(
+    monkeypatch, free_port
+):
+    calls = _misplaced_run(
+        monkeypatch,
+        ports.Listener("127.0.0.1", 8090),
+        ports.Listener("::1", 5174),
+        grace=10,
+    )
+    clock = iter([100.0, 105.0, 111.0])
+    monkeypatch.setattr(runner.time, "monotonic", lambda: next(clock))
+    terminated = []
+    monkeypatch.setattr(
+        runner, "_terminate_process_tree", lambda child, sig: terminated.append(sig)
+    )
+    # Helpers routinely bind before the server itself does. Only once the
+    # planned port has stayed empty for the whole grace is the run judged.
+    monkeypatch.setattr(
+        runner.subprocess,
+        "Popen",
+        lambda *a, **k: _judged_child(calls, [False, False, True]),
+    )
+    plan = runner.RunPlan("demo", "vite", ("x",), 6100, "p", "")
+
+    with pytest.raises(click.ClickException):
+        runner.execute(plan, lambda: None, public_origin="http://d.localhost")
+    assert len(terminated) == 1
+
+
+def test_execute_forgets_the_grace_once_the_planned_port_is_taken(
+    monkeypatch, free_port
+):
+    listening = iter(
+        [
+            [ports.Listener("127.0.0.1", 8090)],
+            [ports.Listener("127.0.0.1", 8090), ports.Listener("0.0.0.0", 6100)],
+        ]
+    )
+    calls = _misplaced_run(monkeypatch, grace=10)
+    monkeypatch.setattr(ports, "listeners", lambda pgid: next(listening))
+    clock = iter([100.0, 200.0])
+    monkeypatch.setattr(runner.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(
+        runner, "_terminate_process_tree", lambda child, sig: pytest.fail("killed")
+    )
+    # Long past the grace, but the application arrived where it was meant to.
+    monkeypatch.setattr(
+        runner.subprocess, "Popen", lambda *a, **k: _judged_child(calls, [False, False])
+    )
+    plan = runner.RunPlan("demo", "vite", ("x",), 6100, "p", "")
+
+    assert runner.execute(plan, lambda: None, public_origin="http://d.localhost") == 0

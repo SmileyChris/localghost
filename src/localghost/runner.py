@@ -57,6 +57,17 @@ RUN_TYPES = tuple(item for item in SUPPORTED_TYPES if item != "dockerfile")
 # or scaffolding a Dockerfile project.
 SAVABLE_NON_COMPOSE_TYPES = tuple(item for item in SUPPORTED_TYPES if item != "compose")
 
+# How long the planned port may stay empty while the application listens
+# somewhere else before the run acts on it. Helpers routinely bind before the
+# server itself does -- a database the dev script starts first, say. A relay
+# kills nothing and rests on firm evidence, so it can be raised sooner; a run
+# is only stopped once a boot that slow would have finished.
+_RELAY_GRACE = 5.0
+_WRONG_PORT_GRACE = 30.0
+
+# Where an error sends a reader for the longer story.
+_DOCS = "https://smileychris.github.io/localghost"
+
 DEFAULT_PORTS = {
     "django": 8000,
     "vite": 5173,
@@ -680,52 +691,104 @@ def execute(
     child: subprocess.Popen[bytes] | None = None
     status = 1
     cleanup_error: Exception | None = None
-    unreachable: list[ports.Listener] = []
+    stopped: list[str] = []
+    misplaced_since: list[float] = []
+    relay_refused: list[bool] = []
     relays = contextlib.ExitStack()
     bridged: list[ports.Listener] = []
     old_handlers = _install_termination_handlers()
 
+    def relay(target: ports.Listener, describe: Callable[[str], str]) -> bool:
+        """Relay the planned port from the Docker gateway to `target`.
+
+        False when no gateway can be read or bound here; binding is the only
+        real test of whether the address belongs to this host.
+        """
+        address = forwarder.gateway()
+        if address is None:
+            return False
+        try:
+            relays.enter_context(
+                forwarder.forwarding(target, bind=address, port=plan.port)
+            )
+        except OSError:
+            return False
+        bridged.append(target)
+        info(describe(address))
+        return True
+
+    def stop(message: str) -> bool:
+        """End a run that cannot work, leaving `message` to explain it.
+
+        Stopping the child also ends the wait blocking on it; the message is
+        raised once the bar and the bridge are gone.
+        """
+        stopped.append(message)
+        _terminate_process_tree(child, signal.SIGTERM)
+        return True
+
     def hopeless() -> bool:
         """Has the application come up somewhere the hub cannot reach?
 
-        Asked before each readiness probe, because an application bound to
-        loopback answers this process while staying unreachable by the hub.
-        Where the Docker gateway can be bound, relaying from it makes the
-        route work without asking the application to widen what it chose;
-        that is not a reason to keep waiting, so the answer stays False.
-
-        Only when no relay can be raised is the run hopeless. The child is
-        then stopped rather than left running behind a URL that cannot
-        resolve, which also ends the wait blocking on it.
+        Asked around each readiness probe, because an application bound to
+        loopback answers this process while staying unreachable by the hub,
+        and one on the wrong port leaves the probe failing forever. Where a
+        relay can stand in for the missing route, raising it is not a reason
+        to stop waiting, so the answer stays False; only a run nothing can
+        rescue is stopped.
         """
-        if child is None or unreachable or bridged:
+        if child is None or stopped or bridged:
             return False
         found = ports.loopback_only(child.pid, plan.port)
         if found is None:
-            return False
+            return misplaced()
+        misplaced_since.clear()
         # Asked only now: it consults Docker, which is not worth doing on
         # every poll for an application that has not bound anything yet.
         if forwarder.hub_reaches_loopback():
             return False
-        address = forwarder.gateway()
-        if address is not None:
-            try:
-                relays.enter_context(
-                    forwarder.forwarding(found, bind=address, port=plan.port)
-                )
-            except OSError:
-                # Binding is the only real test of the gateway address.
-                pass
-            else:
-                bridged.append(found)
-                info(
-                    f"Application bound {_address(found)}; relaying from "
-                    f"{address}:{plan.port} so the hub can reach it."
-                )
+        if relay(
+            found,
+            lambda address: (
+                f"Application bound {_address(found)}; relaying from "
+                f"{address}:{plan.port} so the hub can reach it."
+            ),
+        ):
+            return False
+        return stop(_unreachable_message(plan, found))
+
+    def misplaced() -> bool:
+        """Has the application come up on some port other than the planned one?
+
+        Usually a dev script that dropped --port, leaving the server on its
+        own default. Only judged once the planned port has stayed empty while
+        something else listens, for long enough that a helper binding before
+        the server -- a database the script starts first -- is not mistaken
+        for the application having landed elsewhere.
+        """
+        opened = ports.listeners(child.pid)
+        if not opened or any(item.port == plan.port for item in opened):
+            misplaced_since.clear()
+            return False
+        now = time.monotonic()
+        if not misplaced_since:
+            misplaced_since.append(now)
+        waited = now - misplaced_since[0]
+        target = _relay_target(plan, opened)
+        if target is not None and not relay_refused and waited >= _RELAY_GRACE:
+            if relay(
+                target,
+                lambda address: (
+                    f"Application is listening on {_address(target)} rather "
+                    f"than port {plan.port}; relaying from {address}:"
+                    f"{plan.port} so the hub can reach it."
+                ),
+            ):
                 return False
-        unreachable.append(found)
-        _terminate_process_tree(child, signal.SIGTERM)
-        return True
+            relay_refused.append(True)
+        if waited < _WRONG_PORT_GRACE:
+            return False
+        return stop(_misplaced_message(plan, opened))
 
     try:
         # Opened before the hub is reconciled: that is the slowest step of a
@@ -813,10 +876,10 @@ def execute(
         )
         if status == 0:
             return 1
-    if unreachable:
+    if stopped:
         # Raised only once the bar has been released and the bridge torn
         # down, so the diagnosis is the last thing left on screen.
-        raise click.ClickException(_unreachable_message(plan, unreachable[0]))
+        raise click.ClickException(stopped[0])
     return status
 
 
@@ -843,6 +906,52 @@ def _unreachable_message(plan: RunPlan, found: ports.Listener) -> str:
             f"localghost run --port {plan.port} -- <command> --host 0.0.0.0 "
             f"--port {plan.port}"
         )
+    return "\n".join(lines)
+
+
+def _relay_target(
+    plan: RunPlan, opened: list[ports.Listener]
+) -> ports.Listener | None:
+    """The one listener a relay may point the planned port at, if any.
+
+    Only a Vite or Astro dev server that ignored its --port has a known place
+    to land: its own default, walked upward past anything taken, the way
+    localghost's own selection walks. A lone listener there is the
+    application. Anywhere else, or beside other listeners, it could as easily
+    be a helper the dev script started first, and relaying to that would
+    serve the wrong thing at the URL.
+    """
+    if len(opened) != 1 or plan.type not in ("vite", "astro"):
+        return None
+    only = opened[0]
+    start = DEFAULT_PORTS[plan.type]
+    return only if start <= only.port < start + ports.WALK else None
+
+
+def _misplaced_message(plan: RunPlan, opened: list[ports.Listener]) -> str:
+    """Explain an application that came up on a port other than the planned one."""
+    places = [_address(item) for item in sorted(opened, key=lambda item: item.port)]
+    where = (
+        places[0] if len(places) == 1 else ", ".join(places[:-1]) + " and " + places[-1]
+    )
+    lines = [
+        f"the application is listening on {where}, not on port {plan.port} "
+        "where the hub expects it",
+    ]
+    if plan.type in ("vite", "astro"):
+        lines.append(
+            "  the dev script appears to drop the --port localghost passes; "
+            f'forward "$@" to {plan.type}, or name the command directly: '
+            f"localghost run --port {plan.port} -- <command> --port {plan.port}"
+        )
+    else:
+        lines.append(
+            "  the command has to listen on the port it is given: include {port} "
+            "in it, or pass --port to match where it already listens"
+        )
+    lines.append(
+        f"  see {_DOCS}/troubleshooting/#the-application-is-listening-on-another-port"
+    )
     return "\n".join(lines)
 
 

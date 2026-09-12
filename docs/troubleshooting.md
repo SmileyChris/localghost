@@ -206,6 +206,31 @@ free port and warns about the one it skipped; a dev server that then ignores
 `--port` and comes up on its own default is the wrapper-script case described
 in [Wrapper scripts](running-host-apps.md#wrapper-scripts).
 
+## The application is listening on another port
+
+```
+the application is listening on [::1]:5174, not on port 6100 where the hub expects it
+```
+
+The run planned one port and the application came up on another, usually
+because a `dev` script wraps the tool and drops the `--port` localghost passes,
+so the server starts from its own default instead. On a native Linux Docker
+daemon, when exactly one address is listening and it sits in the range the
+tool would pick for itself, the run relays the planned port to it and says so.
+Otherwise it stops the application rather than leave a URL that cannot
+resolve, and the error lists every address the application's processes are
+listening on.
+
+Forward `"$@"` to the tool in the wrapper, or name the command directly:
+
+```sh
+localghost run --port 6100 -- npx vite --port 6100 --strictPort
+```
+
+A custom command has to listen on the port it is given: include `{port}` in it,
+or pass `--port` to match where it already listens. See
+[Wrapper scripts](running-host-apps.md#wrapper-scripts).
+
 ## The OAuth credential was not stored
 
 `localghost tailscale enable` warns when it cannot save the credential in the

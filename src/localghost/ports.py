@@ -43,16 +43,23 @@ def port_available(port: int) -> bool:
     return True
 
 
+# How far past a busy port selection looks for a free one. Dev servers that
+# choose their own replacement walk upward the same way, which is what lets a
+# run recognise where one landed after ignoring the port it was given.
+WALK = 100
+
+
 def select_port(port: int, strict: bool) -> int:
     if port_available(port):
         return port
     if strict:
         raise click.ClickException(in_use_message(port))
-    for candidate in range(port + 1, min(port + 100, 65536)):
+    for candidate in range(port + 1, min(port + WALK, 65536)):
         if port_available(candidate):
             return candidate
     raise click.ClickException(
-        f"no free host port found from {port} through {min(port + 99, 65535)}"
+        f"no free host port found from {port} through "
+        f"{min(port + WALK - 1, 65535)}"
     )
 
 

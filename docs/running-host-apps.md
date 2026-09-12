@@ -378,6 +378,12 @@ The `"$@"` passes Localghost's arguments through to Vite. Without it the server
 starts on its own default port, and binds loopback where localghost would have
 asked for a wider interface.
 
+A server that comes up on another port anyway is not left behind a URL that
+cannot resolve. On a native Linux Docker daemon the run relays the planned port
+to it when it can tell which listener is the application; otherwise it stops
+with an error naming every address the application is listening on (see
+[troubleshooting](troubleshooting.md#the-application-is-listening-on-another-port)).
+
 ### Loopback-bound servers
 
 The bridge reaches the host over the Docker gateway address, which a server

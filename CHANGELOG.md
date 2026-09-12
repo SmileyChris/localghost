@@ -16,6 +16,12 @@ uses [Semantic Versioning](https://semver.org/).
   waiting forever. Docker Desktop for Linux and rootless Docker report a
   gateway that is not an address of the host; their route to the host reaches
   loopback on its own, so a loopback bind is left alone there as on macOS.
+- A run whose application comes up on a port other than the one it planned --
+  typically a `dev` script that drops `--port` -- no longer waits forever
+  behind a 502. On a native Linux Docker daemon it relays the planned port to
+  the application when exactly one address is listening, in the range the tool
+  would pick for itself; otherwise it stops with an error naming every address
+  the application is listening on.
 
 ### Changed
 
@@ -26,9 +32,10 @@ uses [Semantic Versioning](https://semver.org/).
   same links beside the wordmark that leads back to the hub.
 - Where the relay is available, the generated Vite and Astro commands no
   longer pass `--host 0.0.0.0`, which exposed the application port to the LAN.
-  They still pass it wherever no relay can be raised. Availability is proven by binding the gateway
-  address rather than taken from Docker's report of it, and a bridge with IPv6
-  enabled, which reports a gateway per family, yields the IPv4 one.
+  They still pass it wherever no relay can be raised. Availability is proven
+  by binding the gateway address rather than taken from Docker's report of it,
+  and a bridge with IPv6 enabled, which reports a gateway per family, yields
+  the IPv4 one.
 - Relaying and diagnosing no longer depend on the status bar being drawn. A
   piped run, a dumb terminal or `--no-status-bar` got neither, and waited.
 - The readiness probe resolves `localhost` rather than dialling 127.0.0.1, so
