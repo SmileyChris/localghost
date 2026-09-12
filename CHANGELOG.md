@@ -19,10 +19,14 @@ uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The hub's welcome page lists remembered projects as rows, each with its
+  hostname, type, directory and last start, and says what to do when nothing
+  has been remembered yet. The Traefik dashboard and documentation links moved
+  into a footer shared by the offline and not-found pages, which now carry the
+  same links beside the wordmark that leads back to the hub.
 - Where the relay is available, the generated Vite and Astro commands no
   longer pass `--host 0.0.0.0`, which exposed the application port to the LAN.
-  They still pass it where no relay can be raised, since the wider bind is then
-  the only thing that works. Availability is proven by binding the gateway
+  They still pass it wherever no relay can be raised. Availability is proven by binding the gateway
   address rather than taken from Docker's report of it, and a bridge with IPv6
   enabled, which reports a gateway per family, yields the IPv4 one.
 - Relaying and diagnosing no longer depend on the status bar being drawn. A

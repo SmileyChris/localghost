@@ -110,8 +110,9 @@ foreground run.
 
 This is narrower than the alternative, a wildcard bind, which exposes the
 application port to the LAN. Where a relay is available, the generated Vite and
-Astro commands therefore no longer ask for `--host 0.0.0.0`; they still do where
-it is not, since the wider bind is then the only thing that works. When
+Astro commands therefore no longer ask for `--host 0.0.0.0`; they still do
+wherever a relay cannot be raised, whether or not a loopback bind would happen
+to be reachable there, since localghost cannot tell from the outside. When
 choosing a bind yourself, prefer a Docker-specific host interface, and use a
 host firewall on untrusted networks.
 
@@ -131,8 +132,8 @@ becomes reachable by authorized tailnet devices along with every other
 application the hub serves, so bind deliberately when a service is meant to
 stay on one machine.
 
-The foreground `run` command executes detected Django runners and Vite package
-scripts with the checkout user's normal host permissions. Review application
+The foreground `run` command executes detected Django, Vite, Astro, Laravel,
+CakePHP and PHP runners with the checkout user's normal host permissions. Review application
 scripts as you would when running them directly.
 
 Managed host runs store their checkout path in a Docker label so the hub's

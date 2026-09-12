@@ -185,10 +185,17 @@ through the route itself — and the bar switches to a solid URL once the first
 probe succeeds, so the bar doubles as the readiness signal rather than
 inviting a click that would return a gateway error.
 
+The probe resolves `localhost` and tries every address it yields, so a server
+that bound only the IPv6 loopback is seen. On a native Linux daemon an
+application answering only on loopback is not reported ready until the relay
+that makes it reachable is up (see
+[Loopback-bound servers](#loopback-bound-servers)).
+
 If something is already serving on the application's port when the run
-starts, Localghost says so before launching it. That usually means the
-application is about to fail to bind, and until it does the readiness probe
-cannot tell the existing listener apart from a fast start.
+starts, Localghost refuses to start rather than launching an application onto
+a URL that would serve whatever was already there. On Linux the error names
+the process holding the port and its working directory, and it always says
+how to get past it: stop that process, or choose another port with `--port`.
 
 The bar is drawn with a terminal scrolling region that covers every row except
 the last, which leaves the terminal's own scrollback intact: scrolling up
@@ -196,12 +203,17 @@ still reaches everything the application printed. This holds inside terminal
 multiplexers as well — it has been checked against VTE-based terminals, tmux,
 and zellij, in each case reaching the first line the application printed. It is skipped when output is
 not a terminal, when `TERM` is unset or `dumb`, when the window is narrower
-than 40 columns, and on `--detach` and `--dry-run` runs. Pass
-`--no-status-bar` to turn it off:
+than 40 columns or shorter than 3 rows, and on `--detach` and `--dry-run`
+runs. Pass `--no-status-bar` to turn it off:
 
 ```sh
 localghost run --no-status-bar
 ```
+
+Turning the bar off, or piping the output, does not turn off the watching.
+Whether the application came up somewhere the hub can reach is a fact about
+the run, so the relay and the unreachable-application diagnosis below happen
+either way.
 
 ### Detached runs
 
@@ -241,9 +253,13 @@ Override the detected port when the default is already in use:
 uvx localghost run --port 9000
 ```
 
-If the port is free it is used directly. If it is occupied and `--port` was
-given explicitly, an error is raised. Without `--port`, the next free port is
-chosen automatically.
+A port counts as free only when it can be bound over both IPv4 and IPv6. If
+it is free it is used directly. If it is occupied and `--port` was given
+explicitly, an error is raised naming what holds it. Without `--port`, the
+next free port is chosen automatically, and a warning says which port was
+passed over and, on Linux, which process and working directory hold it. That
+matters because an application that ignores the port it is given starts from
+its own default, meets the same squatter, and picks its own replacement.
 
 ### Explicit type
 
@@ -371,9 +387,13 @@ only, on the same port, so the bridge reaches it while the LAN does not. Because
 that relay can stand in for a wider bind, localghost does not ask Vite or Astro
 for `--host 0.0.0.0` where one is available.
 
+When a relay starts, the run says so: `Application bound 127.0.0.1:5173;
+relaying from 172.17.0.1:5173 so the hub can reach it.`
+
 Where no relay can be raised, localghost passes `--host 0.0.0.0` instead. On
 Linux with a native Docker daemon, an application that still comes up on
-loopback then ends the run with an explanation rather than leaving it waiting.
+loopback is then stopped, and the run ends with an explanation rather than
+leaving it waiting behind a URL that cannot resolve.
 
 A relay needs the Docker gateway to be an address of the host itself, which it
 is only for a native daemon. Docker Desktop for Linux and rootless Docker report

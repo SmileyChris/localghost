@@ -170,8 +170,41 @@ Django has not been told to trust the hub's forwarded scheme. See
 
 For `localghost run`, Django needs its generated `<name>.localhost` in
 `ALLOWED_HOSTS` and, when applicable, CSRF trusted origins. Vite HTTP, HMR, and
-WebSocket traffic use the same bridge; a failed upgrade usually means the host
-server was not listening on the selected Docker-reachable port.
+WebSocket traffic use the same bridge, and pass through the loopback relay
+unaltered when one is in use.
+
+## The application is listening somewhere the hub cannot reach
+
+```
+the application is listening on 127.0.0.1:5173, which the hub cannot reach
+```
+
+The application bound loopback only, and no relay could be raised from the
+Docker gateway address to stand in for a wider bind. Localghost stops the
+application rather than leave it running behind a URL that cannot resolve.
+Make it listen on all interfaces. For a Vite or Astro project the usual cause
+is a `dev` script that wraps the tool and drops the `--host` localghost passes:
+forward `"$@"` to the tool in the script, or name the command directly:
+
+```sh
+localghost run --port 5173 -- npx vite --host 0.0.0.0 --port 5173
+```
+
+See [Loopback-bound servers](running-host-apps.md#loopback-bound-servers).
+
+## Host port is already in use
+
+```
+host port 5173 is already in use
+```
+
+Something else is listening on the port the run planned, so `run` refuses to
+start rather than put its URL in front of whatever is already there. On Linux
+the error names the process and its working directory. Stop that process, or
+pass another port with `--port`. Without `--port`, the run walks to the next
+free port and warns about the one it skipped; a dev server that then ignores
+`--port` and comes up on its own default is the wrapper-script case described
+in [Wrapper scripts](running-host-apps.md#wrapper-scripts).
 
 ## The OAuth credential was not stored
 

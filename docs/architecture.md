@@ -103,8 +103,11 @@ on the host. The bridge joins the shared network, carries the ordinary Traefik
 labels, and forwards requests to `host.docker.internal`. This keeps
 host-specific routes out of the persistent hub configuration.
 
-The host process must listen on an interface reachable from Docker. Binding only
-to host loopback is generally insufficient.
+The host process must be reachable from the bridge. On a native Linux daemon a
+process bound only to loopback is not, so a foreground `run` relays to it from
+the Docker gateway address; elsewhere the route to the host is proxied by a
+process that reaches loopback. See
+[Loopback-bound servers](running-host-apps.md#loopback-bound-servers).
 
 `localghost run` creates the bridge model in memory with a unique internal
 project and foreground ownership labels. Its
