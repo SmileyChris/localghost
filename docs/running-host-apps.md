@@ -285,8 +285,10 @@ uvx localghost run --port 8080 -- my-custom-server --port 8080
 
 For host types, `localghost run` creates an ephemeral Caddy bridge container
 on the `localghost` network. The Caddy container forwards requests from the
-hub to the host process via `host.docker.internal`. When the foreground
-process exits, the bridge is removed automatically.
+hub to the host process via `host.docker.internal`, handing on the client
+address and scheme Traefik recorded in `X-Forwarded-For` and
+`X-Forwarded-Proto` rather than its own view of that internal hop. When the
+foreground process exits, the bridge is removed automatically.
 
 If a previous `localghost run` was interrupted and left a stale bridge
 container, it is detected and removed automatically before the new one

@@ -578,6 +578,13 @@ def create_run_bridge_compose(
             ":8080",
             "--to",
             f"http://host.docker.internal:{host_port}",
+            # Traefik is the edge that saw the client. Caddy would otherwise
+            # replace the client address and scheme with its own view of this
+            # internal hop, so hand Traefik's values on unchanged.
+            "--header-up",
+            "X-Forwarded-For: {http.request.header.X-Forwarded-For}",
+            "--header-up",
+            "X-Forwarded-Proto: {http.request.header.X-Forwarded-Proto}",
         ]
     )
     service["extra_hosts"] = CommentedSeq(["host.docker.internal:host-gateway"])

@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- A host run's bridge no longer overwrites what the hub tells the application
+  about the request. Caddy replaced `X-Forwarded-Proto` with `http` and
+  `X-Forwarded-For` with Traefik's container address, so a Django project
+  following the `SECURE_PROXY_SSL_HEADER` advice saw every HTTPS request as
+  plain HTTP. The bridge now passes the hub's values through unchanged.
+
 ## [3.2.0] - 2026-09-12
 
 ### Added

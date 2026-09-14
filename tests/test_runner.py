@@ -283,6 +283,26 @@ def test_bridge_model_is_ephemeral():
     assert "ports:" not in text
 
 
+def test_bridge_passes_the_hubs_forwarded_headers_through():
+    # Traefik is the edge that saw the client, so the bridge must not replace
+    # its client address and scheme with its own view of the internal hop.
+    bridge = runner.create_run_bridge_compose("demo", 8123)["services"]["bridge"]
+    command = list(bridge["command"])
+    assert command[:6] == [
+        "caddy",
+        "reverse-proxy",
+        "--from",
+        ":8080",
+        "--to",
+        "http://host.docker.internal:8123",
+    ]
+    headers = [command[i + 1] for i, arg in enumerate(command) if arg == "--header-up"]
+    assert headers == [
+        "X-Forwarded-For: {http.request.header.X-Forwarded-For}",
+        "X-Forwarded-Proto: {http.request.header.X-Forwarded-Proto}",
+    ]
+
+
 def test_collision_inspects_any_router(monkeypatch):
     calls = []
 
