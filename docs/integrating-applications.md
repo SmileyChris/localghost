@@ -211,6 +211,29 @@ framework will answer to, which origins it trusts for state-changing
 requests, and how it learns that the original request was HTTPS when the
 connection it sees is not.
 
+## Client addresses
+
+The connection an application sees always comes from the hub's side —
+Traefik, or the bridge for a host run — so the requester's address travels in
+`X-Real-Ip` and as the first `X-Forwarded-For` entry:
+
+| Request from | Address the application is given |
+| --- | --- |
+| A browser on this machine | `127.0.0.1` |
+| A tailnet device | the device's tailnet address, such as `100.101.102.103` |
+| Another container on the `localghost` network | its own address on that network |
+
+Docker delivers the hub's loopback port from an address of its own — the
+bridge gateway on a native daemon, the VM's gateway under Docker Desktop — so
+the hub renames it: every request passes a small middleware that recognizes
+those addresses from Traefik's routing table and records `127.0.0.1` instead.
+If that table cannot be read, requests pass through unchanged and a local
+request shows Docker's address.
+
+Believe these headers only when the connection itself comes from the hub, a
+private address. An application that is also reachable directly — a dev
+server bound to a LAN interface, say — can be handed forged ones.
+
 ## Failure behavior
 
 Because `localghost` is declared external, application startup fails if

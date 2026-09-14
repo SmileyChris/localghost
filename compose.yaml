@@ -19,6 +19,10 @@ services:
       - --providers.docker.exposedbydefault=false
       - --providers.docker.network=localghost
       - --experimental.localplugins.localghostFallback.modulename=github.com/SmileyChris/traefik-localghost-fallback
+      # Docker hands Traefik loopback connections from an address of its own;
+      # every request passes this middleware so applications see 127.0.0.1.
+      - --experimental.localplugins.localghostClient.modulename=github.com/SmileyChris/traefik-localghost-client
+      - --entrypoints.web.http.middlewares=localghost-client@docker
     healthcheck:
       test: [CMD, traefik, healthcheck, --ping]
       interval: 10s
@@ -47,6 +51,7 @@ services:
       - traefik.http.routers.localghost-fallback.middlewares=localghost-fallback
       - traefik.http.routers.localghost-fallback.service=noop@internal
       - traefik.http.middlewares.localghost-fallback.plugin.localghostFallback.registryPath=/var/lib/localghost-registry
+      - traefik.http.middlewares.localghost-client.plugin.localghostClient.routesPath=/proc/net/route
 
 networks:
   localghost:

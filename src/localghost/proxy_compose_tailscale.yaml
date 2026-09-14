@@ -14,6 +14,16 @@ services:
       - --api.insecure=false
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
+      # The gateway speaks for tailnet clients: it replaces their forwarded
+      # headers on plain HTTP and names the peer in a PROXY header on the TLS
+      # passthrough. It sits on a Docker network, and everything else that
+      # reaches these loopback-published entrypoints is this machine, arriving
+      # from the Docker gateway -- all private addresses.
+      - --entrypoints.web.forwardedheaders.trustedips=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7
+      - --entrypoints.websecure.proxyprotocol.trustedips=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7
+      - --entrypoints.web.http.middlewares=localghost-client@docker
+      - --entrypoints.websecure.http.middlewares=localghost-client@docker
+      - --experimental.localplugins.localghostClient.modulename=github.com/SmileyChris/traefik-localghost-client
       - --global.checknewversion=false
       - --global.sendanonymoususage=false
       - --ping=true

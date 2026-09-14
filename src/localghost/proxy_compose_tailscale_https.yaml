@@ -21,6 +21,7 @@ services:
       - --root-ca=/var/lib/localghost-root/rootCA.pem
       - --http-target=traefik:80
       - --https-target=traefik:443
+      - --https-proxy-protocol
     volumes:
       # The signer volume contains only the exported public root plus the
       # constrained online signer. The offline root volume must never be

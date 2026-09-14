@@ -64,6 +64,11 @@ Opting into Traefik makes a container reachable from local browsers through the
 hub. Applications remain responsible for trusted hosts, CSRF, CORS, callback
 URLs, authentication, cookies, and safe handling of development data.
 
+The hub tells applications that a request from this machine came from
+`127.0.0.1`. That names the machine rather than its loopback interface: a host
+process that connects to Traefik's container address directly arrives from the
+same Docker gateway and is named the same way.
+
 The shared Docker network also permits network connections between attached
 containers. Do not attach sensitive or untrusted workloads casually. Keep
 databases and internal dependencies only on application-private networks unless
@@ -189,3 +194,15 @@ new one is written, because both mkcert and certutil identify an installed
 authority by the certificate they are handed. When a store refuses the
 removal, localghost reports which one, and the superseded root must be removed
 with that client's own trust-store tooling.
+
+So that applications learn which tailnet device connected, Traefik believes
+forwarded headers on the `web` entrypoint and PROXY protocol headers on
+`websecure` from private addresses while tailnet hosting is enabled. The
+gateway discards whatever a tailnet client claims about itself before it
+speaks for that client. Everything else with a private address that reaches
+those entrypoints is this machine, arriving through Docker's loopback port
+publisher, or a container on a Docker network, and either could already reach
+the applications directly. A local process that forwards outside traffic into
+the hub's loopback ports, such as a `tailscale serve` pointed at them, is
+trusted the same way, so it must set those headers itself rather than pass on
+its clients' own.

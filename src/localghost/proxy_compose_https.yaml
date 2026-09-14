@@ -46,6 +46,9 @@ services:
       - --experimental.abortonpluginfailure=true
       - --experimental.localplugins.localghostCA.modulename=github.com/SmileyChris/traefik-localghost-ca
       - --experimental.localplugins.localghostFallback.modulename=github.com/SmileyChris/traefik-localghost-fallback
+      - --experimental.localplugins.localghostClient.modulename=github.com/SmileyChris/traefik-localghost-client
+      - --entrypoints.web.http.middlewares=localghost-client@docker
+      - --entrypoints.websecure.http.middlewares=localghost-client@docker
     ports:
       - 127.0.0.1:${LOCALGHOST_HTTPS_PORT:-443}:443
     volumes:

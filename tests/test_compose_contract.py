@@ -60,6 +60,8 @@ def test_proxy_compose_matches_the_public_contract() -> None:
         "--providers.docker.exposedbydefault=false",
         "--providers.docker.network=localghost",
         "--experimental.localplugins.localghostFallback.modulename=github.com/SmileyChris/traefik-localghost-fallback",
+        "--experimental.localplugins.localghostClient.modulename=github.com/SmileyChris/traefik-localghost-client",
+        "--entrypoints.web.http.middlewares=localghost-client@docker",
     }
     assert traefik["healthcheck"]["test"] == [
         "CMD",
@@ -113,6 +115,12 @@ def test_proxy_compose_matches_the_public_contract() -> None:
             "traefik.http.middlewares.localghost-fallback.plugin.localghostFallback.registryPath"
         ]
         == "/var/lib/localghost-registry"
+    )
+    assert (
+        labels[
+            "traefik.http.middlewares.localghost-client.plugin.localghostClient.routesPath"
+        ]
+        == "/proc/net/route"
     )
     # The self-contained hub carries no user state.
     assert not any(
@@ -334,6 +342,7 @@ def test_tailscale_overlay_adds_unpublished_gateway_and_suffix_provider() -> Non
         "--root-ca=/var/lib/localghost-root/rootCA.pem",
         "--http-target=traefik:80",
         "--https-target=traefik:443",
+        "--https-proxy-protocol",
     ]
     root_mount = next(
         mount
@@ -355,6 +364,11 @@ def test_tailscale_overlay_adds_unpublished_gateway_and_suffix_provider() -> Non
     )
 
     command = set(model["services"]["traefik"]["command"])
+    # Traefik believes what the gateway says about the tailnet client:
+    # forwarded headers on plain HTTP, a PROXY header on the TLS passthrough.
+    private = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"
+    assert f"--entrypoints.web.forwardedheaders.trustedips={private}" in command
+    assert f"--entrypoints.websecure.proxyprotocol.trustedips={private}" in command
     assert "--providers.plugin.localghostCA.domainsuffix=localhost" in command
     assert "--providers.plugin.localghostTailnetCA.domainsuffix=tail1234" in command
     assert "--providers.plugin.localghostTailnetCA.mode=tls" in command
@@ -405,6 +419,10 @@ def test_public_suffix_tailscale_overlay_serves_http_only() -> None:
     # Routers are still mirrored onto .work by the tailnet provider, but both
     # providers run without a signer: no certificates, nothing to trust.
     command = set(model["services"]["traefik"]["command"])
+    # Plain HTTP is the whole tailnet path here, so it is where the gateway's
+    # word about the client has to be believed.
+    private = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"
+    assert f"--entrypoints.web.forwardedheaders.trustedips={private}" in command
     assert "--providers.plugin.localghostTailnetCA.domainsuffix=work" in command
     assert "--providers.plugin.localghostTailnetCA.mode=http" in command
     assert "--providers.plugin.localghostCA.mode=http" in command
@@ -416,6 +434,47 @@ def test_public_suffix_tailscale_overlay_serves_http_only() -> None:
         mount["target"] != "/var/lib/localghost-tailnet-ca"
         for mount in model["services"]["traefik"].get("volumes", [])
     )
+
+
+def test_every_hub_variant_names_this_machine_as_loopback(tmp_path) -> None:
+    src = ROOT / "src" / "localghost"
+    base = src / "proxy_compose.yaml"
+    https = src / "proxy_compose_https.yaml"
+    tailnet = src / "proxy_compose_tailscale.yaml"
+    tailnet_https = src / "proxy_compose_tailscale_https.yaml"
+    variants = {
+        "http": ((base,), {"web"}),
+        "https": ((base, https), {"web", "websecure"}),
+        "tailnet over http": ((base, tailnet), {"web", "websecure"}),
+        "tailnet over https": (
+            (base, https, tailnet, tailnet_https),
+            {"web", "websecure"},
+        ),
+    }
+    for name, (files, entrypoints) in variants.items():
+        traefik = compose_model(
+            *files,
+            LOCALGHOST_IMAGE_TAG="test",
+            LOCALGHOST_REGISTRY_DIR=str(tmp_path),
+            LOCALGHOST_TAILSCALE_SUFFIX="tail1234",
+        )["services"]["traefik"]
+        command = set(traefik["command"])
+        assert (
+            "--experimental.localplugins.localghostClient.modulename="
+            "github.com/SmileyChris/traefik-localghost-client"
+        ) in command, name
+        for entrypoint in entrypoints:
+            assert (
+                f"--entrypoints.{entrypoint}.http.middlewares=localghost-client@docker"
+                in command
+            ), name
+        # Defined once on the base file's labels; overlays only add labels.
+        assert (
+            traefik["labels"][
+                "traefik.http.middlewares.localghost-client.plugin.localghostClient.routesPath"
+            ]
+            == "/proc/net/route"
+        ), name
 
 
 def test_example_compose_exercises_consumer_contract() -> None:

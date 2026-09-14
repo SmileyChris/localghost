@@ -22,9 +22,10 @@ Four pieces cooperate, and each has exactly one job:
   tailnet device `localghost-<suffix>` (what the admin console shows), and
   "the gateway" in this documentation. It joins the tailnet as a userspace
   node and only transports: it answers DNS for the suffix with its own
-  tailnet addresses, forwards HTTP to Traefik with the original Host header,
-  and passes HTTPS through as raw TCP. It terminates no TLS, holds no offline
-  CA material, and has no Docker socket.
+  tailnet addresses, forwards HTTP to Traefik with the original Host header
+  and the requesting device's tailnet address, and passes HTTPS through as
+  raw TCP behind a PROXY protocol header naming that device. It terminates no
+  TLS, holds no offline CA material, and has no Docker socket.
 - **Two certificate authorities** live in Docker volumes, one for
   `.localhost` and one per tailnet suffix, each split into an offline root
   and a constrained online signer. Traefik's provider plugin — one instance

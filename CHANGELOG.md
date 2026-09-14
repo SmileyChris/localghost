@@ -5,6 +5,21 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Tailnet requests reach applications with the requesting device's tailnet
+  address instead of the gateway container's. The gateway replaces whatever
+  forwarded headers a tailnet client sent with its real address on plain HTTP,
+  and names it in a PROXY protocol header on the HTTPS passthrough. With
+  tailnet hosting enabled, Traefik believes forwarded headers on `web` and
+  PROXY headers on `websecure` from private addresses. See
+  [Client addresses](docs/integrating-applications.md#client-addresses).
+- Requests from this machine reach applications as `127.0.0.1` rather than
+  Docker's gateway address. A new `localghost-client` middleware on every
+  entrypoint renames the address Docker delivers published-port connections
+  from -- the bridge gateway on a native daemon, the VM's gateway under Docker
+  Desktop -- before Traefik writes `X-Forwarded-For` and `X-Real-Ip`.
+
 ### Fixed
 
 - A host run's bridge no longer overwrites what the hub tells the application

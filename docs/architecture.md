@@ -40,6 +40,13 @@ No application host port is needed in this path. Application containers may
 also retain their ordinary Compose default network for databases and other
 private dependencies.
 
+Docker delivers step 2's connections from an address of its own — the bridge
+gateway on a native daemon, the VM's gateway under Docker Desktop — rather
+than loopback. A middleware plugin on every entrypoint renames an IPv4 source
+that is the gateway, or is on none of Traefik's networks and is not a
+Tailscale address, to `127.0.0.1` before Traefik writes the forwarded headers.
+Containers on the shared network and tailnet devices keep their own addresses.
+
 ## Discovery and isolation
 
 Traefik reads Docker metadata through a read-only bind mount of
@@ -124,8 +131,11 @@ Tailnet hosting adds a dedicated userspace Tailscale gateway to the hub. It
 owns no host ports: tsnet supplies its tailnet listeners for DNS, HTTP, and
 HTTPS. Split DNS sends only the configured one-label suffix to the gateway.
 The gateway answers supported route depths with its own Tailscale addresses,
-forwards HTTP to Traefik with the original Host header, and passes TLS through
-unchanged so Traefik still selects the certificate and router by SNI.
+forwards HTTP to Traefik with the original Host header and the client's
+tailnet address, and passes TLS through unchanged behind a PROXY protocol
+header naming the client, so Traefik still selects the certificate and router
+by SNI and still knows who connected. Traefik believes both only from private
+addresses, and only while tailnet hosting is enabled.
 
 A second instance of the local certificate provider watches the same opted-in
 Docker labels. It derives suffix-specific certificates and provider routers

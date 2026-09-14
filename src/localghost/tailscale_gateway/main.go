@@ -43,7 +43,10 @@ type configuration struct {
 	rootCA      string
 	httpTarget  string
 	httpsTarget string
-	bootstrap   bool
+	// httpsProxyProtocol names each tailnet client to the HTTPS target in a
+	// PROXY protocol header; the hub's websecure entrypoint expects one.
+	httpsProxyProtocol bool
+	bootstrap          bool
 }
 
 // servesHTTPS reports whether the gateway fronts a TLS-terminating Traefik.
@@ -62,6 +65,7 @@ func main() {
 	flag.StringVar(&cfg.rootCA, "root-ca", "", "public root certificate; empty serves HTTP only")
 	flag.StringVar(&cfg.httpTarget, "http-target", "traefik:80", "HTTP proxy target")
 	flag.StringVar(&cfg.httpsTarget, "https-target", "", "HTTPS TCP target; required with --root-ca")
+	flag.BoolVar(&cfg.httpsProxyProtocol, "https-proxy-protocol", false, "name each tailnet client to the HTTPS target in a PROXY protocol v1 header")
 	flag.BoolVar(&cfg.bootstrap, "bootstrap", false, "enroll from an auth key on stdin, then exit")
 	healthProbe := flag.Bool("health-probe", false, "check the running gateway's health listener, then exit")
 	flag.Parse()
@@ -164,7 +168,7 @@ func run(ctx context.Context, cfg configuration) error {
 	startDNS(ctx, server, cfg.suffix, ip4, ip6, errCh)
 	startHTTP(ctx, server, cfg, errCh)
 	if cfg.servesHTTPS() {
-		startTCPProxy(ctx, server, ":443", cfg.httpsTarget, errCh)
+		startTCPProxy(ctx, server, ":443", cfg.httpsTarget, cfg.httpsProxyProtocol, errCh)
 	}
 	startHealth(ctx, errCh)
 
@@ -330,20 +334,45 @@ func startHealth(ctx context.Context, errCh chan<- error) {
 	}()
 }
 
+// newHTTPProxy forwards tailnet HTTP to target with the original Host header.
+// Traefik believes forwarded headers from the gateway, so whatever a tailnet
+// client claimed about itself is dropped and replaced with the address its
+// connection actually came from.
+func newHTTPProxy(target string) *httputil.ReverseProxy {
+	upstream := &url.URL{Scheme: "http", Host: target}
+	return &httputil.ReverseProxy{
+		Rewrite: func(request *httputil.ProxyRequest) {
+			request.SetURL(upstream)
+			request.Out.Host = request.In.Host
+			stripForwardedHeaders(request.Out.Header)
+			request.SetXForwarded()
+			if client := request.Out.Header.Get("X-Forwarded-For"); client != "" {
+				request.Out.Header.Set("X-Real-Ip", client)
+			}
+		},
+	}
+}
+
+// stripForwardedHeaders removes every header Traefik would take as a proxy's
+// word about the original request: the X-Forwarded-* family, X-Real-Ip, and
+// the standard Forwarded header.
+func stripForwardedHeaders(header http.Header) {
+	for name := range header {
+		if strings.HasPrefix(name, "X-Forwarded-") {
+			header.Del(name)
+		}
+	}
+	header.Del("X-Real-Ip")
+	header.Del("Forwarded")
+}
+
 func startHTTP(ctx context.Context, server *tsnet.Server, cfg configuration, errCh chan<- error) {
 	listener, err := server.Listen("tcp", ":80")
 	if err != nil {
 		errCh <- fmt.Errorf("listening for HTTP: %w", err)
 		return
 	}
-	target := &url.URL{Scheme: "http", Host: cfg.httpTarget}
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	originalDirector := proxy.Director
-	proxy.Director = func(request *http.Request) {
-		host := request.Host
-		originalDirector(request)
-		request.Host = host
-	}
+	proxy := newHTTPProxy(cfg.httpTarget)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if serveTrust(w, request, cfg) {
 			return
@@ -451,7 +480,7 @@ on the hosting machine.</p>
 `, cfg.suffix, command, fingerprint)
 }
 
-func startTCPProxy(ctx context.Context, server *tsnet.Server, address, target string, errCh chan<- error) {
+func startTCPProxy(ctx context.Context, server *tsnet.Server, address, target string, proxyProtocol bool, errCh chan<- error) {
 	listener, err := server.Listen("tcp", address)
 	if err != nil {
 		errCh <- fmt.Errorf("listening on %s: %w", address, err)
@@ -470,12 +499,16 @@ func startTCPProxy(ctx context.Context, server *tsnet.Server, address, target st
 				}
 				return
 			}
-			go proxyConnection(ctx, incoming, target)
+			go proxyConnection(ctx, incoming, target, proxyProtocol)
 		}
 	}()
 }
 
-func proxyConnection(ctx context.Context, incoming net.Conn, target string) {
+// proxyConnection relays one tailnet connection to target. With proxyProtocol
+// it first names the tailnet peer in a PROXY protocol v1 header: the stream is
+// TLS the gateway never opens, so this is the only way Traefik can learn who
+// connected rather than seeing the gateway itself.
+func proxyConnection(ctx context.Context, incoming net.Conn, target string, proxyProtocol bool) {
 	defer incoming.Close()
 	dialer := net.Dialer{Timeout: 10 * time.Second}
 	outgoing, err := dialer.DialContext(ctx, "tcp", target)
@@ -484,6 +517,13 @@ func proxyConnection(ctx context.Context, incoming net.Conn, target string) {
 		return
 	}
 	defer outgoing.Close()
+	if proxyProtocol {
+		header := proxyProtocolHeader(incoming.RemoteAddr(), incoming.LocalAddr())
+		if _, err := io.WriteString(outgoing, header); err != nil {
+			log.Printf("proxy header to %s failed: %v", target, err)
+			return
+		}
+	}
 	var wait sync.WaitGroup
 	wait.Add(2)
 	copyHalf := func(destination, source net.Conn) {
@@ -496,4 +536,26 @@ func proxyConnection(ctx context.Context, incoming net.Conn, target string) {
 	go copyHalf(outgoing, incoming)
 	go copyHalf(incoming, outgoing)
 	wait.Wait()
+}
+
+// proxyProtocolHeader renders the PROXY protocol v1 line for a connection from
+// source to destination. v1 names one address family for both ends, so a pair
+// that disagrees, or an address that is not ip:port, is sent as UNKNOWN and
+// the receiver keeps the connection's own addresses.
+func proxyProtocolHeader(source, destination net.Addr) string {
+	from, errFrom := netip.ParseAddrPort(source.String())
+	to, errTo := netip.ParseAddrPort(destination.String())
+	if errFrom != nil || errTo != nil {
+		return "PROXY UNKNOWN\r\n"
+	}
+	fromIP := from.Addr().Unmap().WithZone("")
+	toIP := to.Addr().Unmap().WithZone("")
+	if fromIP.Is4() != toIP.Is4() {
+		return "PROXY UNKNOWN\r\n"
+	}
+	family := "TCP4"
+	if fromIP.Is6() {
+		family = "TCP6"
+	}
+	return fmt.Sprintf("PROXY %s %s %s %d %d\r\n", family, fromIP, toIP, from.Port(), to.Port())
 }

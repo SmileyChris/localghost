@@ -1,0 +1,7 @@
+displayName: Localghost Client Address
+type: middleware
+import: github.com/SmileyChris/traefik-localghost-client
+summary: Names requests from this machine as 127.0.0.1
+
+testData:
+  routesPath: /proc/net/route
