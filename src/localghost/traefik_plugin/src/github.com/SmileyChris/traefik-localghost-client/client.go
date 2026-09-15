@@ -1,5 +1,6 @@
 // Package traefik_localghost_client implements a Traefik middleware plugin
-// that names requests from this machine as 127.0.0.1.
+// that names requests from this machine as 127.0.0.1 and requests from the
+// tailnet by the user behind them.
 //
 // The hub publishes its ports on loopback only, yet Docker hands Traefik those
 // connections from an address of its own: the bridge gateway on a native
@@ -9,6 +10,11 @@
 // networks (the tailnet gateway among them) or a tailnet device named by the
 // gateway's PROXY header. So an IPv4 source that is the gateway, or is on
 // none of Traefik's networks and is not a Tailscale address, is this machine.
+//
+// A Tailscale address is a device the gateway named. With tailnet hosting
+// enabled the gateway also answers who owns that address, and the middleware
+// records the answer in the identity headers Tailscale Serve uses. What a
+// client sent in those headers is always dropped first.
 package traefik_localghost_client
 
 import (
@@ -28,6 +34,9 @@ type Config struct {
 	// container: its default route names the host, and its directly
 	// connected routes name the networks containers arrive from.
 	RoutesPath string `json:"routesPath,omitempty"`
+	// WhoisURL is the tailnet gateway's identity lookup. Empty, as on a hub
+	// without tailnet hosting, leaves every request anonymous.
+	WhoisURL string `json:"whoisURL,omitempty"`
 }
 
 func CreateConfig() *Config { return &Config{RoutesPath: "/proc/net/route"} }
@@ -36,45 +45,84 @@ func CreateConfig() *Config { return &Config{RoutesPath: "/proc/net/route"} }
 // network, but they are anything but this machine.
 var tailnet = &net.IPNet{IP: net.IPv4(100, 64, 0, 0).To4(), Mask: net.CIDRMask(10, 32)}
 
+// tailnet6 is Tailscale's IPv6 range, fd7a:115c:a1e0::/48.
+var tailnet6 = &net.IPNet{IP: net.ParseIP("fd7a:115c:a1e0::"), Mask: net.CIDRMask(48, 128)}
+
+func isTailnet(ip net.IP) bool {
+	return ip != nil && (tailnet.Contains(ip) || tailnet6.Contains(ip))
+}
+
 type client struct {
-	next     http.Handler
-	gateway  net.IP
-	networks []*net.IPNet
+	next       http.Handler
+	gateway    net.IP
+	networks   []*net.IPNet
+	identities *identities
 }
 
 func New(_ context.Context, next http.Handler, config *Config, _ string) (http.Handler, error) {
 	if config == nil || config.RoutesPath == "" {
 		return nil, errors.New("localghost client: routesPath is required")
 	}
+	c := &client{next: next}
 	gateway, networks, err := readRoutes(config.RoutesPath)
 	if err != nil {
 		// Without its own networks to compare against, every source would
-		// look like this machine. Pass requests through untouched instead;
+		// look like this machine. Leave addresses untouched instead;
 		// applications then see Docker's address, as they would without us.
 		fmt.Fprintf(os.Stdout, "localghost client: leaving client addresses alone: %v\n", err)
-		return next, nil
+	} else {
+		c.gateway, c.networks = gateway, networks
 	}
-	return &client{next: next, gateway: gateway, networks: networks}, nil
+	if config.WhoisURL != "" {
+		c.identities = newIdentities(config.WhoisURL)
+	}
+	return c, nil
 }
 
 func (c *client) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
+	var answer *identity
 	host, port, err := net.SplitHostPort(req.RemoteAddr)
-	if err == nil && c.isThisMachine(net.ParseIP(host)) {
-		req.RemoteAddr = net.JoinHostPort("127.0.0.1", port)
-		// Traefik has already recorded the connection's address here. A value
-		// it kept from a trusted sender is that sender's claim; leave it be.
-		if req.Header.Get("X-Real-Ip") == host {
-			req.Header.Set("X-Real-Ip", "127.0.0.1")
+	if err == nil {
+		ip := net.ParseIP(host)
+		switch {
+		case c.isThisMachine(ip):
+			req.RemoteAddr = net.JoinHostPort("127.0.0.1", port)
+			// Traefik has already recorded the connection's address here. A
+			// value it kept from a trusted sender is that sender's claim;
+			// leave it be.
+			if req.Header.Get("X-Real-Ip") == host {
+				req.Header.Set("X-Real-Ip", "127.0.0.1")
+			}
+		case c.identities != nil:
+			if peer := c.tailnetPeer(ip, req.Header.Get("X-Real-Ip")); peer != nil {
+				answer = c.identities.lookup(peer.String())
+			}
 		}
 	}
+	setIdentity(req.Header, answer)
 	c.next.ServeHTTP(rw, req)
+}
+
+// tailnetPeer returns the tailnet device behind a request, if any. On the
+// HTTPS passthrough the gateway's PROXY header made the device the
+// connection itself. On plain HTTP the gateway is the connection and names
+// the device in X-Real-Ip, which Traefik kept because the gateway is a
+// trusted sender; any other sender's claim is worth nothing.
+func (c *client) tailnetPeer(connection net.IP, realIP string) net.IP {
+	if isTailnet(connection) {
+		return connection
+	}
+	if claimed := net.ParseIP(realIP); isTailnet(claimed) && c.identities.isGateway(connection) {
+		return claimed
+	}
+	return nil
 }
 
 func (c *client) isThisMachine(ip net.IP) bool {
 	// IPv6 is left alone: this table only lists IPv4 networks, so an IPv6
 	// container address would otherwise be mistaken for the host.
 	ip = ip.To4()
-	if ip == nil || ip.IsLoopback() {
+	if ip == nil || ip.IsLoopback() || c.gateway == nil {
 		return false
 	}
 	if ip.Equal(c.gateway) {

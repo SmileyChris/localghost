@@ -206,3 +206,14 @@ the applications directly. A local process that forwards outside traffic into
 the hub's loopback ports, such as a `tailscale serve` pointed at them, is
 trusted the same way, so it must set those headers itself rather than pass on
 its clients' own.
+
+The `Tailscale-User-*` identity headers are set by the hub from the gateway's
+own lookup of the connecting tailnet address, never from the request. On the
+HTTPS passthrough that address is the connection itself, named by the
+gateway's PROXY header. On plain HTTP the gateway is the connection and names
+the device in `X-Real-Ip`; the hub believes that only when the connection
+resolves to the gateway container, so another container on the `localghost`
+network cannot borrow a tailnet user's identity by claiming their address.
+The lookup itself listens on the `localghost` Docker network, so any container
+on it can map a tailnet address to a login; it is not published to the host or
+the tailnet.

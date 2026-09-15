@@ -51,6 +51,11 @@ services:
       - --experimental.localplugins.localghostCA.modulename=github.com/SmileyChris/traefik-localghost-ca
       - --experimental.localplugins.localghostTailnetCA.modulename=github.com/SmileyChris/traefik-localghost-tailnet-ca
       - --experimental.localplugins.localghostFallback.modulename=github.com/SmileyChris/traefik-localghost-fallback
+    labels:
+      # The client middleware asks the gateway who owns a tailnet address and
+      # records the answer in the Tailscale-User-* headers Serve would set.
+      # The lookup listener is on the localghost network only, never the host.
+      - traefik.http.middlewares.localghost-client.plugin.localghostClient.whoisURL=http://tailscale-gateway:41824/whois
 
   tailscale-gateway:
     build:

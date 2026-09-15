@@ -3,6 +3,20 @@
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Tailnet requests name the person behind them. With tailnet hosting enabled,
+  applications receive the `Tailscale-User-Login`, `Tailscale-User-Name` and
+  `Tailscale-User-Profile-Pic` headers Tailscale Serve would set, so an
+  application written for Serve reads them unchanged and a shared development
+  app can skip its own sign-in. The gateway answers who owns a tailnet address
+  from the node it runs, and the `localghost-client` middleware records the
+  answer after dropping whatever the client claimed. Tagged devices arrive as
+  `tagged-devices`, as under Serve. See
+  [Tailnet identity](docs/integrating-applications.md#tailnet-identity).
+
 ## [3.2.1] - 2026-09-14
 
 ### Changed

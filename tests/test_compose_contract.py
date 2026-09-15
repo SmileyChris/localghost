@@ -475,6 +475,14 @@ def test_every_hub_variant_names_this_machine_as_loopback(tmp_path) -> None:
             ]
             == "/proc/net/route"
         ), name
+        # Only a tailnet hub has a gateway to ask who a tailnet address is.
+        whois = traefik["labels"].get(
+            "traefik.http.middlewares.localghost-client.plugin.localghostClient.whoisURL"
+        )
+        if "tailnet" in name:
+            assert whois == "http://tailscale-gateway:41824/whois", name
+        else:
+            assert whois is None, name
 
 
 def test_example_compose_exercises_consumer_contract() -> None:

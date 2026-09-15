@@ -164,12 +164,13 @@ func run(ctx context.Context, cfg configuration) error {
 	}
 	log.Printf("tailnet gateway ready hostname=%s IPv4=%s IPv6=%s suffix=%s https=%t", cfg.hostname, ip4, ip6, cfg.suffix, cfg.servesHTTPS())
 
-	errCh := make(chan error, 6)
+	errCh := make(chan error, 8)
 	startDNS(ctx, server, cfg.suffix, ip4, ip6, errCh)
 	startHTTP(ctx, server, cfg, errCh)
 	if cfg.servesHTTPS() {
 		startTCPProxy(ctx, server, ":443", cfg.httpsTarget, cfg.httpsProxyProtocol, errCh)
 	}
+	startIdentity(ctx, server, errCh)
 	startHealth(ctx, errCh)
 
 	select {

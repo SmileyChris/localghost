@@ -24,8 +24,11 @@ Four pieces cooperate, and each has exactly one job:
   node and only transports: it answers DNS for the suffix with its own
   tailnet addresses, forwards HTTP to Traefik with the original Host header
   and the requesting device's tailnet address, and passes HTTPS through as
-  raw TCP behind a PROXY protocol header naming that device. It terminates no
-  TLS, holds no offline CA material, and has no Docker socket.
+  raw TCP behind a PROXY protocol header naming that device. It also tells the
+  hub which tailnet user owns an address, so applications receive
+  [Tailscale identity headers](integrating-applications.md#tailnet-identity).
+  It terminates no TLS, holds no offline CA material, and has no Docker
+  socket.
 - **Two certificate authorities** live in Docker volumes, one for
   `.localhost` and one per tailnet suffix, each split into an offline root
   and a constrained online signer. Traefik's provider plugin — one instance
@@ -147,6 +150,18 @@ link to the root certificate for manual installation.
 Trusting a root again replaces the one this client had for that suffix; the
 superseded certificate leaves the trust stores first, and the `.localhost`
 root is never disturbed.
+
+## What applications receive
+
+A tailnet request reaches the application like a local one, on the same
+route, with two differences. The requesting device's tailnet address, such as
+`100.101.102.103`, arrives in `X-Real-Ip` and `X-Forwarded-For` instead of
+`127.0.0.1`. And the person behind the device arrives in the
+`Tailscale-User-Login`, `Tailscale-User-Name` and `Tailscale-User-Profile-Pic`
+headers Tailscale Serve would set, so an application can recognize a
+teammate without a sign-in of its own. See
+[Tailnet identity](integrating-applications.md#tailnet-identity) for the
+values, tagged devices, and what to trust.
 
 ## Operate and disable it
 

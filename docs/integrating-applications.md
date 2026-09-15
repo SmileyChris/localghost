@@ -234,6 +234,35 @@ Believe these headers only when the connection itself comes from the hub, a
 private address. An application that is also reachable directly — a dev
 server bound to a LAN interface, say — can be handed forged ones.
 
+## Tailnet identity
+
+With [tailnet hosting](tailscale.md) enabled, a request from a tailnet device
+also names the person behind it, in the same headers
+[Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve) sets:
+
+| Header | Value |
+| --- | --- |
+| `Tailscale-User-Login` | the login, such as `alice@example.com` |
+| `Tailscale-User-Name` | the display name, such as `Alice Example` |
+| `Tailscale-User-Profile-Pic` | the profile picture URL, when the identity provider has one |
+
+A device that is [tagged](https://tailscale.com/docs/features/tags) rather than
+owned by a person arrives as login `tagged-devices` and name `Tagged Device`,
+as it does under Serve. Requests from this machine and from other containers
+carry none of these headers, and whatever a client put in them is dropped
+before the application sees the request. The identity is the device's
+Tailscale login, not a browser session: everyone using that device is that
+user. An application can therefore skip its own sign-in for tailnet use, but
+still apply the same caution as for [client addresses](#client-addresses)
+about connections that bypass the hub.
+
+The hub learns the identity from the gateway, which asks the Tailscale node it
+runs. The answer is remembered for 30 seconds per address, so a device removed
+from the tailnet keeps its identity on connections already open for at most
+that long; Tailscale itself refuses its new connections at once. If the
+gateway cannot answer, the request arrives without identity rather than
+failing.
+
 ## Failure behavior
 
 Because `localghost` is declared external, application startup fails if
