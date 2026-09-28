@@ -17,6 +17,12 @@ uses [Semantic Versioning](https://semver.org/).
   `tagged-devices`, as under Serve. See
   [Tailnet identity](docs/integrating-applications.md#tailnet-identity).
 
+### Fixed
+
+- `localghost tailscale disable` reports "Reconciling hub…" when it recreates
+  a running hub without the gateway, instead of "Starting hub…", which read as
+  though it had started a stopped one.
+
 ## [3.2.1] - 2026-09-14
 
 ### Changed

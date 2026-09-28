@@ -1028,7 +1028,12 @@ def tailscale_disable(client_id: str | None, client_secret: str | None) -> None:
         remove_tailscale_state()
         delete_tailscale_credential()
         if proxy_is_running():
-            _run_proxy("up", https_enabled=_https_configured(), force_recreate=True)
+            _run_proxy(
+                "up",
+                already_running=True,
+                https_enabled=_https_configured(),
+                force_recreate=True,
+            )
     except TailscaleError as exc:
         raise click.ClickException(str(exc)) from exc
     success("Tailnet DNS was restored and the local gateway was removed.")
