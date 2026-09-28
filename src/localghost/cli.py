@@ -976,7 +976,12 @@ def tailscale_enable(
 def _resolve_tailscale_credential(
     client_id: str | None, client_secret: str | None, *, tag: str | None = None
 ) -> tuple[str, str]:
-    """Find the OAuth credential: options, then keyring, then a guided prompt."""
+    """Find the OAuth credential: options, then keyring, then a guided prompt.
+
+    With a tag, the prompt follows enable's full admin-console setup; without
+    one it only names the scope disable uses, since disable deletes the
+    credential afterwards anyway.
+    """
     if not client_id and not client_secret:
         stored = load_tailscale_credential()
         if stored is not None:
@@ -997,6 +1002,11 @@ def _resolve_tailscale_credential(
                     ),
                 ],
                 title="One-time Tailscale admin-console setup",
+            )
+        else:
+            details(
+                [("OAuth client with dns:write", OAUTH_CONSOLE_URL)],
+                title="No OAuth credential is stored in the system keyring",
             )
     if not client_id:
         client_id = click.prompt("Client id")
@@ -1026,7 +1036,7 @@ def tailscale_disable(client_id: str | None, client_secret: str | None) -> None:
         previous = state.previous_split_dns.get(state.suffix)
         api.update_split_dns(state.tailnet, {state.suffix: previous})
         remove_tailscale_state()
-        delete_tailscale_credential()
+        forgot_credential = delete_tailscale_credential()
         if proxy_is_running():
             _run_proxy(
                 "up",
@@ -1037,6 +1047,8 @@ def tailscale_disable(client_id: str | None, client_secret: str | None) -> None:
     except TailscaleError as exc:
         raise click.ClickException(str(exc)) from exc
     success("Tailnet DNS was restored and the local gateway was removed.")
+    if forgot_credential:
+        info("The OAuth credential was removed from the system keyring.")
     info(
         f"Machines that trusted the .{state.suffix} root still trust it; run "
         "`localghost trust remove` on each to revoke."

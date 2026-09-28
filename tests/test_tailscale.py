@@ -9,7 +9,7 @@ from urllib.error import HTTPError, URLError
 import click
 import pytest
 from click.testing import CliRunner
-from keyring.errors import KeyringError
+from keyring.errors import KeyringError, PasswordDeleteError
 
 import localghost.cli as cli_module
 import localghost.tailscale as tailscale_module
@@ -319,12 +319,16 @@ def test_dns_forbidden_names_the_missing_scope(monkeypatch) -> None:
 
 
 def _fake_keyring(stored: dict) -> SimpleNamespace:
+    def delete_password(service, name):
+        if stored.pop((service, name), None) is None:
+            raise PasswordDeleteError("not found")
+
     return SimpleNamespace(
         set_password=lambda service, name, value: stored.__setitem__(
             (service, name), value
         ),
         get_password=lambda service, name: stored.get((service, name)),
-        delete_password=lambda service, name: stored.pop((service, name), None),
+        delete_password=delete_password,
     )
 
 
@@ -336,9 +340,10 @@ def test_credential_round_trip_uses_the_system_keyring(monkeypatch) -> None:
     assert all(service == "localghost-tailscale" for service, _ in stored)
     credential = tailscale_module.load_credential()
     assert credential == tailscale_module.Credential("id", "secret")
-    tailscale_module.delete_credential()
+    assert tailscale_module.delete_credential() is True
     assert not stored
     assert tailscale_module.load_credential() is None
+    assert tailscale_module.delete_credential() is False
 
 
 def test_credential_helpers_survive_a_missing_keyring_backend(monkeypatch) -> None:
@@ -354,7 +359,7 @@ def test_credential_helpers_survive_a_missing_keyring_backend(monkeypatch) -> No
     )
     assert tailscale_module.store_credential("id", "secret") is False
     assert tailscale_module.load_credential() is None
-    tailscale_module.delete_credential()
+    assert tailscale_module.delete_credential() is False
 
 
 def test_api_rejects_missing_fields_and_unexpected_dns(monkeypatch) -> None:
@@ -933,15 +938,18 @@ def test_disable_uses_the_stored_credential_and_deletes_it(monkeypatch) -> None:
         "load_tailscale_credential",
         lambda: tailscale_module.Credential("kid", "ksecret"),
     )
-    monkeypatch.setattr(
-        cli_module, "delete_tailscale_credential", lambda: events.append("deleted")
-    )
+    def delete_credential():
+        events.append("deleted")
+        return True
+
+    monkeypatch.setattr(cli_module, "delete_tailscale_credential", delete_credential)
 
     result = CliRunner().invoke(cli, ["tailscale", "disable"])
     assert result.exit_code == 0, result.output
     assert events[0] == ("kid", "ksecret")
     assert "deleted" in events
     assert events.index("deleted") > events.index("removed")
+    assert "removed from the system keyring" in result.output
 
 
 def test_disable_notes_that_other_machines_still_trust_the_root(monkeypatch) -> None:
@@ -1809,3 +1817,38 @@ def test_create_auth_key_reraises_unexpected_api_errors(monkeypatch) -> None:
     monkeypatch.setattr(tailscale_module, "_request", rejected)
     with pytest.raises(APIError, match="boom"):
         tailscale_module.API("token").create_auth_key("example.com", "tag:localghost")
+
+
+def test_disable_without_a_stored_credential_names_the_scope_it_needs(
+    monkeypatch,
+) -> None:
+    state = TailscaleState(
+        "example.com", "tail1234", ("100.64.0.1",), {}
+    )
+
+    class FakeAPI:
+        @classmethod
+        def authenticate(cls, client_id, client_secret):
+            assert (client_id, client_secret) == ("typed", "typed-secret")
+            return cls()
+
+        def update_split_dns(self, tailnet, value):
+            pass
+
+    monkeypatch.delenv("TAILSCALE_CLIENT_ID", raising=False)
+    monkeypatch.delenv("TAILSCALE_CLIENT_SECRET", raising=False)
+    monkeypatch.setattr(cli_module, "TailscaleAPI", FakeAPI)
+    monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: state)
+    monkeypatch.setattr(cli_module, "remove_tailscale_state", lambda: None)
+    monkeypatch.setattr(cli_module, "proxy_is_running", lambda: False)
+    monkeypatch.setattr(cli_module, "load_tailscale_credential", lambda: None)
+    monkeypatch.setattr(cli_module, "delete_tailscale_credential", lambda: False)
+
+    result = CliRunner().invoke(
+        cli, ["tailscale", "disable"], input="typed\ntyped-secret\n"
+    )
+    assert result.exit_code == 0, result.output
+    assert "No OAuth credential is stored" in result.output
+    assert "dns:write" in result.output
+    assert "auth_keys" not in result.output
+    assert "removed from the system keyring" not in result.output

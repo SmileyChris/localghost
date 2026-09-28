@@ -130,10 +130,14 @@ def load_credential() -> Credential | None:
     return Credential(client_id, client_secret)
 
 
-def delete_credential() -> None:
+def delete_credential() -> bool:
+    """Remove the stored OAuth credential; report whether any was there."""
+    deleted = False
     for name in ("client-id", "client-secret"):
         with suppress(KeyringError):
             keyring.delete_password(KEYRING_SERVICE, name)
+            deleted = True
+    return deleted
 
 
 # "localghost-" plus the suffix must still fit in one 63-character DNS label

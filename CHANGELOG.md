@@ -17,6 +17,13 @@ uses [Semantic Versioning](https://semver.org/).
   `tagged-devices`, as under Serve. See
   [Tailnet identity](docs/integrating-applications.md#tailnet-identity).
 
+### Changed
+
+- `localghost tailscale disable` says so when no credential is stored in the
+  system keyring, as happens after an enable that predates 3.0.0, and names
+  the one scope it needs, `dns:write`, instead of showing a bare prompt. It
+  also reports when it removes the stored credential.
+
 ### Fixed
 
 - `localghost tailscale disable` reports "Reconciling hub…" when it recreates

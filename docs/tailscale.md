@@ -70,7 +70,8 @@ translated into the exact console fix instead of raw HTTP responses.
 After a successful enable, the credential is saved in the system keyring
 (service `localghost-tailscale`), so `disable` and a later re-enable need no
 re-entry; `disable` removes it again. Without a usable keyring, localghost
-warns and stores nothing.
+warns and stores nothing, and `disable` prompts for a client with the
+`dns:write` scope instead.
 
 The OAuth client's own tailnet is the default. Localghost asks the installed
 `tailscale` CLI for a suffix: an explicit one-label search domain wins, then
