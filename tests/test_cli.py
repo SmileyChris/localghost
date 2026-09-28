@@ -573,7 +573,10 @@ def test_save_takes_the_per_type_default_port() -> None:
         assert "8000" in result.output
 
 
-def test_save_custom_command_does_not_record_an_irrelevant_detected_type() -> None:
+def test_save_custom_command_does_not_record_an_irrelevant_detected_type(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("localghost.ports.port_available", lambda port: True)
     runner_ = CliRunner()
     with runner_.isolated_filesystem():
         Path("manage.py").touch()
