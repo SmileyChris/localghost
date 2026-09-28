@@ -725,6 +725,11 @@ def tailscale_status() -> None:
     _tailscale_status()
 
 
+def _explicit_tailnet_row(tailnet: str) -> list[tuple[str, str]]:
+    """Name the tailnet only when one was chosen; '-' is the credential's own."""
+    return [] if tailnet == "-" else [("Tailnet", tailnet)]
+
+
 def _tailscale_status() -> None:
     try:
         state = load_tailscale_state()
@@ -734,14 +739,10 @@ def _tailscale_status() -> None:
         details([("Tailnet hosting", "disabled")], title="Tailscale status")
         return
     details(
-        [
-            ("Tailnet hosting", "enabled"),
-            ("Tailnet", state.tailnet),
+        [("Tailnet hosting", "enabled")]
+        + _explicit_tailnet_row(state.tailnet)
+        + [
             ("Route suffix", f".{state.suffix}"),
-            (
-                "Tailnet HTTPS",
-                "enabled" if state.https else "HTTP only (public DNS name)",
-            ),
             ("Gateway", ", ".join(state.gateway_ips)),
             ("Gateway health", _tailscale_gateway_health()),
             ("Device tag", state.tag),
@@ -753,12 +754,15 @@ def _tailscale_status() -> None:
         ),
         title="Tailscale status",
     )
+    if not state.https:
+        _public_suffix_notice(state.suffix)
+        return
     root_path = _tailnet_root_path(state.suffix)
-    if state.https and root_path.is_file():
+    if root_path.is_file():
         with suppress(TrustError):
             certificate = PublicCertificate.parse(root_path.read_bytes())
             action(
-                "Trust on other tailnet machines",
+                f"Trust https://*.{state.suffix} on other machines",
                 _share_command(state.suffix, certificate),
             )
 
@@ -901,10 +905,9 @@ def tailscale_enable(
         https = not tailscale_suffix_is_public(chosen_suffix)
         node = default_tailscale_node()
         details(
-            [
-                ("Tailnet", "credential's own tailnet" if tailnet == "-" else tailnet),
+            _explicit_tailnet_row(tailnet)
+            + [
                 ("Route suffix", f".{chosen_suffix}"),
-                ("Tailnet HTTPS", "enabled" if https else "HTTP only"),
                 ("Gateway", f"localghost-{node}"),
                 ("Device tag", tag),
             ],
@@ -989,7 +992,6 @@ def _switch_tailnet_suffix(
     details(
         [
             ("Route suffix", f".{old_suffix} → .{chosen_suffix}"),
-            ("Tailnet HTTPS", "enabled" if https else "HTTP only"),
             ("Gateway", f"localghost-{current.node_label} (unchanged)"),
         ],
         title="Switching tailnet suffix",
@@ -1078,7 +1080,7 @@ def _offer_tailnet_trust(
     if certificate is None:
         return
     action(
-        "Trust on other tailnet machines",
+        f"Trust https://*.{suffix} on other machines",
         _share_command(suffix, certificate),
     )
     if localhost_trusted:

@@ -34,6 +34,10 @@ uses [Semantic Versioning](https://semver.org/).
   is created and no offline device is left behind. Without `--suffix`,
   enable detects the suffix again, so renaming the machine in the admin
   console and running enable follows it.
+- `localghost tailscale status` and enable's summary drop the `Tailnet
+  HTTPS` row, and the `Tailnet` row unless `--tailnet` named one. The share
+  command reads `Trust https://*.<suffix> on other machines`; a public suffix
+  shows its HTTP-only notice in its place.
 - `localghost tailscale disable` says so when no credential is stored in the
   system keyring, as happens after an enable that predates 3.0.0, and names
   the one scope it needs, `dns:write`, instead of showing a bare prompt. It

@@ -96,8 +96,8 @@ impersonate real websites on every machine that trusts it, so no tailnet
 authority is minted for such a suffix. Requests are still encrypted by the
 tailnet's WireGuard tunnel; what is lost is the browser's secure context
 (service workers, `crypto.subtle`, camera access) and the `trust.<suffix>`
-page. `enable` and `hub up` say so, and `localghost tailscale status` reports
-`Tailnet HTTPS: HTTP only`. Detection never picks a public label; one has to
+page. `enable`, `hub up`, and `localghost tailscale status` say so, the
+last in place of the trust command a private suffix shows. Detection never picks a public label; one has to
 be passed as `--suffix` deliberately. Choose a private label such as
 `tail1234` for trusted HTTPS.
 

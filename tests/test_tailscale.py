@@ -2059,3 +2059,20 @@ def test_enable_while_enabled_without_detection_keeps_the_suffix(
     assert "already enabled at .old1234" in result.output
     assert saved == []
 
+
+def test_status_explains_a_public_suffix_instead_of_offering_trust(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        cli_module,
+        "load_tailscale_state",
+        lambda: TailscaleState("-", "work", ("100.64.0.1",), {}),
+    )
+    monkeypatch.setattr(cli_module, "_tailscale_gateway_health", lambda: "healthy")
+    monkeypatch.setattr(cli_module, "_unmirrored_router_names", lambda: [])
+    result = CliRunner().invoke(cli, ["tailscale", "status"])
+    assert result.exit_code == 0, result.output
+    assert "Tailnet routes for .work are HTTP only" in result.output
+    assert "Trust https://" not in result.output
+    # '-' is the credential's own tailnet, which says nothing worth a row.
+    assert "Tailnet:" not in result.output
