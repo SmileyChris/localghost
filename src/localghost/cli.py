@@ -1155,7 +1155,7 @@ def _install_tailnet_trust(
     if show_details:
         details(
             [
-                ("Authorization", "system authorization is required now"),
+                ("Authorization", "sudo password may be requested for system trust"),
                 ("Scope", f"development names under .{suffix}"),
                 ("Public-root fingerprint", certificate.fingerprint),
                 ("Private keys", "remain on the hosting machine"),
