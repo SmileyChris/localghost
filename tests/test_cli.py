@@ -2364,6 +2364,21 @@ def test_run_leaves_a_persistent_nonzero_exit_diagnosis(monkeypatch) -> None:
     assert "--no-status-bar" in result.output
 
 
+def test_run_treats_ctrl_c_as_a_normal_stop(monkeypatch) -> None:
+    plan = RunPlan("demo", "custom", ("serve",), 3000, "session", "services: {}\n")
+    monkeypatch.setattr("localghost.cli.build_plan", lambda *args, **kwargs: plan)
+    monkeypatch.setattr("localghost.cli.find_route_collision", lambda name: None)
+    monkeypatch.setattr("localghost.cli._https_configured", lambda: False)
+    monkeypatch.setattr("localghost.cli.execute", lambda *args, **kwargs: 130)
+
+    result = CliRunner().invoke(cli, ["run", "--port", "3000", "--", "serve"])
+
+    # The shell convention survives for scripts; the panel does not.
+    assert result.exit_code == 130
+    assert "Application stopped." in result.output
+    assert "exited with status" not in result.output
+
+
 def test_compose_run_pins_before_the_hub_is_reconciled(monkeypatch, tmp_path) -> None:
     order = []
 

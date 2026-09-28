@@ -1727,6 +1727,10 @@ def _run_compose(
 
 def _report_application_exit(status: int) -> None:
     """Leave a stable diagnosis after the transient status display is gone."""
+    if status == 128 + signal.SIGINT:
+        # Ctrl+C is how a foreground run is meant to end, not a failure.
+        success("Application stopped.")
+        return
     warning(
         "Application exited",
         [

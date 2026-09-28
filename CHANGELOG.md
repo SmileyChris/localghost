@@ -45,6 +45,9 @@ uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Stopping a foreground `localghost run` with Ctrl+C reports "Application
+  stopped." instead of an "Application exited" warning about status 130. The
+  exit status stays 130.
 - `localghost tailscale disable` reports "Reconciling hub…" when it recreates
   a running hub without the gateway, instead of "Starting hub…", which read as
   though it had started a stopped one.
