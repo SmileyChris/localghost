@@ -32,3 +32,13 @@ def neutral_colour_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.delenv("FORCE_COLOR", raising=False)
     monkeypatch.delenv("TTY_COMPATIBLE", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def mkcert_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pass the CLI's up-front mkcert check whether or not the host has it.
+
+    Trust tests replace the installers themselves; without this they would
+    pass on a machine with mkcert and fail on one without.
+    """
+    monkeypatch.setattr("localghost.cli.require_mkcert", lambda: "mkcert")

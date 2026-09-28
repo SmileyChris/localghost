@@ -73,6 +73,16 @@ class PublicCertificate:
             return None
 
 
+def require_mkcert(which: Callable[[str], str | None] = shutil.which) -> str:
+    """Find mkcert, or explain that trust cannot change without it."""
+    executable = which("mkcert")
+    if executable is None:
+        raise TrustError(
+            "mkcert is unavailable; install mkcert, then run this command again."
+        )
+    return executable
+
+
 class MkcertInstaller:
     """Ask mkcert to manage only the exported public root."""
 
@@ -88,12 +98,7 @@ class MkcertInstaller:
         self.which = which
 
     def _run(self, action: str) -> None:
-        executable = self.which("mkcert")
-        if executable is None:
-            raise TrustError(
-                "mkcert is unavailable; HTTPS remains disabled. Install mkcert, "
-                "then run `localghost trust install`."
-            )
+        executable = require_mkcert(self.which)
         # mkcert does not accept a certificate path: it always reads the exact
         # filename CAROOT/rootCA.pem. Stage only the selected public root so
         # another managed authority in the same state directory cannot be

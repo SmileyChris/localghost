@@ -118,7 +118,13 @@ from .tailscale import (
 from .tailscale import (
     validate_suffix as validate_tailscale_suffix,
 )
-from .trust import MkcertInstaller, PublicCertificate, TrustError, ZenNssInstaller
+from .trust import (
+    MkcertInstaller,
+    PublicCertificate,
+    TrustError,
+    ZenNssInstaller,
+    require_mkcert,
+)
 
 LOCALGHOST_VERSION = importlib.metadata.version("localghost")
 TRAEFIK_IMAGE = f"localghost-traefik:v{LOCALGHOST_VERSION}"
@@ -1127,6 +1133,7 @@ def _install_tailnet_trust(
 ) -> None:
     expected = _normalize_fingerprint(expected_fingerprint)
     try:
+        require_mkcert()
         suffix = validate_tailscale_suffix(suffix)
         state = load_tailscale_state()
         gateway_ips = state.gateway_ips if state and state.suffix == suffix else ()
@@ -2078,6 +2085,10 @@ def _detect_root_rotation(certificate: PublicCertificate) -> bool:
 
 
 def _enable_https() -> None:
+    try:
+        require_mkcert()
+    except TrustError as exc:
+        raise click.ClickException(str(exc)) from exc
     was_configured = _https_configured()
     certificate = _bootstrap_public_root()
     certificate_path = _public_root_path()

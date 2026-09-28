@@ -1852,3 +1852,23 @@ def test_disable_without_a_stored_credential_names_the_scope_it_needs(
     assert "dns:write" in result.output
     assert "auth_keys" not in result.output
     assert "removed from the system keyring" not in result.output
+
+
+def test_tailnet_trust_without_mkcert_stops_before_downloading(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+
+    def missing():
+        raise TrustError("mkcert is unavailable")
+
+    def fetch(suffix, gateway_ips):
+        raise AssertionError("downloaded the root without mkcert")
+
+    monkeypatch.setattr(cli_module, "require_mkcert", missing)
+    monkeypatch.setattr(cli_module, "fetch_tailscale_root", fetch)
+    result = CliRunner().invoke(cli, ["tailscale", "trust", "tail1234"])
+    assert result.exit_code != 0
+    assert "mkcert is unavailable" in result.output
+    assert "Tailnet HTTPS setup" not in result.output
+    assert not list(tmp_path.glob("tailscale-*-rootCA.pem"))

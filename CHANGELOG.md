@@ -29,6 +29,11 @@ uses [Semantic Versioning](https://semver.org/).
 - `localghost tailscale disable` reports "Reconciling hub…" when it recreates
   a running hub without the gateway, instead of "Starting hub…", which read as
   though it had started a stopped one.
+- Trust commands check for `mkcert` before doing any work, so a missing
+  `mkcert` no longer surfaces only after `localghost tailscale trust` has
+  downloaded the root or `localghost trust install` has prepared it. The error
+  also no longer sends `tailscale trust` and `trust remove` users to
+  `localghost trust install`.
 
 ## [3.2.1] - 2026-09-14
 
