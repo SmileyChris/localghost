@@ -128,7 +128,7 @@ def test_detect_suffix_survives_null_search_domains(monkeypatch) -> None:
     assert detect_suffix() == "taildc3ac3"
 
 
-def test_detect_suffix_prefers_the_tailnet_label(monkeypatch) -> None:
+def test_detect_suffix_prefers_this_machine_name(monkeypatch) -> None:
     monkeypatch.setattr(
         tailscale_module.subprocess,
         "run",
@@ -147,10 +147,10 @@ def test_detect_suffix_prefers_the_tailnet_label(monkeypatch) -> None:
             "",
         ),
     )
-    assert detect_suffix() == "taildc3ac3"
+    assert detect_suffix() == "chris-laptop"
 
 
-def test_detect_suffix_skips_an_unusable_tailnet_label(monkeypatch) -> None:
+def test_detect_suffix_skips_a_public_machine_name(monkeypatch) -> None:
     monkeypatch.setattr(
         tailscale_module.subprocess,
         "run",
@@ -160,15 +160,15 @@ def test_detect_suffix_skips_an_unusable_tailnet_label(monkeypatch) -> None:
             json.dumps(
                 {
                     "CurrentTailnet": {
-                        "MagicDNSSuffix": "local.ts.net",
-                        "SelfDNSName": "chris-laptop.example.ts.net.",
+                        "MagicDNSSuffix": "taildc3ac3.ts.net",
+                        "SelfDNSName": "work.taildc3ac3.ts.net.",
                     },
                 }
             ),
             "",
         ),
     )
-    assert detect_suffix() == "chris-laptop"
+    assert detect_suffix() == "taildc3ac3"
 
 
 def test_detect_suffix_falls_back_to_this_machine_name(monkeypatch) -> None:

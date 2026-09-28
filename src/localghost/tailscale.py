@@ -220,11 +220,13 @@ def _private_suffix(value: str) -> str:
 def detect_suffix() -> str:
     """Choose a suffix from the local Tailscale client's DNS view.
 
-    An explicit one-label search domain wins, then the tailnet's own MagicDNS
-    label (``taildc3ac3`` for ``taildc3ac3.ts.net``), which is stable and
-    collides with no device's short name. This machine's own hostname is the
-    last resort. Public or reserved labels are skipped: they would silently
-    downgrade the tailnet routes to HTTP, so they must be chosen explicitly.
+    An explicit one-label search domain wins, then this machine's own tailnet
+    short name (``wrk`` for ``wrk.taildc3ac3.ts.net``), which differs per
+    hosting machine and matches the gateway's device name. The tailnet's
+    MagicDNS label (``taildc3ac3``) is the fallback. The short name still
+    resolves to the machine itself alongside the suffix. Public or reserved
+    labels are skipped: they would silently downgrade the tailnet routes to
+    HTTP, so they must be chosen explicitly.
     """
     try:
         result = subprocess.run(
@@ -249,7 +251,7 @@ def detect_suffix() -> str:
                 with suppress(ValueError):
                     return _private_suffix(candidate)
         tailnet = payload.get("CurrentTailnet") or {}
-        for name in (tailnet.get("MagicDNSSuffix"), tailnet.get("SelfDNSName")):
+        for name in (tailnet.get("SelfDNSName"), tailnet.get("MagicDNSSuffix")):
             if not name:
                 continue
             with suppress(ValueError):

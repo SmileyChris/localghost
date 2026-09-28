@@ -76,14 +76,16 @@ warns and stores nothing, and `disable` prompts for a client with the
 
 The OAuth client's own tailnet is the default. Localghost asks the installed
 `tailscale` CLI for a suffix: an explicit one-label search domain wins, then
-the tailnet's own MagicDNS label (`taildc3ac3.ts.net` becomes `taildc3ac3`),
-and only as a last resort the current machine's name. Pass `--tailnet` or
-`--suffix` explicitly when those defaults are not the desired values.
+this machine's own tailnet short name (`wrk.taildc3ac3.ts.net` becomes `wrk`,
+serving `shop.wrk`), and finally the tailnet's MagicDNS label (`taildc3ac3`)
+when the short name is a public word. The short name keeps resolving to the
+machine itself alongside the suffix. Pass `--tailnet` or `--suffix`
+explicitly when those defaults are not the desired values.
 
-Because the detected suffix is shared by the whole tailnet, enable refuses to
-replace an existing split-DNS entry for it — most likely another machine
-already hosting that suffix. Choose a distinct `--suffix` per hosting
-machine, or pass `--takeover` to replace the mapping deliberately. When a
+A suffix's split-DNS entry applies to the whole tailnet, so enable refuses to
+replace an existing one — most likely another machine already hosting that
+suffix. Machine short names keep hosting machines apart by default; pass a
+distinct `--suffix`, or `--takeover` to replace the mapping deliberately. When a
 later enable step fails, the split-DNS entry and saved state are rolled back
 so the command can simply be run again.
 
