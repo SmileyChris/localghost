@@ -19,6 +19,10 @@ uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The tailnet gateway is named after the hosting machine's own tailnet name
+  (`localghost-<machine>`) instead of the suffix, and its tailnet state
+  volume follows the same name. Hubs enabled earlier keep their
+  `localghost-<suffix>` device and volume until they are next disabled.
 - `localghost tailscale disable` says so when no credential is stored in the
   system keyring, as happens after an enable that predates 3.0.0, and names
   the one scope it needs, `dns:write`, instead of showing a bare prompt. It

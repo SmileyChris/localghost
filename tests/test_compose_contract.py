@@ -328,6 +328,8 @@ def test_tailscale_overlay_adds_unpublished_gateway_and_suffix_provider() -> Non
         LOCALGHOST_TAILNET_CA_MODE="tls",
     )
 
+    # Without a node (state saved before nodes were named) the device and its
+    # state volume stay keyed by the suffix.
     gateway = model["services"]["tailscale-gateway"]
     assert "ports" not in gateway
     assert gateway["pull_policy"] == "build"
@@ -395,14 +397,16 @@ def test_public_suffix_tailscale_overlay_serves_http_only() -> None:
         ROOT / "src" / "localghost" / "proxy_compose_tailscale.yaml",
         LOCALGHOST_IMAGE_TAG="test",
         LOCALGHOST_TAILSCALE_SUFFIX="work",
+        LOCALGHOST_TAILSCALE_NODE="t16",
         LOCALGHOST_LOCALHOST_CA_MODE="http",
         LOCALGHOST_TAILNET_CA_MODE="http",
     )
 
+    # The device and its state follow the node; the suffix is only routing.
     gateway = model["services"]["tailscale-gateway"]
     assert gateway["command"] == [
         "--suffix=work",
-        "--hostname=localghost-work",
+        "--hostname=localghost-t16",
         "--state-dir=/var/lib/localghost-tailscale",
         "--http-target=traefik:80",
     ]
@@ -410,7 +414,7 @@ def test_public_suffix_tailscale_overlay_serves_http_only() -> None:
         mount["target"] != "/var/lib/localghost-root" for mount in gateway["volumes"]
     )
     assert model["volumes"]["localghost-tailscale-state"]["name"] == (
-        "localghost-tailscale-state-work"
+        "localghost-tailscale-state-t16"
     )
     assert "localghost-tailnet-ca-signer" not in model["volumes"]
     assert "localghost-tailnet-ca-root" not in model["volumes"]

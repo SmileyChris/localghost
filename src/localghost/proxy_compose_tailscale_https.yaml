@@ -16,7 +16,7 @@ services:
   tailscale-gateway:
     command:
       - --suffix=${LOCALGHOST_TAILSCALE_SUFFIX:?LOCALGHOST_TAILSCALE_SUFFIX is required}
-      - --hostname=localghost-${LOCALGHOST_TAILSCALE_SUFFIX}
+      - --hostname=localghost-${LOCALGHOST_TAILSCALE_NODE:-${LOCALGHOST_TAILSCALE_SUFFIX}}
       - --state-dir=/var/lib/localghost-tailscale
       - --root-ca=/var/lib/localghost-root/rootCA.pem
       - --http-target=traefik:80

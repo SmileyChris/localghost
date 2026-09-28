@@ -569,8 +569,11 @@ def _patch_enable(monkeypatch, events, saved, state_dir):
         lambda suffix: PublicCertificate.parse(CERTIFICATE_PEM),
     )
     monkeypatch.setattr(
-        cli_module, "_bootstrap_tailscale_gateway", lambda suffix, key: ("100.64.0.1",)
+        cli_module,
+        "_bootstrap_tailscale_gateway",
+        lambda suffix, node, key: ("100.64.0.1",),
     )
+    monkeypatch.setattr(cli_module, "default_tailscale_node", lambda: "t16")
     monkeypatch.setattr(cli_module, "_ensure_gateway_image", lambda suffix: None)
     monkeypatch.setattr(cli_module, "save_tailscale_state", saved.append)
     monkeypatch.setattr(
@@ -1403,12 +1406,16 @@ def test_bootstrap_gateway_passes_key_only_on_stdin(monkeypatch) -> None:
         ),
     )
 
-    addresses = cli_module._bootstrap_tailscale_gateway("tail1234", "secret-key")
+    addresses = cli_module._bootstrap_tailscale_gateway(
+        "tail1234", "t16", "secret-key"
+    )
 
     command, kwargs = calls[0]
     assert addresses == ("100.64.0.1", "fd7a:115c:a1e0::1")
     assert "secret-key" not in command
     assert kwargs["input"] == b"secret-key"
+    assert "--hostname=localghost-t16" in command
+    assert kwargs["env"]["LOCALGHOST_TAILSCALE_NODE"] == "t16"
 
 
 def test_bootstrap_gateway_parses_only_labelled_addresses(monkeypatch) -> None:
@@ -1424,7 +1431,7 @@ def test_bootstrap_gateway_parses_only_labelled_addresses(monkeypatch) -> None:
             b"",
         ),
     )
-    addresses = cli_module._bootstrap_tailscale_gateway("tail1234", "key")
+    addresses = cli_module._bootstrap_tailscale_gateway("tail1234", "t16", "key")
     assert addresses == ("100.64.0.1",)
 
 
@@ -1437,7 +1444,7 @@ def test_bootstrap_helpers_report_compose_failures(monkeypatch) -> None:
     with pytest.raises(TailscaleError, match="failed"):
         cli_module._bootstrap_tailnet_root("tail1234")
     with pytest.raises(TailscaleError, match="failed"):
-        cli_module._bootstrap_tailscale_gateway("tail1234", "key")
+        cli_module._bootstrap_tailscale_gateway("tail1234", "t16", "key")
 
 
 def test_disable_restores_exact_dns_then_reconciles(monkeypatch) -> None:
@@ -1872,3 +1879,58 @@ def test_tailnet_trust_without_mkcert_stops_before_downloading(
     assert "mkcert is unavailable" in result.output
     assert "Tailnet HTTPS setup" not in result.output
     assert not list(tmp_path.glob("tailscale-*-rootCA.pem"))
+
+
+def test_default_node_is_this_machines_tailnet_name(monkeypatch) -> None:
+    monkeypatch.setattr(
+        tailscale_module.subprocess,
+        "run",
+        lambda *args, **kwargs: CompletedProcess(
+            args, 0, '{"Self": {"DNSName": "wrk.taildc3ac3.ts.net."}}', ""
+        ),
+    )
+    monkeypatch.setattr(tailscale_module.socket, "gethostname", lambda: "ms7b85")
+    assert tailscale_module.default_node() == "wrk"
+
+
+@pytest.mark.parametrize(
+    "hostname, node",
+    [("t16", "t16"), ("My_Laptop.local", "my-laptop"), ("___", "gateway")],
+)
+def test_default_node_falls_back_to_the_hostname_as_one_label(
+    monkeypatch, hostname, node
+) -> None:
+    def no_cli(*args, **kwargs):
+        raise FileNotFoundError
+
+    monkeypatch.setattr(tailscale_module.subprocess, "run", no_cli)
+    monkeypatch.setattr(tailscale_module.socket, "gethostname", lambda: hostname)
+    assert tailscale_module.default_node() == node
+
+
+def test_state_saved_before_nodes_keeps_its_suffix_as_the_node(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    tailscale_module.state_path().write_text(
+        '{"tailnet": "-", "suffix": "work", "gateway_ips": ["100.64.0.1"], '
+        '"previous_split_dns": {}}'
+    )
+    assert tailscale_module.load_state().node_label == "work"
+
+    tailscale_module.save_state(
+        TailscaleState("-", "wrk", ("100.64.0.1",), {}, node="t16")
+    )
+    assert tailscale_module.load_state().node_label == "t16"
+
+
+def test_enable_names_the_gateway_after_this_machine(monkeypatch, tmp_path) -> None:
+    events: list = []
+    saved: list = []
+    _patch_enable(monkeypatch, events, saved, tmp_path)
+
+    result = CliRunner().invoke(cli, ENABLE_ARGS + CREDENTIAL_ARGS)
+    assert result.exit_code == 0, result.output
+    assert saved[0].node == "t16"
+    assert "localghost-t16" in result.output
+

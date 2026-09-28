@@ -7,6 +7,7 @@ import ipaddress
 import json
 import os
 import re
+import socket
 import subprocess
 import tempfile
 import urllib.error
@@ -49,6 +50,14 @@ class TailscaleState:
     gateway_ips: tuple[str, ...]
     previous_split_dns: dict[str, list[str]]
     tag: str = "tag:localghost"
+    # The gateway device is localghost-<node>. State saved before the node
+    # was named used the suffix, and keeps it so the device and its state
+    # volume carry over.
+    node: str | None = None
+
+    @property
+    def node_label(self) -> str:
+        return self.node or self.suffix
 
     @property
     def https(self) -> bool:
@@ -77,6 +86,7 @@ def load_state() -> TailscaleState | None:
             gateway_ips=tuple(value["gateway_ips"]),
             previous_split_dns=value["previous_split_dns"],
             tag=value.get("tag", "tag:localghost"),
+            node=value.get("node"),
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise TailscaleError(f"invalid saved Tailscale state in {path}: {exc}") from exc
@@ -177,6 +187,27 @@ def validate_suffix(value: str) -> str:
             f"localghost-{{suffix}} gateway hostname stays one DNS label"
         )
     return value
+
+
+def default_node() -> str:
+    """Name the gateway after this machine, as one DNS label.
+
+    The machine's own tailnet name wins, so the gateway sits beside it in the
+    admin console; the OS hostname covers a host without the tailscale CLI.
+    """
+    name = ""
+    with suppress(FileNotFoundError, json.JSONDecodeError, AttributeError):
+        result = subprocess.run(
+            ["tailscale", "status", "--json"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            name = json.loads(result.stdout).get("Self", {}).get("DNSName") or ""
+    name = (name or socket.gethostname()).split(".", 1)[0].lower()
+    label = re.sub(r"[^a-z0-9-]+", "-", name).strip("-")[:_SUFFIX_LIMIT]
+    return label.rstrip("-") or "gateway"
 
 
 def _private_suffix(value: str) -> str:

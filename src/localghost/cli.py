@@ -89,6 +89,9 @@ from .tailscale import (
     TailscaleState,
 )
 from .tailscale import (
+    default_node as default_tailscale_node,
+)
+from .tailscale import (
     delete_credential as delete_tailscale_credential,
 )
 from .tailscale import (
@@ -890,12 +893,13 @@ def tailscale_enable(
             suffix or detect_tailscale_suffix()
         )
         https = not tailscale_suffix_is_public(chosen_suffix)
+        node = default_tailscale_node()
         details(
             [
                 ("Tailnet", "credential's own tailnet" if tailnet == "-" else tailnet),
                 ("Route suffix", f".{chosen_suffix}"),
                 ("Tailnet HTTPS", "enabled" if https else "HTTP only"),
-                ("Gateway", f"localghost-{chosen_suffix}"),
+                ("Gateway", f"localghost-{node}"),
                 ("Device tag", tag),
             ],
             title="Tailnet hosting",
@@ -932,14 +936,15 @@ def tailscale_enable(
         _ensure_gateway_image(chosen_suffix)
         info("Creating a single-use gateway auth key…")
         auth_key = api.create_auth_key(tailnet, tag)
-        info(f"Enrolling localghost-{chosen_suffix} in the tailnet…")
-        gateway_ips = _bootstrap_tailscale_gateway(chosen_suffix, auth_key)
+        info(f"Enrolling localghost-{node} in the tailnet…")
+        gateway_ips = _bootstrap_tailscale_gateway(chosen_suffix, node, auth_key)
         state = TailscaleState(
             tailnet=tailnet,
             suffix=chosen_suffix,
             gateway_ips=gateway_ips,
             previous_split_dns=previous,
             tag=tag,
+            node=node,
         )
         save_tailscale_state(state)
         try:
@@ -1059,7 +1064,10 @@ def tailscale_disable(client_id: str | None, client_secret: str | None) -> None:
         f"Machines that trusted the .{state.suffix} root still trust it; run "
         "`localghost trust remove` on each to revoke."
     )
-    info("Remove the offline tagged localghost device in the Tailscale admin console.")
+    info(
+        f"Remove the offline tagged localghost-{state.node_label} device in the "
+        "Tailscale admin console."
+    )
 
 
 @tailscale.command("trust")
@@ -1788,6 +1796,7 @@ def _run_proxy(
             environment["LOCALGHOST_IMAGE_TAG"] = f"v{LOCALGHOST_VERSION}"
             if tailscale_state is not None:
                 environment["LOCALGHOST_TAILSCALE_SUFFIX"] = tailscale_state.suffix
+                environment["LOCALGHOST_TAILSCALE_NODE"] = tailscale_state.node_label
                 # The tailnet overlay owns Traefik's command, so it also has
                 # to be told which CA providers have a signer to run with.
                 environment["LOCALGHOST_LOCALHOST_CA_MODE"] = (
@@ -1951,7 +1960,9 @@ def _ensure_gateway_image(suffix: str) -> None:
         raise TailscaleError(detail or "could not build the gateway image")
 
 
-def _bootstrap_tailscale_gateway(suffix: str, auth_key: str) -> tuple[str, ...]:
+def _bootstrap_tailscale_gateway(
+    suffix: str, node: str, auth_key: str
+) -> tuple[str, ...]:
     with _proxy_resource_directory() as resource_root:
         command = [
             "docker",
@@ -1970,13 +1981,14 @@ def _bootstrap_tailscale_gateway(suffix: str, auth_key: str) -> tuple[str, ...]:
             "-T",
             "tailscale-gateway",
             f"--suffix={suffix}",
-            f"--hostname=localghost-{suffix}",
+            f"--hostname=localghost-{node}",
             "--state-dir=/var/lib/localghost-tailscale",
             "--bootstrap",
         ]
         environment = os.environ.copy()
         environment["LOCALGHOST_IMAGE_TAG"] = f"v{LOCALGHOST_VERSION}"
         environment["LOCALGHOST_TAILSCALE_SUFFIX"] = suffix
+        environment["LOCALGHOST_TAILSCALE_NODE"] = node
         try:
             result = subprocess.run(
                 command,

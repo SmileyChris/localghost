@@ -19,9 +19,10 @@ Four pieces cooperate, and each has exactly one job:
   labels, so localhost and tailnet routing cannot drift apart.
 - **The gateway** is one extra container in that same hub. It appears three
   ways that all name the same thing: Compose service `tailscale-gateway`,
-  tailnet device `localghost-<suffix>` (what the admin console shows), and
-  "the gateway" in this documentation. It joins the tailnet as a userspace
-  node and only transports: it answers DNS for the suffix with its own
+  tailnet device `localghost-<machine>`, named after the hosting machine's
+  own tailnet name (what the admin console shows), and "the gateway" in this
+  documentation. It joins the tailnet as a userspace node and only
+  transports: it answers DNS for the suffix with its own
   tailnet addresses, forwards HTTP to Traefik with the original Host header
   and the requesting device's tailnet address, and passes HTTPS through as
   raw TCP behind a PROXY protocol header naming that device. It also tells the
@@ -104,7 +105,8 @@ Enable performs four bounded operations:
    gateway image;
 2. creates a single-use, ten-minute auth key — after the build, so a slow
    first build cannot outlive it — and enrolls a persistent tagged
-   `localghost-tail1234` userspace node;
+   `localghost-<machine>` userspace node, named after this machine's tailnet
+   name (its hostname when the `tailscale` CLI is unavailable);
 3. adds [split DNS](https://tailscale.com/docs/reference/dns-in-tailscale) for
    `tail1234`, preserving the previous suffix mapping; and
 4. starts the gateway and suffix-specific HTTPS provider with the hub.
@@ -197,9 +199,9 @@ localghost tailscale disable
 ```
 
 Disabling deliberately does not delete the offline machine record. Remove the
-tagged `localghost-<suffix>` device from the Tailscale admin console after you
-have confirmed it is the expected node. Trust installed on other clients is
-also left in place; run `localghost trust remove` on each to revoke it.
+tagged `localghost-<machine>` device from the Tailscale admin console after
+you have confirmed it is the expected node. Trust installed on other clients
+is also left in place; run `localghost trust remove` on each to revoke it.
 
 While tailnet hosting is enabled, `localghost trust remove` on the hosting
 machine removes local trust but the hub keeps serving HTTPS — tailnet TLS

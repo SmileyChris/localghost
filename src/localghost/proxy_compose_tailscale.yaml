@@ -70,7 +70,7 @@ services:
       - no-new-privileges:true
     command:
       - --suffix=${LOCALGHOST_TAILSCALE_SUFFIX:?LOCALGHOST_TAILSCALE_SUFFIX is required}
-      - --hostname=localghost-${LOCALGHOST_TAILSCALE_SUFFIX}
+      - --hostname=localghost-${LOCALGHOST_TAILSCALE_NODE:-${LOCALGHOST_TAILSCALE_SUFFIX}}
       - --state-dir=/var/lib/localghost-tailscale
       - --http-target=traefik:80
     healthcheck:
@@ -93,4 +93,7 @@ services:
 
 volumes:
   localghost-tailscale-state:
-    name: localghost-tailscale-state-${LOCALGHOST_TAILSCALE_SUFFIX}
+    # Keyed by the node, not the suffix, so switching suffix keeps the same
+    # tailnet device. Hubs enabled before the node was named keep using their
+    # suffix here.
+    name: localghost-tailscale-state-${LOCALGHOST_TAILSCALE_NODE:-${LOCALGHOST_TAILSCALE_SUFFIX}}
