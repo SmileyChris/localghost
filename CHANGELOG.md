@@ -27,6 +27,13 @@ uses [Semantic Versioning](https://semver.org/).
   (`shop.wrk` on a machine named `wrk`) rather than the tailnet's MagicDNS
   label, so each hosting machine gets its own suffix by default. The tailnet
   label remains the fallback when the short name is a public word.
+- `localghost tailscale enable --suffix <new>` switches a hub that is
+  already enabled to another suffix on the same gateway device: split DNS
+  moves in one change, the new suffix's HTTPS root is prepared, and the hub
+  is recreated, with a rollback to the old suffix if that fails. No auth key
+  is created and no offline device is left behind. Without `--suffix`,
+  enable detects the suffix again, so renaming the machine in the admin
+  console and running enable follows it.
 - `localghost tailscale disable` says so when no credential is stored in the
   system keyring, as happens after an enable that predates 3.0.0, and names
   the one scope it needs, `dns:write`, instead of showing a bare prompt. It

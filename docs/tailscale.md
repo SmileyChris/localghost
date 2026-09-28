@@ -200,10 +200,44 @@ gateway from the running hub:
 localghost tailscale disable
 ```
 
+Disable also deletes the OAuth credential from the system keyring, and says
+so, so the next enable asks for it again. Switching suffix (below) keeps it.
+
 Disabling deliberately does not delete the offline machine record. Remove the
 tagged `localghost-<machine>` device from the Tailscale admin console after
 you have confirmed it is the expected node. Trust installed on other clients
 is also left in place; run `localghost trust remove` on each to revoke it.
+
+### Switch to another suffix
+
+Run enable again with the new suffix while tailnet hosting is enabled:
+
+```sh
+localghost tailscale enable --suffix wrk
+```
+
+Without `--suffix`, enable detects the suffix again, so after renaming this
+machine in the admin console a plain `localghost tailscale enable` moves the
+routes to the new short name. That applies to a suffix chosen with
+`--suffix` too; when detection gives the current suffix, enable just reports
+that hosting is already enabled.
+
+The gateway keeps its device, addresses, tailnet, and tag, so no auth key is
+created and nothing new appears in the admin console. The new suffix's split
+DNS entry points at the gateway, and in the same change the old suffix gets
+back whatever it resolved to before enable. The hub is recreated to answer
+for the new names. The same `--takeover` rule applies to the new suffix, and
+if the hub fails to start the switch is rolled back to the old suffix. The
+stored credential is used and kept.
+
+Each suffix has its own HTTPS root, because a root may only sign names under
+its suffix. Other machines therefore run the printed `localghost tailscale
+trust` command for the new suffix, and `localghost trust remove` if they
+should stop trusting the old one.
+
+A hub enabled before gateways were named after the machine keeps its
+`localghost-<suffix>` device across switches; disable and enable again to
+enroll one named after the machine.
 
 While tailnet hosting is enabled, `localghost trust remove` on the hosting
 machine removes local trust but the hub keeps serving HTTPS — tailnet TLS

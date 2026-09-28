@@ -700,17 +700,6 @@ def test_enable_without_credential_guides_setup_then_prompts(
     assert "dns:write" in result.output
 
 
-def test_enable_refuses_when_already_enabled(monkeypatch) -> None:
-    monkeypatch.setattr(
-        cli_module,
-        "load_tailscale_state",
-        lambda: TailscaleState("example.com", "tail1234", ("100.64.0.1",), {}),
-    )
-    result = CliRunner().invoke(cli, ["tailscale", "enable"])
-    assert result.exit_code != 0
-    assert "already enabled" in result.output
-
-
 def test_enable_requires_a_tag_prefix(monkeypatch, tmp_path) -> None:
     events: list = []
     saved: list = []
@@ -1933,4 +1922,140 @@ def test_enable_names_the_gateway_after_this_machine(monkeypatch, tmp_path) -> N
     assert result.exit_code == 0, result.output
     assert saved[0].node == "t16"
     assert "localghost-t16" in result.output
+
+
+CURRENT = TailscaleState(
+    "example.com", "old1234", ("100.64.0.1",), {"old1234": ["100.2.2.2"]}, node="t16"
+)
+
+
+def _patch_switch(monkeypatch, events, saved, tmp_path, split_dns=None):
+    _patch_enable(monkeypatch, events, saved, tmp_path)
+    monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: CURRENT)
+    monkeypatch.setattr(
+        cli_module.TailscaleAPI,
+        "split_dns",
+        lambda self, tailnet: split_dns or {"old1234": ["100.64.0.1"]},
+    )
+
+    def no_new_device(*args):
+        raise AssertionError("switching enrolled a new gateway")
+
+    monkeypatch.setattr(cli_module.TailscaleAPI, "create_auth_key", no_new_device)
+    monkeypatch.setattr(cli_module, "_bootstrap_tailscale_gateway", no_new_device)
+
+
+@pytest.mark.parametrize("args", [[], ["--suffix", "old1234"]])
+def test_enable_while_enabled_needs_another_suffix(
+    monkeypatch, tmp_path, args
+) -> None:
+    events: list = []
+    saved: list = []
+    _patch_switch(monkeypatch, events, saved, tmp_path)
+    monkeypatch.setattr(cli_module, "detect_tailscale_suffix", lambda: "old1234")
+
+    result = CliRunner().invoke(cli, ["tailscale", "enable", *args])
+    assert result.exit_code != 0
+    assert "already enabled at .old1234" in result.output
+    assert "--suffix" in result.output
+    assert saved == []
+
+
+def test_enable_with_another_suffix_moves_the_routes_to_the_same_device(
+    monkeypatch, tmp_path
+) -> None:
+    events: list = []
+    saved: list = []
+    _patch_switch(monkeypatch, events, saved, tmp_path)
+
+    result = CliRunner().invoke(
+        cli, ["tailscale", "enable", "--suffix", "wrk"] + CREDENTIAL_ARGS
+    )
+    assert result.exit_code == 0, result.output
+    assert saved[0] == TailscaleState(
+        "example.com", "wrk", ("100.64.0.1",), {"old1234": ["100.64.0.1"]}, node="t16"
+    )
+    # One update both points the new suffix at the gateway and hands the old
+    # one back to whatever it resolved to before enable.
+    assert ("example.com", {"wrk": ["100.64.0.1"], "old1234": ["100.2.2.2"]}) in events
+    assert events[-1] == {"https_enabled": True, "force_recreate": True}
+    assert "localghost-t16 (unchanged)" in result.output
+    assert "Machines that trusted the .old1234 root still trust it" in result.output
+    assert "localghost tailscale trust wrk --fingerprint" in result.output
+
+
+def test_switching_refuses_a_suffix_another_machine_hosts(
+    monkeypatch, tmp_path
+) -> None:
+    events: list = []
+    saved: list = []
+    _patch_switch(
+        monkeypatch,
+        events,
+        saved,
+        tmp_path,
+        split_dns={"old1234": ["100.64.0.1"], "wrk": ["100.9.9.9"]},
+    )
+
+    result = CliRunner().invoke(
+        cli, ["tailscale", "enable", "--suffix", "wrk"] + CREDENTIAL_ARGS
+    )
+    assert result.exit_code != 0
+    assert "100.9.9.9" in result.output
+    assert saved == []
+
+
+def test_switching_rolls_back_to_the_old_suffix_when_the_hub_fails(
+    monkeypatch, tmp_path
+) -> None:
+    events: list = []
+    saved: list = []
+    _patch_switch(monkeypatch, events, saved, tmp_path)
+    monkeypatch.setattr(
+        cli_module,
+        "_run_proxy",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            click.ClickException("compose failed")
+        ),
+    )
+
+    result = CliRunner().invoke(
+        cli, ["tailscale", "enable", "--suffix", "wrk"] + CREDENTIAL_ARGS
+    )
+    assert result.exit_code != 0
+    assert ("example.com", {"wrk": None, "old1234": ["100.64.0.1"]}) in events
+    assert saved[-1] == CURRENT
+    assert "rolled back" in result.output
+
+
+def test_enable_follows_a_renamed_machine_to_its_new_suffix(
+    monkeypatch, tmp_path
+) -> None:
+    events: list = []
+    saved: list = []
+    _patch_switch(monkeypatch, events, saved, tmp_path)
+    monkeypatch.setattr(cli_module, "detect_tailscale_suffix", lambda: "wrk")
+
+    result = CliRunner().invoke(cli, ["tailscale", "enable"] + CREDENTIAL_ARGS)
+    assert result.exit_code == 0, result.output
+    assert saved[0].suffix == "wrk"
+    assert ".old1234 → .wrk" in result.output
+
+
+def test_enable_while_enabled_without_detection_keeps_the_suffix(
+    monkeypatch, tmp_path
+) -> None:
+    events: list = []
+    saved: list = []
+    _patch_switch(monkeypatch, events, saved, tmp_path)
+
+    def undetectable():
+        raise TailscaleError("could not detect a short tailnet suffix")
+
+    monkeypatch.setattr(cli_module, "detect_tailscale_suffix", undetectable)
+
+    result = CliRunner().invoke(cli, ["tailscale", "enable"])
+    assert result.exit_code != 0
+    assert "already enabled at .old1234" in result.output
+    assert saved == []
 

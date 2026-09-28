@@ -16,7 +16,7 @@ import tempfile
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import click
@@ -878,10 +878,16 @@ def tailscale_enable(
     client_id: str | None,
     client_secret: str | None,
 ) -> None:
-    """Enroll a tagged gateway and add split DNS for the chosen suffix."""
+    """Enroll a tagged gateway and add split DNS for the chosen suffix.
+
+    When tailnet hosting is already enabled, a different suffix, given or
+    detected, moves the routes to it, keeping the same gateway device.
+    """
     title()
-    if load_tailscale_state() is not None:
-        raise click.ClickException("tailnet hosting is already enabled")
+    current = load_tailscale_state()
+    if current is not None:
+        _switch_tailnet_suffix(current, suffix, takeover, client_id, client_secret)
+        return
     localhost_trusted = _https_configured()
     if not tag.startswith("tag:"):
         raise click.UsageError("--tag must start with 'tag:'")
@@ -910,26 +916,8 @@ def tailscale_enable(
         api = TailscaleAPI.authenticate(client_id, client_secret)
         info("Reading the existing split-DNS configuration…")
         previous = api.split_dns(tailnet)
-        active = previous.get(chosen_suffix)
-        if active and not takeover:
-            raise click.ClickException(
-                f"split DNS for .{chosen_suffix} already points at "
-                f"{', '.join(active)} — another machine may be hosting this "
-                "suffix. Choose a different --suffix, or pass --takeover to "
-                "replace the mapping."
-            )
-        certificate: PublicCertificate | None = None
-        if https:
-            # Tailnet TLS terminates on Traefik's websecure entrypoint.
-            # Bootstrap its localhost signer as well, but do not install
-            # localhost trust as an implicit side effect of enabling a remote
-            # route.
-            info("Preparing the localhost and tailnet HTTPS authorities…")
-            _bootstrap_public_root()
-            certificate = _bootstrap_tailnet_root(chosen_suffix)
-            # Keep the tailnet root beside the state so `tailscale status` can
-            # repeat the share command without a running gateway.
-            _write_public_root(_tailnet_root_path(chosen_suffix), certificate.pem)
+        _refuse_active_mapping(chosen_suffix, previous, takeover)
+        certificate = _prepare_tailnet_authority(chosen_suffix) if https else None
         # The auth key lives ten minutes; the first gateway image build can
         # take longer, so build before minting the key rather than after.
         info("Preparing the gateway image…")
@@ -959,22 +947,144 @@ def tailscale_enable(
             raise
     except (TailscaleError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
+    _remember_tailscale_credential(client_id, client_secret)
+    success(f"Tailnet routes are enabled at {_tailnet_url(state, '<project>')}.")
+    _offer_tailnet_trust(chosen_suffix, certificate, localhost_trusted)
+
+
+def _switch_tailnet_suffix(
+    current: TailscaleState,
+    suffix: str | None,
+    takeover: bool,
+    client_id: str | None,
+    client_secret: str | None,
+) -> None:
+    """Move the tailnet routes to another suffix on the same gateway device.
+
+    The gateway keeps its enrollment, addresses, tailnet and tag: only the
+    split-DNS entries move, the suffix's HTTPS root is prepared, and the hub is
+    recreated to answer for the new names.
+    """
+    try:
+        # Without --suffix, detection runs again, so renaming the machine in
+        # the admin console carries its routes to the new name.
+        chosen_suffix = validate_tailscale_suffix(
+            suffix or detect_tailscale_suffix()
+        )
+    except (TailscaleError, ValueError) as exc:
+        if suffix:
+            raise click.ClickException(str(exc)) from exc
+        chosen_suffix = current.suffix
+    if chosen_suffix == current.suffix:
+        raise click.ClickException(
+            f"tailnet hosting is already enabled at .{current.suffix}; pass "
+            "--suffix to move it to another suffix"
+        )
+    old_suffix = current.suffix
+    localhost_trusted = _https_configured()
+    client_id, client_secret = _resolve_tailscale_credential(
+        client_id, client_secret, tag=current.tag
+    )
+    https = not tailscale_suffix_is_public(chosen_suffix)
+    details(
+        [
+            ("Route suffix", f".{old_suffix} → .{chosen_suffix}"),
+            ("Tailnet HTTPS", "enabled" if https else "HTTP only"),
+            ("Gateway", f"localghost-{current.node_label} (unchanged)"),
+        ],
+        title="Switching tailnet suffix",
+    )
+    if not https:
+        _public_suffix_notice(chosen_suffix)
+    try:
+        info("Authenticating with the Tailscale API…")
+        api = TailscaleAPI.authenticate(client_id, client_secret)
+        info("Reading the existing split-DNS configuration…")
+        previous = api.split_dns(current.tailnet)
+        _refuse_active_mapping(chosen_suffix, previous, takeover)
+        certificate = _prepare_tailnet_authority(chosen_suffix) if https else None
+        state = replace(
+            current,
+            suffix=chosen_suffix,
+            previous_split_dns=previous,
+            node=current.node_label,
+        )
+        save_tailscale_state(state)
+        try:
+            info(f"Routing *.{chosen_suffix} DNS to the gateway…")
+            api.update_split_dns(
+                current.tailnet,
+                {
+                    chosen_suffix: list(current.gateway_ips),
+                    old_suffix: current.previous_split_dns.get(old_suffix),
+                },
+            )
+            info("Starting the mirrored localhost and tailnet routes…")
+            _run_proxy(
+                "up", https_enabled=https or localhost_trusted, force_recreate=True
+            )
+        except Exception:
+            _rollback_switch(api, current, chosen_suffix, previous)
+            raise
+    except (TailscaleError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    _remember_tailscale_credential(client_id, client_secret)
+    success(f"Tailnet routes moved to {_tailnet_url(state, '<project>')}.")
+    if current.https:
+        info(
+            f"Machines that trusted the .{old_suffix} root still trust it; run "
+            "`localghost trust remove` on each to revoke."
+        )
+    _offer_tailnet_trust(chosen_suffix, certificate, localhost_trusted)
+
+
+def _refuse_active_mapping(
+    suffix: str, split_dns: dict[str, list[str]], takeover: bool
+) -> None:
+    active = split_dns.get(suffix)
+    if active and not takeover:
+        raise click.ClickException(
+            f"split DNS for .{suffix} already points at "
+            f"{', '.join(active)} — another machine may be hosting this "
+            "suffix. Choose a different --suffix, or pass --takeover to "
+            "replace the mapping."
+        )
+
+
+def _prepare_tailnet_authority(suffix: str) -> PublicCertificate:
+    # Tailnet TLS terminates on Traefik's websecure entrypoint. Bootstrap its
+    # localhost signer as well, but do not install localhost trust as an
+    # implicit side effect of enabling a remote route.
+    info("Preparing the localhost and tailnet HTTPS authorities…")
+    _bootstrap_public_root()
+    certificate = _bootstrap_tailnet_root(suffix)
+    # Keep the tailnet root beside the state so `tailscale status` can repeat
+    # the share command without a running gateway.
+    _write_public_root(_tailnet_root_path(suffix), certificate.pem)
+    return certificate
+
+
+def _remember_tailscale_credential(client_id: str, client_secret: str) -> None:
     if not store_tailscale_credential(client_id, client_secret):
         warning(
             "The OAuth credential was not stored",
             ["no usable system keyring; disable will ask for the credential again"],
         )
-    success(f"Tailnet routes are enabled at {_tailnet_url(state, '<project>')}.")
+
+
+def _offer_tailnet_trust(
+    suffix: str, certificate: PublicCertificate | None, localhost_trusted: bool
+) -> None:
     if certificate is None:
         return
     action(
         "Trust on other tailnet machines",
-        _share_command(chosen_suffix, certificate),
+        _share_command(suffix, certificate),
     )
     if localhost_trusted:
         info("Installing the tailnet HTTPS root (sudo may be requested)…")
         try:
-            _install_tailnet_trust(chosen_suffix, show_details=False)
+            _install_tailnet_trust(suffix, show_details=False)
         except click.ClickException as exc:
             warning("Tailnet trust was not installed", [str(exc)])
             action("Trust this client", "localghost trust")
@@ -1121,6 +1231,33 @@ def _rollback_enable(
     warning(
         "Enable failed and was rolled back",
         [f"run `localghost tailscale enable` again to retry .{suffix}"],
+    )
+
+
+def _rollback_switch(
+    api: TailscaleAPI,
+    current: TailscaleState,
+    suffix: str,
+    previous: dict[str, list[str]],
+) -> None:
+    """Return the routes to the old suffix after a late switch failure."""
+    try:
+        api.update_split_dns(
+            current.tailnet,
+            {
+                suffix: previous.get(suffix),
+                current.suffix: previous.get(current.suffix),
+            },
+        )
+    except TailscaleError as exc:
+        warning("Tailnet DNS was not restored", [str(exc)])
+    save_tailscale_state(current)
+    warning(
+        "The switch failed and was rolled back",
+        [
+            f"tailnet routes stay on .{current.suffix}",
+            "run `localghost hub up` to restore them on the running hub",
+        ],
     )
 
 
