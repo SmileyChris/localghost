@@ -56,7 +56,8 @@ def test_rich_feedback_uses_compact_components(monkeypatch):
     feedback.details([("Key", "Value")], title="Status")
     feedback.choices("Pick", [("web", "port 8000", True)])
 
-    assert len(console.items) == 8
+    # A warning is its heading plus one line per message, with no frame.
+    assert len(console.items) == 9
 
 
 def test_next_actions_highlight_each_runnable_command(monkeypatch):
@@ -251,3 +252,16 @@ def test_interrupt_break_is_quiet_when_output_is_redirected(monkeypatch):
     monkeypatch.setenv("FORCE_COLOR", "3")
     feedback.interrupt_break()
     assert stream.getvalue() == ""
+
+
+def test_sign_off_marks_localghost_after_application_output(monkeypatch):
+    console = Console()
+    monkeypatch.setattr(feedback, "_console", lambda err: console)
+
+    monkeypatch.setattr(feedback, "_rich_terminal", lambda err: False)
+    feedback.sign_off()
+    assert console.items == []
+
+    monkeypatch.setattr(feedback, "_rich_terminal", lambda err: True)
+    feedback.sign_off()
+    assert console.items[-1].plain == "localghost"

@@ -35,10 +35,12 @@ from .feedback import (
     choices,
     compose_dry_run,
     details,
+    failure,
     info,
     next_actions,
     routes,
     run_plan,
+    sign_off,
     success,
     title,
     warning,
@@ -1497,10 +1499,9 @@ def run(
         secondary_origin=_tailnet_origin(plan.name),
         status_bar=not no_status_bar,
     )
+    _report_application_exit(status)
     if status:
-        _report_application_exit(status)
         raise click.exceptions.Exit(status)
-    success("Application stopped.")
 
 
 def _report_live_session(session: Session, *, refuse: bool) -> None:
@@ -1727,17 +1728,12 @@ def _run_compose(
 
 def _report_application_exit(status: int) -> None:
     """Leave a stable diagnosis after the transient status display is gone."""
-    if status == 128 + signal.SIGINT:
+    sign_off()
+    if status in (0, 128 + signal.SIGINT):
         # Ctrl+C is how a foreground run is meant to end, not a failure.
         success("Application stopped.")
         return
-    warning(
-        "Application exited",
-        [
-            f"The application command exited with status {status}.",
-            "Its output is above; use --no-status-bar for plain terminal output.",
-        ],
-    )
+    failure(f"Application exited with status {status}.")
 
 
 def _print_run_plan(plan: RunPlan, dry_run: bool, detach: bool = False) -> None:

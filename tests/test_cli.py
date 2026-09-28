@@ -2361,7 +2361,6 @@ def test_run_leaves_a_persistent_nonzero_exit_diagnosis(monkeypatch) -> None:
 
     assert result.exit_code == 7
     assert "exited with status 7" in result.output
-    assert "--no-status-bar" in result.output
 
 
 def test_run_treats_ctrl_c_as_a_normal_stop(monkeypatch) -> None:

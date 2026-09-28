@@ -38,6 +38,12 @@ uses [Semantic Versioning](https://semver.org/).
   HTTPS` row, and the `Tailnet` row unless `--tailnet` named one. The share
   command reads `Trust https://*.<suffix> on other machines`; a public suffix
   shows its HTTP-only notice in its place.
+- Warnings print as a yellow heading with bulleted lines instead of a framed
+  box, matching the rest of localghost's output. A failed foreground run
+  reports a single `✗ Application exited with status N.` line in place of a
+  warning suggesting `--no-status-bar`, and the report after a foreground run
+  is headed by the localghost wordmark so it stands apart from the
+  application's own output.
 - `localghost tailscale disable` says so when no credential is stored in the
   system keyring, as happens after an enable that predates 3.0.0, and names
   the one scope it needs, `dns:write`, instead of showing a bare prompt. It

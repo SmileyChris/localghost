@@ -34,10 +34,23 @@ def title(*, welcome: bool = False) -> None:
         return
     _wordmark_shown = True
     console = _console(False)
-    console.print(Text.assemble(("local", "bold"), ("ghost", f"bold {LIME}")))
+    console.print(_wordmark())
     console.print()
     if welcome:
         console.print("Easy .localhost URLs for your local apps.")
+
+
+def sign_off() -> None:
+    """Mark where localghost speaks again after an application's own output."""
+    if not _rich_terminal(False):
+        return
+    console = _console(False)
+    console.print()
+    console.print(_wordmark())
+
+
+def _wordmark() -> Text:
+    return Text.assemble(("local", "bold"), ("ghost", f"bold {LIME}"))
 
 
 def next_actions(*, https_enabled: bool) -> None:
@@ -137,11 +150,17 @@ def success(message: str, *, err: bool = False) -> None:
     _message(message, LIME, err=err, symbol="✓")
 
 
+def failure(message: str) -> None:
+    _message(message, "red", err=True, symbol="✗")
+
+
 def warning(title: str, messages: Iterable[str]) -> None:
     items = list(messages)
     if _rich_terminal(True):
-        body = Text("\n".join(f"• {message}" for message in items))
-        _console(True).print(Panel(body, title=title, border_style="yellow"))
+        console = _console(True)
+        console.print(Text(title, style="bold yellow"))
+        for message in items:
+            console.print(Text.assemble(("• ", "yellow"), message))
         return
     for message in items:
         _console(True).print(f"Warning: {title}: {message}", soft_wrap=True)
