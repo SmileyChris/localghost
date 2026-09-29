@@ -9,7 +9,6 @@ from pathlib import Path
 
 from rich import box
 from rich.console import Console
-from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
@@ -166,17 +165,20 @@ def warning(title: str, messages: Iterable[str]) -> None:
         _console(True).print(f"Warning: {title}: {message}", soft_wrap=True)
 
 
-def _labeled_block(rows: list[tuple[str, str]], *, title: str, err: bool) -> None:
-    """Render label/value rows under a title, as a Panel or a plain heading."""
+def _labeled_block(rows: list[tuple[str, str]], *, heading: str, err: bool) -> None:
+    """Render label/value rows under a heading, marked by a mint accent bar."""
     if _rich_terminal(err):
+        console = _console(err)
+        console.print(Text.assemble(("▌ ", MINT), (heading, "bold")))
         table = Table.grid(padding=(0, 1))
+        table.add_column(style=MINT)
         table.add_column(style="bold")
         table.add_column()
         for label, value in rows:
-            table.add_row(label, value)
-        _console(err).print(Panel(table, title=title, border_style=MINT))
+            table.add_row("▌", label, value)
+        console.print(table)
         return
-    lines = [f"{title}:", *(f"  {label}: {value}" for label, value in rows)]
+    lines = [heading, *(f"  {label}: {value}" for label, value in rows)]
     _console(err).print("\n".join(lines), soft_wrap=True)
 
 
@@ -190,7 +192,7 @@ def run_plan(
     project_root: Path | None = None,
     working_directory: Path | None = None,
 ) -> None:
-    rows = [("Type", type)]
+    rows = []
     if project_root:
         rows.append(("Project root", str(project_root)))
     if working_directory and working_directory != project_root:
@@ -202,8 +204,9 @@ def run_plan(
             ("Public URL", url),
         ]
     )
-    title = "Dry run" if dry_run else "Run configuration"
-    _labeled_block(rows, title=title, err=dry_run)
+    # The type is the one row that describes the whole block, so it heads it.
+    heading = f"Dry run: {type}" if dry_run else f"Running {type}"
+    _labeled_block(rows, heading=heading, err=dry_run)
 
 
 def compose_dry_run(*, project: str, url: str) -> None:
@@ -212,8 +215,8 @@ def compose_dry_run(*, project: str, url: str) -> None:
     Compose owns its own port and command, so those rows never apply here;
     only the type, the project name, and the public URL are meaningful.
     """
-    rows = [("Type", "compose"), ("Project", project), ("Public URL", url)]
-    _labeled_block(rows, title="Dry run", err=True)
+    rows = [("Project", project), ("Public URL", url)]
+    _labeled_block(rows, heading="Dry run: compose", err=True)
 
 
 def routes(items: Iterable[tuple[str, str]]) -> None:

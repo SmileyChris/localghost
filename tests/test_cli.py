@@ -500,7 +500,7 @@ def test_run_reports_the_type_not_the_framework(monkeypatch, tmp_path) -> None:
     )
 
     assert result.exit_code == 0, result.output
-    assert "Type: django" in result.output
+    assert "Dry run: django" in result.output
     assert "Framework:" not in result.output
 
 
@@ -1458,8 +1458,7 @@ def test_compose_run_dry_run_prints_the_plan_and_starts_nothing(
     )
 
     assert result.exit_code == 0, result.output
-    assert "Dry run:" in result.output
-    assert "Type: compose" in result.output
+    assert "Dry run: compose" in result.output
     assert f"Project: {tmp_path.name}" in result.output
     assert "Public URL: http://" in result.output
 
@@ -1479,7 +1478,7 @@ def test_run_dry_run_detects_compose_over_a_coexisting_dockerfile(
     result = CliRunner().invoke(cli, ["run", "-C", str(tmp_path), "--dry-run"])
 
     assert result.exit_code == 0, result.output
-    assert "Type: compose" in result.output
+    assert "Dry run: compose" in result.output
 
 
 def test_unconfigured_compose_run_points_at_save() -> None:
@@ -1621,7 +1620,7 @@ def test_a_pinned_root_with_only_a_configured_name_still_detects_compose(
     result = CliRunner().invoke(cli, ["run", "-C", str(tmp_path), "--dry-run"])
 
     assert result.exit_code == 0, result.output
-    assert "Type: compose" in result.output
+    assert "Dry run: compose" in result.output
     assert "Project: demo" in result.output
     assert "demo.localhost" in result.output
 
@@ -1638,7 +1637,7 @@ def test_a_root_flag_pinned_compose_project_is_still_detected(
     result = CliRunner().invoke(cli, ["run", "--project-root", str(root), "--dry-run"])
 
     assert result.exit_code == 0, result.output
-    assert "Type: compose" in result.output
+    assert "Dry run: compose" in result.output
 
 
 def test_compose_run_from_a_subdirectory_uses_the_project_root(

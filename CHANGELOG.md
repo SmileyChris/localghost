@@ -34,6 +34,9 @@ uses [Semantic Versioning](https://semver.org/).
   is created and no offline device is left behind. Without `--suffix`,
   enable detects the suffix again, so renaming the machine in the admin
   console and running enable follows it.
+- The run summary before `localghost run` starts an application is marked
+  by a mint bar down its left edge instead of a framed box, and is headed by
+  what runs (`Running django`, `Dry run: compose`) in place of a `Type` row.
 - `localghost tailscale status` and enable's summary drop the `Tailnet
   HTTPS` row, and the `Tailnet` row unless `--tailnet` named one. The share
   command reads `Trust https://*.<suffix> on other machines`; a public suffix

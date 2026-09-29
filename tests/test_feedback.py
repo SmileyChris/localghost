@@ -56,8 +56,9 @@ def test_rich_feedback_uses_compact_components(monkeypatch):
     feedback.details([("Key", "Value")], title="Status")
     feedback.choices("Pick", [("web", "port 8000", True)])
 
-    # A warning is its heading plus one line per message, with no frame.
-    assert len(console.items) == 9
+    # Warnings and the run plan print a heading line above their rows, with
+    # no frame.
+    assert len(console.items) == 10
 
 
 def test_next_actions_highlight_each_runnable_command(monkeypatch):
