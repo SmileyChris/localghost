@@ -36,14 +36,16 @@ uses [Semantic Versioning](https://semver.org/).
   console and running enable follows it.
 - The run summary before `localghost run` starts an application is marked
   by a mint bar down its left edge instead of a framed box, and is headed by
-  what runs (`Running django`, `Dry run: compose`) in place of a `Type` row.
+  the application's name and type (`Running shop (django)`, `Dry run: shop
+  (compose)`) in place of its `Type` and `Project` rows. A custom command
+  leaves the type out; its Command row already says what runs.
 - `localghost tailscale status` and enable's summary drop the `Tailnet
   HTTPS` row, and the `Tailnet` row unless `--tailnet` named one. The share
   command reads `Trust https://*.<suffix> on other machines`; a public suffix
   shows its HTTP-only notice in its place.
 - Warnings print as a yellow heading with bulleted lines instead of a framed
   box, matching the rest of localghost's output. A failed foreground run
-  reports a single line naming what ran (`✗ django exited with status N.`) in place of a
+  reports a single line naming what ran (`✗ shop exited with status N.`) in place of a
   warning suggesting `--no-status-bar`, and the report after a foreground run
   is headed by the localghost wordmark so it stands apart from the
   application's own output.
@@ -55,7 +57,7 @@ uses [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - Stopping a foreground `localghost run` with Ctrl+C reports what stopped
-  (`Stopped django.`) instead of an "Application exited" warning about status 130. The
+  (`Stopped shop.`) instead of an "Application exited" warning about status 130. The
   exit status stays 130.
 - `localghost tailscale disable` reports "Reconciling hub…" when it recreates
   a running hub without the gateway, instead of "Starting hub…", which read as

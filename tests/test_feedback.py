@@ -22,6 +22,7 @@ def test_plain_feedback_is_stable(monkeypatch):
     feedback.success("Done")
     feedback.warning("Settings", ["First", "Second"])
     feedback.run_plan(
+        name="demo",
         type="vite",
         command=("npm", "run", "dev"),
         port=5173,
@@ -34,7 +35,7 @@ def test_plain_feedback_is_stable(monkeypatch):
         "Warning: Settings: First",
         "Warning: Settings: Second",
     ]
-    assert "Dry run:" in errors.items[2]
+    assert errors.items[2].startswith("Dry run: demo (vite)\n")
     assert "Command: npm run dev" in errors.items[2]
 
 
@@ -46,6 +47,7 @@ def test_rich_feedback_uses_compact_components(monkeypatch):
     feedback.info("Starting")
     feedback.warning("Settings", ["Missing host"])
     feedback.run_plan(
+        name="demo",
         type="django",
         command=("python", "manage.py", "runserver"),
         port=8000,
@@ -203,6 +205,7 @@ def test_plain_blocks_never_hard_wrap(monkeypatch):
     monkeypatch.setattr(feedback, "_console", lambda err: console)
 
     feedback.run_plan(
+        name="demo",
         type="custom",
         command=("./server",),
         port=8080,
@@ -266,3 +269,20 @@ def test_sign_off_marks_localghost_after_application_output(monkeypatch):
     monkeypatch.setattr(feedback, "_rich_terminal", lambda err: True)
     feedback.sign_off()
     assert console.items[-1].plain == "localghost"
+
+
+def test_run_plan_leaves_the_custom_type_out_of_its_heading(monkeypatch):
+    console = Console()
+    monkeypatch.setattr(feedback, "_rich_terminal", lambda err: False)
+    monkeypatch.setattr(feedback, "_console", lambda err: console)
+
+    feedback.run_plan(
+        name="shop",
+        type="custom",
+        command=("./serve",),
+        port=8080,
+        url="http://shop.localhost",
+        dry_run=False,
+    )
+
+    assert console.items[0].startswith("Running shop\n")

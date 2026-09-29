@@ -1499,7 +1499,7 @@ def run(
         secondary_origin=_tailnet_origin(plan.name),
         status_bar=not no_status_bar,
     )
-    _report_application_exit(plan.type, status)
+    _report_application_exit(plan.name, status)
     if status:
         raise click.exceptions.Exit(status)
 
@@ -1709,7 +1709,7 @@ def _run_compose(
         bar.status("starting")
         result = subprocess.run(command, cwd=cwd, check=False)
     if result.returncode:
-        _report_application_exit("compose", result.returncode)
+        _report_application_exit(project, result.returncode)
         raise click.exceptions.Exit(result.returncode)
     if detach:
         log = _session_log_path(project)
@@ -1726,19 +1726,20 @@ def _run_compose(
         success(f"Started detached Compose session for {project}.")
 
 
-def _report_application_exit(kind: str, status: int) -> None:
+def _report_application_exit(name: str, status: int) -> None:
     """Leave a stable diagnosis after the transient status display is gone."""
     sign_off()
     if status in (0, 128 + signal.SIGINT):
         # Ctrl+C is how a foreground run is meant to end, not a failure.
-        success(f"Stopped {kind}.")
+        success(f"Stopped {name}.")
         return
-    failure(f"{kind} exited with status {status}.")
+    failure(f"{name} exited with status {status}.")
 
 
 def _print_run_plan(plan: RunPlan, dry_run: bool, detach: bool = False) -> None:
     public_origin = _proxy_origin(plan.name)
     run_plan(
+        name=plan.name,
         type=plan.type,
         command=plan.command,
         port=plan.port,

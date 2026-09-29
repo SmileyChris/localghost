@@ -500,7 +500,7 @@ def test_run_reports_the_type_not_the_framework(monkeypatch, tmp_path) -> None:
     )
 
     assert result.exit_code == 0, result.output
-    assert "Dry run: django" in result.output
+    assert "Dry run: demo (django)" in result.output
     assert "Framework:" not in result.output
 
 
@@ -1458,8 +1458,7 @@ def test_compose_run_dry_run_prints_the_plan_and_starts_nothing(
     )
 
     assert result.exit_code == 0, result.output
-    assert "Dry run: compose" in result.output
-    assert f"Project: {tmp_path.name}" in result.output
+    assert f"Dry run: {tmp_path.name} (compose)" in result.output
     assert "Public URL: http://" in result.output
 
 
@@ -1478,7 +1477,7 @@ def test_run_dry_run_detects_compose_over_a_coexisting_dockerfile(
     result = CliRunner().invoke(cli, ["run", "-C", str(tmp_path), "--dry-run"])
 
     assert result.exit_code == 0, result.output
-    assert "Dry run: compose" in result.output
+    assert "(compose)" in result.output
 
 
 def test_unconfigured_compose_run_points_at_save() -> None:
@@ -1620,8 +1619,7 @@ def test_a_pinned_root_with_only_a_configured_name_still_detects_compose(
     result = CliRunner().invoke(cli, ["run", "-C", str(tmp_path), "--dry-run"])
 
     assert result.exit_code == 0, result.output
-    assert "Dry run: compose" in result.output
-    assert "Project: demo" in result.output
+    assert "Dry run: demo (compose)" in result.output
     assert "demo.localhost" in result.output
 
 
@@ -1637,7 +1635,7 @@ def test_a_root_flag_pinned_compose_project_is_still_detected(
     result = CliRunner().invoke(cli, ["run", "--project-root", str(root), "--dry-run"])
 
     assert result.exit_code == 0, result.output
-    assert "Dry run: compose" in result.output
+    assert "(compose)" in result.output
 
 
 def test_compose_run_from_a_subdirectory_uses_the_project_root(
@@ -2359,7 +2357,7 @@ def test_run_leaves_a_persistent_nonzero_exit_diagnosis(monkeypatch) -> None:
     result = CliRunner().invoke(cli, ["run", "--port", "3000", "--", "false"])
 
     assert result.exit_code == 7
-    assert "custom exited with status 7." in result.output
+    assert "demo exited with status 7." in result.output
 
 
 def test_run_treats_ctrl_c_as_a_normal_stop(monkeypatch) -> None:
@@ -2373,7 +2371,7 @@ def test_run_treats_ctrl_c_as_a_normal_stop(monkeypatch) -> None:
 
     # The shell convention survives for scripts; the panel does not.
     assert result.exit_code == 130
-    assert "Stopped custom." in result.output
+    assert "Stopped demo." in result.output
     assert "exited with status" not in result.output
 
 

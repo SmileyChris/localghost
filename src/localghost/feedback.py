@@ -184,6 +184,7 @@ def _labeled_block(rows: list[tuple[str, str]], *, heading: str, err: bool) -> N
 
 def run_plan(
     *,
+    name: str,
     type: str,
     command: tuple[str, ...],
     port: int,
@@ -204,8 +205,10 @@ def run_plan(
             ("Public URL", url),
         ]
     )
-    # The type is the one row that describes the whole block, so it heads it.
-    heading = f"Dry run: {type}" if dry_run else f"Running {type}"
+    heading = f"Dry run: {name}" if dry_run else f"Running {name}"
+    # A custom command says nothing as a type; the Command row shows it.
+    if type != "custom":
+        heading += f" ({type})"
     _labeled_block(rows, heading=heading, err=dry_run)
 
 
@@ -213,10 +216,11 @@ def compose_dry_run(*, project: str, url: str) -> None:
     """The Compose analogue of `run_plan`'s dry-run block.
 
     Compose owns its own port and command, so those rows never apply here;
-    only the type, the project name, and the public URL are meaningful.
+    only the project name and the public URL are meaningful.
     """
-    rows = [("Project", project), ("Public URL", url)]
-    _labeled_block(rows, heading="Dry run: compose", err=True)
+    _labeled_block(
+        [("Public URL", url)], heading=f"Dry run: {project} (compose)", err=True
+    )
 
 
 def routes(items: Iterable[tuple[str, str]]) -> None:
