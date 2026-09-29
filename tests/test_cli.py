@@ -2359,7 +2359,7 @@ def test_run_leaves_a_persistent_nonzero_exit_diagnosis(monkeypatch) -> None:
     result = CliRunner().invoke(cli, ["run", "--port", "3000", "--", "false"])
 
     assert result.exit_code == 7
-    assert "exited with status 7" in result.output
+    assert "custom exited with status 7." in result.output
 
 
 def test_run_treats_ctrl_c_as_a_normal_stop(monkeypatch) -> None:
@@ -2373,7 +2373,7 @@ def test_run_treats_ctrl_c_as_a_normal_stop(monkeypatch) -> None:
 
     # The shell convention survives for scripts; the panel does not.
     assert result.exit_code == 130
-    assert "Application stopped." in result.output
+    assert "Stopped custom." in result.output
     assert "exited with status" not in result.output
 
 

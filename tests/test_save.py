@@ -294,7 +294,7 @@ def test_save_host_run_prints_the_wordmark_once(monkeypatch, tmp_path) -> None:
     # One title at the top; the only other wordmark is the sign-off that
     # separates the application's output from the stop report.
     assert printed.count("localghost") == 2
-    assert printed[-3:] == ["", "localghost", "✓ Application stopped."]
+    assert printed[-3:] == ["", "localghost", "✓ Stopped django."]
 
 
 def test_save_dockerfile_no_input_never_prompts_for_a_port(monkeypatch) -> None:

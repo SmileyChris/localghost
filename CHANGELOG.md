@@ -43,7 +43,7 @@ uses [Semantic Versioning](https://semver.org/).
   shows its HTTP-only notice in its place.
 - Warnings print as a yellow heading with bulleted lines instead of a framed
   box, matching the rest of localghost's output. A failed foreground run
-  reports a single `✗ Application exited with status N.` line in place of a
+  reports a single line naming what ran (`✗ django exited with status N.`) in place of a
   warning suggesting `--no-status-bar`, and the report after a foreground run
   is headed by the localghost wordmark so it stands apart from the
   application's own output.
@@ -54,8 +54,8 @@ uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- Stopping a foreground `localghost run` with Ctrl+C reports "Application
-  stopped." instead of an "Application exited" warning about status 130. The
+- Stopping a foreground `localghost run` with Ctrl+C reports what stopped
+  (`Stopped django.`) instead of an "Application exited" warning about status 130. The
   exit status stays 130.
 - `localghost tailscale disable` reports "Reconciling hub…" when it recreates
   a running hub without the gateway, instead of "Starting hub…", which read as
