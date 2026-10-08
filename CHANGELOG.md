@@ -3,6 +3,17 @@
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- A detached application that exited, or every one after a reboot, left its
+  bridge running, so the hub kept routing to it and its welcome page showed
+  the project as running while requests answered 502. `sessions`, `status`,
+  `run`, `restart` and `hub up` now take those bridges down, all at once, and
+  say so ("Removing route for NAME, which stopped outside localghost…"),
+  keeping the session record so its log can still be read.
+
 ## [4.0.0] - 2026-10-09
 
 Breaking: `sessions list --json` changes shape, and `[run].framework` is no

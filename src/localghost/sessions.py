@@ -12,13 +12,14 @@ import signal
 import subprocess
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
 import click
 
-from .feedback import warning
+from .feedback import info, warning
 from .paths import state_directory
 
 
@@ -201,6 +202,44 @@ def clean(name: str | None = None) -> int:
             _path(session.id).unlink(missing_ok=True)
             removed += 1
     return removed
+
+
+def reap() -> int:
+    """Take down bridges left behind by sessions whose application exited.
+
+    A detached application that crashes, or every one after a reboot, leaves
+    its bridge running, and the hub keeps routing to it. The record stays so
+    its log can still be read; only the route goes.
+    """
+    # ponytail: runs only when the CLI is used, so a crashed app shows as
+    # running on the hub until then; supervise the detached process to close
+    # that gap if it matters.
+    stale = [item for item in sessions() if item.bridge_project and not alive(item)]
+    if not stale:
+        return 0
+    # `sessions stop` and `restart` remove their own bridges, so whatever is
+    # left ended some other way: a crash, an exit, a kill, or a reboot.
+    names = sorted({item.name for item in stale})
+    listed = names[0] if len(names) == 1 else (
+        f"{', '.join(names[:-1])} and {names[-1]}"
+    )
+    routes = "route" if len(names) == 1 else "routes"
+    info(
+        f"Removing {routes} for {listed}, which stopped outside localghost…",
+        err=True,
+    )
+    # Each bridge is its own Compose project, so they come down together.
+    with ThreadPoolExecutor() as pool:
+        list(pool.map(_stop_bridge, stale))
+    for session in stale:
+        session.bridge_project = None
+        session.bridge_yaml = ""
+        save(session)
+    if len(names) == 1:
+        info(f"Its log is kept: localghost sessions logs {names[0]}", err=True)
+    else:
+        info("Their logs are kept: localghost sessions logs NAME", err=True)
+    return len(stale)
 
 
 def _stop_bridge(session: Session) -> None:

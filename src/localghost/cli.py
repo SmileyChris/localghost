@@ -83,6 +83,7 @@ from .sessions import create as create_session
 from .sessions import discard as discard_session
 from .sessions import find as find_session
 from .sessions import live as live_session
+from .sessions import reap as reap_sessions
 from .sessions import stop as stop_session
 from .tailscale import (
     API as TailscaleAPI,
@@ -335,6 +336,7 @@ def hub_up(rebuild: bool) -> None:
         https_enabled=https_enabled,
         rebuild=rebuild,
     )
+    reap_sessions()
     scheme = "https" if https_enabled else "http"
     port = _proxy_https_port() if https_enabled else _proxy_http_port()
     default_port = 443 if https_enabled else 80
@@ -550,6 +552,7 @@ def _projects() -> list[dict[str, object]]:
     A running session with no registry entry still appears, since registry
     writes are best-effort.
     """
+    reap_sessions()
     records = sessions()
     projects = [entry.as_dict() for entry in registry.entries()]
     remembered = {project["name"] for project in projects}
@@ -1643,6 +1646,7 @@ def run(
             project, resolved.root, refuse=resolved.explicit_run_settings
         ):
             return
+        reap_sessions()
         clean_sessions(project)
         _record_registry(resolved, detached=detach)
         _run_compose(
@@ -1675,6 +1679,7 @@ def run(
     if django_warnings:
         warning("Django settings", django_warnings)
     _print_run_plan(plan, dry_run=False, detach=detach)
+    reap_sessions()
     clean_sessions(plan.name)
     _record_registry(resolved, detached=detach)
     if detach:

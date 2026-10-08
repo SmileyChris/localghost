@@ -220,6 +220,78 @@ def test_clean_tears_down_the_bridge_of_a_dead_session(tmp_path, monkeypatch) ->
     assert calls[0][-2:] == ["down", "--remove-orphans"]
 
 
+def test_reap_takes_down_only_bridges_whose_application_exited(
+    tmp_path, monkeypatch
+) -> None:
+    dead = _session(
+        tmp_path, pid=None, bridge_project="dead", bridge_yaml="services: {}\n"
+    )
+    _session(
+        tmp_path,
+        name="live",
+        pid=os.getpid(),
+        bridge_project="live",
+        bridge_yaml="services: {}\n",
+    )
+    calls = []
+    monkeypatch.setattr(
+        session_store.subprocess,
+        "run",
+        lambda command, **kwargs: calls.append(command),
+    )
+
+    assert session_store.reap() == 1
+    assert [command[3] for command in calls] == ["dead"]
+    kept = {item.id: item for item in sessions()}
+    assert kept[dead.id].bridge_project is None, "the record stays, unbridged"
+    assert session_store.reap() == 0, "a reaped bridge is not taken down twice"
+
+
+def test_sessions_list_reaps_bridges_left_by_exited_applications(
+    tmp_path, monkeypatch
+) -> None:
+    _session(tmp_path, pid=None, bridge_project="dead", bridge_yaml="services: {}\n")
+    calls = []
+    monkeypatch.setattr(
+        session_store.subprocess,
+        "run",
+        lambda command, **kwargs: calls.append(command),
+    )
+
+    result = CliRunner().invoke(cli, ["sessions", "list", "--json"])
+
+    assert result.exit_code == 0, result.output
+    assert [command[3] for command in calls] == ["dead"]
+    assert (
+        "Removing route for demo, which stopped outside localghost…"
+        in result.stderr
+    )
+    assert "Its log is kept: localghost sessions logs demo" in result.stderr
+    json.loads(result.stdout)
+
+
+def test_reap_names_every_project_once_when_there_are_several(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    for name, bridge in [("demo", "a"), ("demo", "b"), ("shop", "c")]:
+        _session(
+            tmp_path, name=name, pid=None, bridge_project=bridge, bridge_yaml="x"
+        )
+    calls = []
+    monkeypatch.setattr(
+        session_store.subprocess,
+        "run",
+        lambda command, **kwargs: calls.append(command),
+    )
+
+    assert session_store.reap() == 3
+
+    assert sorted(command[3] for command in calls) == ["a", "b", "c"]
+    err = capsys.readouterr().err
+    assert "Removing routes for demo and shop, which stopped outside" in err
+    assert "Their logs are kept" in err
+
+
 def test_alive_probes_compose_projects_with_docker(tmp_path, monkeypatch) -> None:
     session = _session(tmp_path, mode="compose", project="demo")
     recorded = {}
