@@ -84,6 +84,7 @@ Run it in the background with `--detach` and manage it afterwards:
 uvx localghost run --detach
 uvx localghost sessions list
 uvx localghost sessions logs NAME -f
+uvx localghost restart NAME
 uvx localghost sessions stop NAME
 ```
 

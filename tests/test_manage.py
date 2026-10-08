@@ -11,6 +11,7 @@ import click
 import pytest
 from click.testing import CliRunner
 
+from localghost import registry
 from localghost import sessions as session_store
 from localghost.cli import cli
 from localghost.runner import RunPlan
@@ -439,6 +440,7 @@ def test_foreground_run_is_recorded_while_it_runs(host_plan, monkeypatch) -> Non
     assert result.exit_code == 0, result.output
     assert [(item.detached, item.pid) for item in seen] == [(False, os.getpid())]
     assert sessions() == [], "the record goes when the run ends; stale ones too"
+    assert registry.entries()[0].detached is False
 
 
 def test_run_refuses_a_name_served_from_another_directory(

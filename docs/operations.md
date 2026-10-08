@@ -112,11 +112,20 @@ Bring a remembered project back from anywhere — no need to find its
 directory first:
 
 ```sh
-uvx localghost summon <name>
+uvx localghost restart <name>
 ```
 
-Bare `uvx localghost summon` on a terminal opens an interactive picker:
-arrow keys (or `j`/`k`) move, Enter summons the selected project, Delete
+`restart` stops the project first if it is running, then starts it the way it
+last ran: in the foreground or detached. `--foreground` or `--detach` picks
+the other way, so `restart <name> --foreground` brings a background app into
+this terminal. A project running in the foreground of another terminal is
+stopped and taken over here after you confirm; without a terminal to confirm
+on, `restart` refuses and prints the `sessions stop` command instead. `<name>`
+can also be a session ID.
+
+Bare `uvx localghost restart` restarts the remembered project containing the
+current directory. Outside one, on a terminal, it opens an interactive picker:
+arrow keys (or `j`/`k`) move, Enter restarts the selected project, Delete
 (or Backspace) forgets it, `u` undoes the last forget, and `q` leaves.
 When output is piped it prints a plain listing instead. The commands on a ghost page are click-to-copy.
 
@@ -144,7 +153,7 @@ once to add the mount; after that the container is stable across runs.
 
 ## Shell completion
 
-Enable Click's standard completion script for your shell so `summon` and
+Enable Click's standard completion script for your shell so `restart` and
 `forget` can complete remembered project names. For zsh:
 
 ```sh

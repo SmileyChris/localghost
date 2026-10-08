@@ -7,8 +7,17 @@ uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `localghost restart [NAME]` brings a project back in one step. It stops the
+  project if it is running, then starts it again from its remembered
+  directory, re-reading `.localghost.toml` and the rest of its setup. It runs
+  the way the project last ran, foreground or detached, unless
+  `--foreground` or `--detach` says otherwise. A project running in the
+  foreground of another terminal is stopped and taken over after you confirm.
+  With no `NAME`, it restarts the remembered project containing the current
+  directory, or opens the picker outside one.
 - Foreground runs are recorded as sessions while they run, so `sessions`
-  shows them and `sessions stop` from another terminal can end them.
+  shows them and `sessions stop` or `restart` from another terminal can end
+  them.
 
 ### Changed
 
@@ -17,7 +26,13 @@ uses [Semantic Versioning](https://semver.org/).
 - `run` refuses to start a project whose name is already served from another
   directory, such as a second worktree of the same repository, and suggests
   `--name`. Starting a project removes its stopped session records.
-- Session records gain `detached`. Older records read as before.
+- Registry entries gain `detached`, recording how the project last ran;
+  session records gain `detached` too. Older files read as before.
+
+### Deprecated
+
+- `localghost summon` is a hidden alias for `restart`. It still works and
+  prints a deprecation notice.
 
 ## [3.3.0] - 2026-09-30
 

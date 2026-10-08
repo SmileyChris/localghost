@@ -226,12 +226,13 @@ localghost sessions list
 localghost sessions list --json
 localghost sessions logs NAME
 localghost sessions logs NAME -f
+localghost restart NAME
 localghost sessions stop NAME
 localghost sessions stop --all
 ```
 
 A foreground run is recorded too, for as long as it runs, so `sessions`
-shows it and `sessions stop` from another terminal can end it.
+shows it and `sessions stop` or `restart` from another terminal can end it.
 Its output stays in its own terminal, so `sessions logs` has none to show.
 
 Sessions are addressed by project name; a session ID works too, and wins

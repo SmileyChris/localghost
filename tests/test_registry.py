@@ -370,7 +370,7 @@ def test_summon_bare_uses_picker_on_tty(tmp_path, monkeypatch):
     project.mkdir()
     registry.record("blog", project, "django")
     entry = registry.entries()[0]
-    monkeypatch.setattr(cli_module, "_summon_interactive", lambda: True)
+    monkeypatch.setattr(cli_module, "_restart_interactive", lambda: True)
     picked = {}
     monkeypatch.setattr(
         cli_module.picker,
@@ -393,7 +393,7 @@ def test_summon_bare_picker_cancelled_runs_nothing(tmp_path, monkeypatch):
 
     monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
     registry.record("blog", tmp_path / "blog", "django")
-    monkeypatch.setattr(cli_module, "_summon_interactive", lambda: True)
+    monkeypatch.setattr(cli_module, "_restart_interactive", lambda: True)
     monkeypatch.setattr(cli_module.picker, "pick", lambda entries, **callbacks: None)
     captured = {}
     monkeypatch.setattr(

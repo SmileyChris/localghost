@@ -368,12 +368,70 @@ def forget(name: str | None, forget_everything: bool) -> None:
     success(f"Forgot {name}.")
 
 
-def _summon_interactive() -> bool:
+def _restart_interactive() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
-def _summon_entry(
-    ctx: click.Context, entry: registry.RegistryEntry, **overrides: object
+def _entry_for_directory(
+    entries: list[registry.RegistryEntry], cwd: Path
+) -> registry.RegistryEntry | None:
+    """The remembered project containing `cwd`, the innermost if nested."""
+    cwd = cwd.resolve()
+    containing = [
+        entry
+        for entry in entries
+        if cwd.is_relative_to(Path(entry.directory).resolve())
+    ]
+    return max(
+        containing, key=lambda entry: len(Path(entry.directory).parts), default=None
+    )
+
+
+def _restart_target(
+    target: str, entries: list[registry.RegistryEntry]
+) -> registry.RegistryEntry:
+    """Resolve a session ID, then a project name, to what `run` needs."""
+    session = find_session(target)
+    name = session.name if session else target
+    entry = next((entry for entry in entries if entry.name == name), None)
+    if entry is not None:
+        return entry
+    if session is not None:
+        # Registry writes are best-effort, so a session can outlive or
+        # predate its entry; its record holds enough to start it again.
+        return registry.RegistryEntry(
+            hostname=f"{session.name}.localhost",
+            name=session.name,
+            directory=session.cwd,
+            type=session.mode,
+            last_started="",
+            detached=session.detached,
+        )
+    known = ", ".join(entry.name for entry in entries) or "nothing"
+    raise click.ClickException(
+        f"no remembered project '{target}' (remembered: {known})"
+    )
+
+
+def _choose_entry(
+    entries: list[registry.RegistryEntry],
+) -> registry.RegistryEntry | None:
+    if not entries:
+        click.echo("Nothing remembered yet; run a project to give it a ghost.")
+        return None
+    if _restart_interactive():
+        return picker.pick(entries, forget=registry.forget, restore=registry.restore)
+    for entry in entries:
+        click.echo(f"{entry.hostname}  {entry.type}  {entry.directory}")
+    return None
+
+
+def _restart_entry(
+    ctx: click.Context,
+    entry: registry.RegistryEntry,
+    *,
+    foreground: bool,
+    **overrides: object,
 ) -> None:
     directory = Path(entry.directory)
     if not directory.is_dir():
@@ -381,6 +439,22 @@ def _summon_entry(
             f"remembered directory '{directory}' no longer exists; "
             f"forget it with: localghost forget {entry.name}"
         )
+    running = None if overrides["dry_run"] else live_session(entry.name)
+    if running is not None:
+        if not running.detached:
+            message = f"{entry.name} is running in the foreground in another terminal"
+            if not _restart_interactive():
+                raise click.ClickException(
+                    f"{message}; stop it with: localghost sessions stop {entry.name}"
+                )
+            click.confirm(f"{message}. Stop it and run it here?", abort=True)
+        stop_session(running)
+        info(f"Stopped {entry.name}.")
+    if not foreground and not overrides["detach"]:
+        overrides["detach"] = entry.detached
+    # The recorded name, not whatever the directory would derive: a project
+    # first run with --name must come back under that name.
+    overrides["name"] = overrides["name"] or entry.name
     ctx.invoke(run, working_directory=directory, **overrides)
 
 
@@ -412,13 +486,19 @@ def _summon_entry(
     "detach",
     "--detach",
     is_flag=True,
-    help="Run in the background and manage it later.",
+    help="Run in the background, whichever way it last ran.",
+)
+@click.option(
+    "foreground",
+    "--foreground",
+    is_flag=True,
+    help="Run in this terminal, whichever way it last ran.",
 )
 @click.option(
     "dry_run",
     "--dry-run",
     is_flag=True,
-    help="Print the plan without starting anything.",
+    help="Print the plan without stopping or starting anything.",
 )
 @click.option(
     "no_status_bar",
@@ -427,31 +507,39 @@ def _summon_entry(
     help="Do not pin the public URL to the bottom of the terminal.",
 )
 @click.pass_context
-def summon(ctx: click.Context, name: str | None, **overrides: object) -> None:
-    """Run a remembered project by name; with no name, pick from the list."""
+def restart(
+    ctx: click.Context, name: str | None, foreground: bool, **overrides: object
+) -> None:
+    """Restart a project, or start a stopped one.
+
+    NAME is a project name or session ID. Without it, restart the project in
+    the current directory, or pick from the remembered projects. A project
+    comes back the way it last ran unless --foreground or --detach says
+    otherwise.
+    """
+    if foreground and overrides["detach"]:
+        raise click.UsageError("--foreground and --detach cannot both be given")
     overrides["name"] = overrides.pop("app_name")
     entries = registry.entries()
-    if name is None:
-        if not entries:
-            click.echo("Nothing remembered yet; run a project to give it a ghost.")
+    if name is not None:
+        entry = _restart_target(name, entries)
+    else:
+        entry = _entry_for_directory(entries, Path.cwd()) or _choose_entry(entries)
+        if entry is None:
             return
-        if _summon_interactive():
-            chosen = picker.pick(
-                entries, forget=registry.forget, restore=registry.restore
-            )
-            if chosen is not None:
-                _summon_entry(ctx, chosen, **overrides)
-            return
-        for entry in entries:
-            click.echo(f"{entry.hostname}  {entry.type}  {entry.directory}")
-        return
-    match = next((entry for entry in entries if entry.name == name), None)
-    if match is None:
-        known = ", ".join(entry.name for entry in entries) or "nothing"
-        raise click.ClickException(
-            f"no remembered project '{name}' (remembered: {known})"
-        )
-    _summon_entry(ctx, match, **overrides)
+    _restart_entry(ctx, entry, foreground=foreground, **overrides)
+
+
+cli.add_command(
+    click.Command(
+        "summon",
+        callback=restart.callback,
+        params=restart.params,
+        help=restart.help,
+        hidden=True,
+        deprecated="Use 'localghost restart' instead.",
+    )
+)
 
 
 @cli.group("sessions", invoke_without_command=True)
@@ -1467,7 +1555,7 @@ def run(
         ):
             return
         clean_sessions(project)
-        _record_registry(resolved)
+        _record_registry(resolved, detached=detach)
         _run_compose(
             resolved.root,
             resolved.name,
@@ -1499,7 +1587,7 @@ def run(
         warning("Django settings", django_warnings)
     _print_run_plan(plan, dry_run=False, detach=detach)
     clean_sessions(plan.name)
-    _record_registry(resolved)
+    _record_registry(resolved, detached=detach)
     if detach:
         _detach_host(plan, resolved.cwd)
         return
@@ -1559,8 +1647,9 @@ def _report_live_session(session: Session, *, refuse: bool) -> None:
     """
     name = session.name
     message = (
-        f"{name} is already running; view logs with: localghost sessions "
-        f"logs {name}, or stop it with: localghost sessions stop {name}"
+        f"{name} is already running; restart it with: localghost restart "
+        f"{name}, view logs with: localghost sessions logs {name}, or stop "
+        f"it with: localghost sessions stop {name}"
     )
     if refuse:
         raise click.ClickException(message)
@@ -2229,16 +2318,24 @@ def _state_directory() -> Path:
     return state_directory()
 
 
-def _record_registry(resolved: ResolvedApplication) -> None:
-    """Remember this project so the hub can serve its ghost page later."""
+def _record_registry(
+    resolved: ResolvedApplication, *, detached: bool | None = None
+) -> None:
+    """Remember this project so the hub can serve its ghost page later.
+
+    `detached` is how it is being started; a save leaves it as `None`.
+    """
     if resolved.selected_type == "compose":
         registry.record(
             resolved.name or _local_project_name(resolved.root),
             resolved.root,
             "compose",
+            detached=detached,
         )
     elif resolved.plan is not None:
-        registry.record(resolved.plan.name, resolved.cwd, resolved.plan.type)
+        registry.record(
+            resolved.plan.name, resolved.cwd, resolved.plan.type, detached=detached
+        )
 
 
 def _public_root_path() -> Path:
