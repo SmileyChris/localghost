@@ -107,10 +107,10 @@ default to fall back on. Set one or the other, not both.
 
 Every key is optional, and an unrecognised key is an error rather than being
 ignored — a misspelled setting fails loudly instead of silently doing
-nothing. `[run].framework` is still accepted as a deprecated alias for `type`
-and prints a warning; `[run].mode` is rejected outright, since `mode` has no
-direct equivalent — the error names the migration (`type = "compose"`, or
-remove the key and let detection choose).
+nothing. Two retired keys are rejected with their migration: `[run].framework`
+(rename it to `type`) and `[run].mode`, which has no direct equivalent — the
+error names the migration (`type = "compose"`, or remove the key and let
+detection choose).
 
 Settings are layered: a command-line option wins over `.localghost.toml`,
 which wins over automatic detection. Use `--config PATH` to read a different
@@ -285,9 +285,8 @@ Skip auto-detection and specify the type:
 uvx localghost run --type vite
 ```
 
-`--framework` is no longer accepted as a CLI option; use `--type`.
-`[run].framework` in `.localghost.toml` still works as a deprecated alias for
-`[run].type` — see [Configured runs](#configured-runs) above.
+`--framework` is no longer accepted as a CLI option, nor `[run].framework` in
+`.localghost.toml`; use `--type` and `[run].type`.
 
 ### Custom command
 

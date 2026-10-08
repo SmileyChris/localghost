@@ -5,7 +5,8 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-This is a 4.0 release: `sessions list --json` changes shape.
+This is a 4.0 release: `sessions list --json` changes shape, and
+`[run].framework` is no longer read.
 
 ### Added
 
@@ -45,6 +46,11 @@ This is a 4.0 release: `sessions list --json` changes shape.
   list, show a running project as "Running in the foreground" or "Running
   detached", using Traefik's own router list, and the rest by when they last
   started.
+
+### Removed
+
+- `[run].framework` in `.localghost.toml`, deprecated since 2.0. A file that
+  still uses it is rejected with the fix: rename it to `[run].type`.
 
 ### Deprecated
 
