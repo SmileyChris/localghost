@@ -3,10 +3,10 @@
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [4.0.0] - 2026-10-09
 
-This is a 4.0 release: `sessions list --json` changes shape, and
-`[run].framework` is no longer read.
+Breaking: `sessions list --json` changes shape, and `[run].framework` is no
+longer read.
 
 ### Added
 

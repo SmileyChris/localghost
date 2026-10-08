@@ -347,7 +347,7 @@ wheels = [
 
 [[package]]
 name = "localghost"
-version = "3.3.0"
+version = "4.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
