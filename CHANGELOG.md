@@ -37,7 +37,8 @@ This is a 4.0 release: `sessions list --json` changes shape, and
   directory, such as a second worktree of the same repository, and suggests
   `--name`. Starting a project removes its stopped session records.
 - `status` shows each remembered project's state and run mode, and its
-  `--json` `remembered` entries gain `detached` and `state`.
+  `--json` `remembered` list holds the same project objects as
+  `sessions list --json`, gaining `detached`, `state` and `session`.
 - Registry entries gain `detached`, recording how the project last ran;
   session records gain `detached` too. Older files read as before.
 - Ghost pages and the welcome page suggest `localghost restart` and

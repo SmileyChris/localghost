@@ -203,10 +203,8 @@ def _proxy_status(as_json: bool = False) -> None:
             "hub": "running" if running else "stopped",
             "https": "enabled" if _https_configured() else "http-only",
             "routes": [],
-            "remembered": [
-                {key: value for key, value in project.items() if key != "session"}
-                for project in remembered
-            ],
+            # The same project objects `sessions list --json` prints.
+            "remembered": remembered,
         }
         if running:
             try:
