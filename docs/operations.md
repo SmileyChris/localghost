@@ -127,17 +127,29 @@ Bare `uvx localghost restart` restarts the remembered project containing the
 current directory. Outside one, on a terminal, it opens an interactive picker:
 arrow keys (or `j`/`k`) move, Enter restarts the selected project, Delete
 (or Backspace) forgets it, `u` undoes the last forget, and `q` leaves.
-When output is piped it prints a plain listing instead. The commands on a ghost page are click-to-copy.
+When output is piped it prints a plain listing instead.
+
+`uvx localghost sessions` lists every remembered project with whether it is
+running, and how:
+
+```text
+synthesis.localhost  running  detached    ~/dev/synthesis
+gulch.localhost      running  foreground  ~/dev/lab/gulch
+oasis.localhost      stopped              ~/dev/oasis
+``` The commands on a ghost page are click-to-copy.
 
 Entries are JSON files under the state directory's `registry/` folder,
 written on every `run` and `save` and mounted read-only into the hub.
 Remove one with:
 
 ```sh
-uvx localghost forget <name>
+uvx localghost sessions forget <name>
 ```
 
-or clear them all with `uvx localghost forget --all`. Status codes are
+or clear every project that isn't running with
+`uvx localghost sessions forget --all`. Forgetting drops the entry and the
+project's stopped session records; it never touches the project's files, and
+it refuses a project that is still running. Status codes are
 unchanged from a hub without ghost pages, so scripts and health checks
 keep working; only response bodies differ.
 
@@ -153,8 +165,8 @@ once to add the mount; after that the container is stable across runs.
 
 ## Shell completion
 
-Enable Click's standard completion script for your shell so `restart` and
-`forget` can complete remembered project names. For zsh:
+Enable Click's standard completion script for your shell so `restart` and the
+`sessions` commands can complete remembered project names. For zsh:
 
 ```sh
 eval "$(_LOCALGHOST_COMPLETE=zsh_source localghost)"

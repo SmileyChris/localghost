@@ -236,7 +236,9 @@ shows it and `sessions stop` or `restart` from another terminal can end it.
 Its output stays in its own terminal, so `sessions logs` has none to show.
 
 Sessions are addressed by project name; a session ID works too, and wins
-when both match.
+when both match. `sessions list` shows every remembered project, running
+or not, and `--json` gives each project's registry entry with its `state`
+and its newest session record under `session`.
 
 Starting a project removes that name's stopped records. A hostname can only
 be served once, so `run` refuses to start a project whose name is already

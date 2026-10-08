@@ -65,7 +65,7 @@ The hub remembers hostnames it has routed before. If the application behind
 one is stopped or was never started this session, the hub answers with a
 ghost page (`503 Service Unavailable`) instead of routing to it. Start the
 application with `localghost restart <name>`, or drop the stale entry with
-`localghost forget <name>` if the project is gone for good.
+`localghost sessions forget <name>` if the project is gone for good.
 
 ## Route returns 502
 

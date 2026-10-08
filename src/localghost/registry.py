@@ -2,7 +2,7 @@
 
 Ghost pages read this: the hub's fallback middleware serves a "project is
 offline" page for any hostname remembered here. Entries persist until
-`localghost forget` removes them; stale entries only make the page report
+`localghost sessions forget` removes them; stale entries only make the page report
 an old date.
 """
 

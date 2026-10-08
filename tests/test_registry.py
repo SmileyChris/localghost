@@ -87,7 +87,7 @@ def test_forget_unknown_name_fails(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
     result = CliRunner().invoke(cli, ["forget", "nothing"])
     assert result.exit_code != 0
-    assert "no ghost page entry" in result.output
+    assert "no remembered project 'nothing'" in result.output
 
 
 def test_forget_all_command(tmp_path, monkeypatch):
@@ -313,7 +313,7 @@ def test_summon_missing_directory_fails(tmp_path, monkeypatch):
     result = CliRunner().invoke(cli, ["summon", "gone"])
     assert result.exit_code != 0
     assert "no longer exists" in result.output
-    assert "localghost forget gone" in result.output
+    assert "localghost sessions forget gone" in result.output
 
 
 def test_summon_runs_project_from_remembered_directory(tmp_path, monkeypatch):

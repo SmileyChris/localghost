@@ -36,7 +36,7 @@ def test_sessions_list_reports_no_sessions() -> None:
     result = CliRunner().invoke(cli, ["sessions", "list"])
 
     assert result.exit_code == 0, result.output
-    assert "No managed sessions." in result.output
+    assert "Nothing remembered yet" in result.output
 
 
 def test_bare_sessions_lists_sessions(tmp_path) -> None:
@@ -50,6 +50,7 @@ def test_bare_sessions_lists_sessions(tmp_path) -> None:
 
 
 def test_sessions_list_marks_a_dead_session_stopped(tmp_path) -> None:
+    registry.record("demo", tmp_path, "django")
     _session(tmp_path, pid=None)
 
     result = CliRunner().invoke(cli, ["sessions", "list"])
@@ -65,8 +66,9 @@ def test_sessions_list_json_is_machine_readable(tmp_path) -> None:
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert [item["id"] for item in payload] == [session.id]
-    assert payload[0]["status"] == "running"
+    assert [item["name"] for item in payload] == ["demo"]
+    assert payload[0]["state"] == "running"
+    assert payload[0]["session"]["id"] == session.id
 
 
 def test_sessions_logs_rejects_an_unknown_session() -> None:
@@ -458,3 +460,66 @@ def test_run_refuses_a_name_served_from_another_directory(
     assert result.exit_code == 1
     assert f"already served from {worktree}" in result.output
     assert "--name" in result.output
+
+
+def test_sessions_list_joins_projects_with_their_sessions(tmp_path) -> None:
+    registry.record("demo", tmp_path / "demo", "django", detached=True)
+    registry.record("shop", tmp_path / "shop", "vite")
+    _session(tmp_path / "demo", pid=os.getpid())
+    _session(tmp_path / "api", name="api", pid=os.getpid(), detached=False)
+    _session(tmp_path / "gone", name="gone", pid=None)
+
+    table = CliRunner().invoke(cli, ["sessions"])
+    payload = json.loads(CliRunner().invoke(cli, ["sessions", "list", "--json"]).output)
+
+    rows = {line.split()[0]: line.split()[1:] for line in table.output.splitlines()}
+    assert rows["demo.localhost"][:2] == ["running", "detached"]
+    assert rows["shop.localhost"][0] == "stopped"
+    assert rows["api.localhost"][:2] == ["running", "foreground"]
+    assert "gone.localhost" not in rows
+    by_name = {item["name"]: item for item in payload}
+    assert by_name["shop"]["session"] is None
+    assert by_name["demo"]["session"]["detached"] is True
+    assert by_name["api"]["last_started"] is None
+
+
+def test_sessions_forget_removes_the_entry_and_stopped_records(tmp_path) -> None:
+    registry.record("demo", tmp_path, "django")
+    _session(tmp_path, pid=None)
+
+    result = CliRunner().invoke(cli, ["sessions", "forget", "demo"])
+
+    assert result.exit_code == 0, result.output
+    assert registry.entries() == [] and sessions() == []
+
+
+def test_sessions_forget_refuses_a_running_project(tmp_path) -> None:
+    registry.record("demo", tmp_path, "django")
+    _session(tmp_path, pid=os.getpid())
+
+    result = CliRunner().invoke(cli, ["sessions", "forget", "demo"])
+
+    assert result.exit_code == 1
+    assert "localghost sessions stop demo" in result.output
+    assert len(registry.entries()) == 1
+
+
+def test_sessions_forget_all_keeps_running_projects(tmp_path) -> None:
+    registry.record("demo", tmp_path, "django")
+    registry.record("shop", tmp_path, "vite")
+    _session(tmp_path, pid=os.getpid())
+
+    result = CliRunner().invoke(cli, ["sessions", "forget", "--all"])
+
+    assert result.exit_code == 0, result.output
+    assert [entry.name for entry in registry.entries()] == ["demo"]
+
+
+def test_top_level_forget_is_a_deprecated_alias(tmp_path) -> None:
+    registry.record("demo", tmp_path, "django")
+
+    result = CliRunner().invoke(cli, ["forget", "demo"])
+
+    assert result.exit_code == 0, result.output
+    assert "localghost sessions forget" in result.output
+    assert registry.entries() == []

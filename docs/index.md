@@ -51,7 +51,7 @@ an explicit `--type` is remembered so later runs need no flag.
 
 The project type is auto-detected, searching upward to the nearest project
 root. `--detach` runs the application in the background,
-`localghost sessions` inspects, follows, and stops those sessions, and
+`localghost sessions` lists projects and follows or stops their sessions, and
 `localghost restart` brings one back. See
 [Running host applications](running-host-apps.md) for the full workflow, custom
 ports, explicit type selection, `.localghost.toml` settings, detached

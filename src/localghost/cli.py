@@ -197,13 +197,16 @@ def status(as_json: bool) -> None:
 def _proxy_status(as_json: bool = False) -> None:
     """Report only observable hub state; never reconcile the hub."""
     running = proxy_is_running()
-    remembered = registry.entries()
+    remembered = _projects()
     if as_json:
         payload: dict[str, object] = {
             "hub": "running" if running else "stopped",
             "https": "enabled" if _https_configured() else "http-only",
             "routes": [],
-            "remembered": [entry.as_dict() for entry in remembered],
+            "remembered": [
+                {key: value for key, value in project.items() if key != "session"}
+                for project in remembered
+            ],
         }
         if running:
             try:
@@ -234,7 +237,21 @@ def _proxy_status(as_json: bool = False) -> None:
             idle = not listed
     if remembered:
         details(
-            [(entry.hostname, entry.directory) for entry in remembered],
+            [
+                (
+                    str(project["hostname"]),
+                    " · ".join(
+                        part
+                        for part in (
+                            str(project["state"]),
+                            _project_mode(project),
+                            str(project["directory"]),
+                        )
+                        if part
+                    ),
+                )
+                for project in remembered
+            ],
             title="Remembered projects",
         )
     if idle:
@@ -347,27 +364,6 @@ def _complete_project_name(
     return [entry.name for entry in entries if entry.name.startswith(incomplete)]
 
 
-@cli.command()
-@click.argument("name", required=False, shell_complete=_complete_project_name)
-@click.option("--all", "forget_everything", is_flag=True, help="Forget every project.")
-def forget(name: str | None, forget_everything: bool) -> None:
-    """Drop a project's ghost page entry."""
-    if forget_everything:
-        if name is not None:
-            raise click.UsageError("NAME and --all cannot both be given")
-        removed = registry.forget_all()
-        success(f"Forgot {removed} project(s).")
-        return
-    if name is None:
-        names = ", ".join(sorted(entry.name for entry in registry.entries()))
-        if not names:
-            raise click.UsageError("nothing is remembered; provide NAME or --all")
-        raise click.UsageError(f"provide NAME or --all; remembered: {names}")
-    if not registry.forget(name):
-        raise click.ClickException(f"no ghost page entry for '{name}'")
-    success(f"Forgot {name}.")
-
-
 def _restart_interactive() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
@@ -437,7 +433,7 @@ def _restart_entry(
     if not directory.is_dir():
         raise click.ClickException(
             f"remembered directory '{directory}' no longer exists; "
-            f"forget it with: localghost forget {entry.name}"
+            f"forget it with: localghost sessions forget {entry.name}"
         )
     running = None if overrides["dry_run"] else live_session(entry.name)
     if running is not None:
@@ -545,9 +541,70 @@ cli.add_command(
 @cli.group("sessions", invoke_without_command=True)
 @click.pass_context
 def sessions_group(ctx: click.Context) -> None:
-    """Inspect and control detached application sessions."""
+    """List remembered projects and control their sessions."""
     if ctx.invoked_subcommand is None:
         _sessions_list(False)
+
+
+def _projects() -> list[dict[str, object]]:
+    """Remembered projects joined by name with their session records.
+
+    A running session with no registry entry still appears, since registry
+    writes are best-effort.
+    """
+    records = sessions()
+    projects = [entry.as_dict() for entry in registry.entries()]
+    remembered = {project["name"] for project in projects}
+    for session in records:
+        if session.name not in remembered and session_alive(session):
+            remembered.add(session.name)
+            projects.append(
+                {
+                    "hostname": f"{session.name}.localhost",
+                    "name": session.name,
+                    "directory": session.cwd,
+                    "type": session.mode,
+                    "last_started": None,
+                    "detached": session.detached,
+                }
+            )
+    for project in projects:
+        named = [item for item in records if item.name == project["name"]]
+        running = next((item for item in named if session_alive(item)), None)
+        latest = running or (find_session(str(project["name"])) if named else None)
+        project["state"] = "running" if running else "stopped"
+        project["session"] = latest.as_dict() if latest else None
+    return projects
+
+
+def _project_mode(project: dict[str, object]) -> str:
+    session = project["session"]
+    if project["state"] != "running" or not isinstance(session, dict):
+        return ""
+    return "detached" if session["detached"] else "foreground"
+
+
+def _sessions_list(as_json: bool) -> None:
+    projects = _projects()
+    if as_json:
+        click.echo(json.dumps(projects, indent=2))
+        return
+    if not projects:
+        click.echo("Nothing remembered yet; run a project to give it a ghost.")
+        return
+    rows = [
+        (
+            str(project["hostname"]),
+            str(project["state"]),
+            _project_mode(project),
+            str(project["directory"]),
+        )
+        for project in projects
+    ]
+    widths = [max(len(row[column]) for row in rows) for column in range(3)]
+    for row in rows:
+        cells = [cell.ljust(width) for cell, width in zip(row, widths, strict=False)]
+        click.echo("  ".join([*cells, row[3]]))
 
 
 @sessions_group.command("list")
@@ -555,31 +612,11 @@ def sessions_group(ctx: click.Context) -> None:
     "--json",
     "as_json",
     is_flag=True,
-    help="Print the session records as JSON instead of a table.",
+    help="Print the projects and their session records as JSON.",
 )
 def sessions_list(as_json: bool) -> None:
-    """List detached sessions and whether each one is still running."""
+    """List remembered projects and whether each one is running."""
     _sessions_list(as_json)
-
-
-def _sessions_list(as_json: bool) -> None:
-    records = []
-    for session in sessions():
-        status = "running" if session_alive(session) else "stopped"
-        item = session.as_dict()
-        item["status"] = status
-        records.append(item)
-    if as_json:
-        click.echo(json.dumps(records, indent=2))
-        return
-    if not records:
-        click.echo("No managed sessions.")
-        return
-    for item in records:
-        click.echo(
-            f"{item['id']}  {item['mode']}  {item['name']}.localhost  "
-            f"{item['status']}  {item['log']}"
-        )
 
 
 def _target_session(target: str) -> Session:
@@ -670,6 +707,60 @@ def sessions_stop(target: str | None, stop_all: bool) -> None:
         success(f"Stopped {stopped} session(s).")
     if failures:
         raise click.ClickException("; ".join(failures))
+
+
+@sessions_group.command("forget")
+@click.argument("name", required=False, shell_complete=_complete_project_name)
+@click.option(
+    "--all",
+    "forget_everything",
+    is_flag=True,
+    help="Forget every project that isn't running.",
+)
+def sessions_forget(name: str | None, forget_everything: bool) -> None:
+    """Drop a remembered project, its ghost page, and its stopped sessions.
+
+    The project's own files are never touched.
+    """
+    if forget_everything:
+        if name is not None:
+            raise click.UsageError("NAME and --all cannot both be given")
+        running = sorted({item.name for item in sessions() if session_alive(item)})
+        removed = sum(
+            registry.forget(entry.name)
+            for entry in registry.entries()
+            if entry.name not in running
+        )
+        clean_sessions()
+        success(f"Forgot {removed} project(s).")
+        if running:
+            info(f"Kept running project(s): {', '.join(running)}")
+        return
+    if name is None:
+        names = ", ".join(sorted(entry.name for entry in registry.entries()))
+        if not names:
+            raise click.UsageError("nothing is remembered; provide NAME or --all")
+        raise click.UsageError(f"provide NAME or --all; remembered: {names}")
+    if live_session(name) is not None:
+        raise click.ClickException(
+            f"{name} is running; stop it first with: localghost sessions stop {name}"
+        )
+    cleaned = clean_sessions(name)
+    if not registry.forget(name) and not cleaned:
+        raise click.ClickException(f"no remembered project '{name}'")
+    success(f"Forgot {name}.")
+
+
+cli.add_command(
+    click.Command(
+        "forget",
+        callback=sessions_forget.callback,
+        params=sessions_forget.params,
+        help=sessions_forget.help,
+        hidden=True,
+        deprecated="Use 'localghost sessions forget' instead.",
+    )
+)
 
 
 @sessions_group.command("clean")

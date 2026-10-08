@@ -5,6 +5,8 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+This is a 4.0 release: `sessions list --json` changes shape.
+
 ### Added
 
 - `localghost restart [NAME]` brings a project back in one step. It stops the
@@ -18,21 +20,31 @@ uses [Semantic Versioning](https://semver.org/).
 - Foreground runs are recorded as sessions while they run, so `sessions`
   shows them and `sessions stop` or `restart` from another terminal can end
   them.
+- `localghost sessions forget` replaces the top-level `forget`. It also
+  removes the project's stopped session records and refuses a running
+  project; `--all` keeps running projects.
 
 ### Changed
 
+- **Breaking:** `sessions list` (and bare `sessions`) lists remembered
+  projects with whether each is running and how, instead of raw session
+  records. `--json` is now a list of projects: the registry entry's fields
+  plus `state` and `session` (the newest session record, or `null`).
 - `sessions logs` and `sessions stop` take a project name as well as a
   session ID; an exact ID wins. Messages print name-based commands.
 - `run` refuses to start a project whose name is already served from another
   directory, such as a second worktree of the same repository, and suggests
   `--name`. Starting a project removes its stopped session records.
+- `status` shows each remembered project's state and run mode, and its
+  `--json` `remembered` entries gain `detached` and `state`.
 - Registry entries gain `detached`, recording how the project last ran;
   session records gain `detached` too. Older files read as before.
 
 ### Deprecated
 
-- `localghost summon` is a hidden alias for `restart`. It still works and
-  prints a deprecation notice.
+- `localghost summon` is a hidden alias for `restart`, and the top-level
+  `localghost forget` for `sessions forget`. Both still work and print a
+  deprecation notice.
 
 ## [3.3.0] - 2026-09-30
 
