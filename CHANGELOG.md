@@ -3,6 +3,22 @@
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Foreground runs are recorded as sessions while they run, so `sessions`
+  shows them and `sessions stop` from another terminal can end them.
+
+### Changed
+
+- `sessions logs` and `sessions stop` take a project name as well as a
+  session ID; an exact ID wins. Messages print name-based commands.
+- `run` refuses to start a project whose name is already served from another
+  directory, such as a second worktree of the same repository, and suggests
+  `--name`. Starting a project removes its stopped session records.
+- Session records gain `detached`. Older records read as before.
+
 ## [3.3.0] - 2026-09-30
 
 ### Added

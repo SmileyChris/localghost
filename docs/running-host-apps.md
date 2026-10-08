@@ -215,7 +215,7 @@ Whether the application came up somewhere the hub can reach is a fact about
 the run, so the relay and the unreachable-application diagnosis below happen
 either way.
 
-### Detached runs
+### Detached runs and sessions
 
 `--detach` records the process outside the project directory and keeps its
 output in Localghost's state directory:
@@ -224,11 +224,23 @@ output in Localghost's state directory:
 localghost run --detach
 localghost sessions list
 localghost sessions list --json
-localghost sessions logs SESSION_ID
-localghost sessions logs SESSION_ID -f
-localghost sessions stop SESSION_ID
+localghost sessions logs NAME
+localghost sessions logs NAME -f
+localghost sessions stop NAME
 localghost sessions stop --all
 ```
+
+A foreground run is recorded too, for as long as it runs, so `sessions`
+shows it and `sessions stop` from another terminal can end it.
+Its output stays in its own terminal, so `sessions logs` has none to show.
+
+Sessions are addressed by project name; a session ID works too, and wins
+when both match.
+
+Starting a project removes that name's stopped records. A hostname can only
+be served once, so `run` refuses to start a project whose name is already
+served from another directory — a second worktree of the same repository,
+say — and suggests `--name`.
 
 Session records live in `${XDG_STATE_HOME:-$HOME/.local/state}/localghost/sessions`
 (or `$LOCALGHOST_STATE_DIR` when set). A host session's liveness is probed by
@@ -237,7 +249,8 @@ its recorded process ID and a Compose session's by `docker compose ps`.
 `docker compose logs`; add `-f` to keep following either kind of session.
 
 `sessions stop` asks a host process to exit with `SIGTERM`, then force-quits it
-with `SIGKILL` after a two second grace period; it reports an error and keeps
+with `SIGKILL` after a two second grace period (ten for a foreground run, which
+tears down its own application first); it reports an error and keeps
 the record if the process somehow survives. `localghost sessions clean`
 removes records and bridges left by sessions that already exited, leaving
 running ones alone. `localghost hub down` continues to control only the hub.

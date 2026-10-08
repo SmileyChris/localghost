@@ -76,10 +76,13 @@ from .runner import (
     start_bridge,
     stop_bridge,
 )
-from .sessions import Session, find_matching, sessions
+from .sessions import Session, sessions
 from .sessions import alive as session_alive
 from .sessions import clean as clean_sessions
 from .sessions import create as create_session
+from .sessions import discard as discard_session
+from .sessions import find as find_session
+from .sessions import live as live_session
 from .sessions import stop as stop_session
 from .tailscale import (
     API as TailscaleAPI,
@@ -491,8 +494,15 @@ def _sessions_list(as_json: bool) -> None:
         )
 
 
+def _target_session(target: str) -> Session:
+    session = find_session(target)
+    if session is None:
+        raise click.ClickException(f"no session for '{target}'")
+    return session
+
+
 @sessions_group.command("logs")
-@click.argument("session_id")
+@click.argument("target", shell_complete=_complete_project_name)
 @click.option(
     "follow",
     "--follow",
@@ -500,11 +510,9 @@ def _sessions_list(as_json: bool) -> None:
     is_flag=True,
     help="Keep printing new output until interrupted.",
 )
-def sessions_logs(session_id: str, follow: bool) -> None:
-    """Print the captured log of a detached session."""
-    session = next((item for item in sessions() if item.id == session_id), None)
-    if session is None:
-        raise click.ClickException(f"unknown session '{session_id}'")
+def sessions_logs(target: str, follow: bool) -> None:
+    """Print the captured log of a session, by project name or session ID."""
+    session = _target_session(target)
     if session.mode == "compose" and session.project:
         command = [
             "docker",
@@ -522,9 +530,15 @@ def sessions_logs(session_id: str, follow: bool) -> None:
         if result.returncode:
             raise click.exceptions.Exit(result.returncode)
         return
+    if not session.detached:
+        click.echo(
+            f"{session.name} is running in the foreground in another terminal; "
+            "its output is there, not in a log."
+        )
+        return
     log = Path(session.log)
     if not log.exists():
-        click.echo(f"Session {session.id} has no log yet.")
+        click.echo(f"{session.name} has no log yet.")
         return
     with log.open("r", encoding="utf-8", errors="replace") as handle:
         click.echo(handle.read(), nl=False)
@@ -541,23 +555,17 @@ def sessions_logs(session_id: str, follow: bool) -> None:
 
 
 @sessions_group.command("stop")
-@click.argument("session_id", required=False)
-@click.option(
-    "--all", "stop_all", is_flag=True, help="Stop every detached session."
-)
-def sessions_stop(session_id: str | None, stop_all: bool) -> None:
-    """Stop one detached session, or every session with --all.
+@click.argument("target", required=False, shell_complete=_complete_project_name)
+@click.option("--all", "stop_all", is_flag=True, help="Stop every session.")
+def sessions_stop(target: str | None, stop_all: bool) -> None:
+    """Stop one session, by project name or session ID, or every one with --all.
 
     A host session is asked to exit with SIGTERM and force-quit with SIGKILL
-    after a two second grace period; its bridge is removed either way.
+    after a grace period; its bridge is removed either way.
     """
-    if bool(session_id) == stop_all:
-        raise click.UsageError("provide a session ID or --all")
-    targets = (
-        sessions()
-        if stop_all
-        else [item for item in sessions() if item.id == session_id]
-    )
+    if bool(target) == stop_all:
+        raise click.UsageError("provide a project name, a session ID, or --all")
+    targets = sessions() if stop_all else [_target_session(target)]
     if not targets:
         raise click.ClickException("no matching managed session")
     stopped = 0
@@ -1452,12 +1460,13 @@ def run(
             compose_dry_run(project=project, url=_proxy_origin(project))
             return
         # Same guard as the host branch below: a second run of a stack that
-        # is already detached would add a second session record to the same
+        # is already running would add a second session record to the same
         # containers, and stopping either would take the whole stack down.
-        matching = find_matching(name=project, cwd=resolved.root)
-        if matching:
-            _report_live_session(matching, refuse=resolved.explicit_run_settings)
+        if _already_serving(
+            project, resolved.root, refuse=resolved.explicit_run_settings
+        ):
             return
+        clean_sessions(project)
         _record_registry(resolved)
         _run_compose(
             resolved.root,
@@ -1468,9 +1477,11 @@ def run(
         return
     plan = resolved.plan
     assert plan is not None
-    matching = find_matching(name=plan.name, cwd=plan.project_root or resolved.cwd)
-    if matching:
-        _report_live_session(matching, refuse=resolved.explicit_run_settings)
+    if _already_serving(
+        plan.name,
+        plan.project_root or resolved.cwd,
+        refuse=resolved.explicit_run_settings,
+    ):
         return
     if dry_run:
         _print_run_plan(plan, dry_run=True)
@@ -1487,33 +1498,69 @@ def run(
     if django_warnings:
         warning("Django settings", django_warnings)
     _print_run_plan(plan, dry_run=False, detach=detach)
+    clean_sessions(plan.name)
     _record_registry(resolved)
     if detach:
         _detach_host(plan, resolved.cwd)
         return
-    status = execute(
-        plan,
-        lambda: _run_proxy("up", https_enabled=_https_configured()),
-        cwd=plan.working_directory or resolved.cwd,
-        public_origin=_proxy_origin(plan.name),
-        secondary_origin=_tailnet_origin(plan.name),
-        status_bar=not no_status_bar,
+    # The record lets other terminals see this run, and stop or take it over.
+    session = create_session(
+        mode="host",
+        name=plan.name,
+        port=plan.port,
+        cwd=plan.project_root or resolved.cwd,
+        command=plan.command,
+        log=None,
+        pid=os.getpid(),
+        bridge_project=plan.project,
+        bridge_yaml=plan.bridge_yaml,
+        detached=False,
     )
+    try:
+        status = execute(
+            plan,
+            lambda: _run_proxy("up", https_enabled=_https_configured()),
+            cwd=plan.working_directory or resolved.cwd,
+            public_origin=_proxy_origin(plan.name),
+            secondary_origin=_tailnet_origin(plan.name),
+            status_bar=not no_status_bar,
+        )
+    finally:
+        discard_session(session)
     _report_application_exit(plan.name, status)
     if status:
         raise click.exceptions.Exit(status)
 
 
+def _already_serving(name: str, directory: Path, *, refuse: bool) -> bool:
+    """Report a live session already serving `name`; True if one is.
+
+    The same name from another directory (a second worktree, say) would
+    fight the first for NAME.localhost, so that is always refused.
+    """
+    session = live_session(name)
+    if session is None:
+        return False
+    if Path(session.cwd).resolve() != directory.resolve():
+        raise click.ClickException(
+            f"{name}.localhost is already served from {session.cwd}; run this "
+            "copy under another name with --name, or stop that one with: "
+            f"localghost sessions stop {name}"
+        )
+    _report_live_session(session, refuse=refuse)
+    return True
+
+
 def _report_live_session(session: Session, *, refuse: bool) -> None:
-    """Point at the detached session already serving this project.
+    """Point at the session already serving this project.
 
     Explicit run settings mean the user wanted something other than what
     is running, so that is an error; a plain `run` is just informed.
     """
+    name = session.name
     message = (
-        f"Session {session.id} is already running; view logs with: "
-        f"localghost sessions logs {session.id}, or stop it with: "
-        f"localghost sessions stop {session.id}"
+        f"{name} is already running; view logs with: localghost sessions "
+        f"logs {name}, or stop it with: localghost sessions stop {name}"
     )
     if refuse:
         raise click.ClickException(message)
@@ -1689,6 +1736,22 @@ def _run_compose(
     command = ["docker", "compose", "--project-name", project, "up"]
     if detach:
         command.append("--detach")
+    # A foreground stack is recorded for as long as `up` holds the terminal.
+    foreground = (
+        None
+        if detach
+        else create_session(
+            mode="compose",
+            name=project,
+            port=0,
+            cwd=cwd,
+            command=(),
+            log=None,
+            pid=os.getpid(),
+            project=project,
+            detached=False,
+        )
+    )
     with statusbar.pinned(
         public_origin,
         secondary_url=_tailnet_origin(project),
@@ -1707,7 +1770,11 @@ def _run_compose(
         info(f"Public URL: {public_origin}")
         _report_tailnet_origin(project)
         bar.status("starting")
-        result = subprocess.run(command, cwd=cwd, check=False)
+        try:
+            result = subprocess.run(command, cwd=cwd, check=False)
+        finally:
+            if foreground is not None:
+                discard_session(foreground)
     if result.returncode:
         _report_application_exit(project, result.returncode)
         raise click.exceptions.Exit(result.returncode)

@@ -1,4 +1,8 @@
-"""Filesystem-backed metadata for detached Localghost runs."""
+"""Filesystem-backed metadata for running Localghost applications.
+
+Detached runs record the application's process group; foreground runs record
+the localghost process itself, so other terminals can see and stop them.
+"""
 
 from __future__ import annotations
 
@@ -31,6 +35,7 @@ class Session:
     bridge_project: str | None = None
     command: tuple[str, ...] = ()
     bridge_yaml: str = ""
+    detached: bool = True
 
     def as_dict(self) -> dict[str, object]:
         return self.__dict__.copy()
@@ -75,11 +80,12 @@ def create(
     port: int,
     cwd: Path,
     command: tuple[str, ...],
-    log: Path,
+    log: Path | None,
     pid: int | None,
     project: str | None = None,
     bridge_project: str | None = None,
     bridge_yaml: str = "",
+    detached: bool = True,
 ) -> Session:
     session = Session(
         uuid.uuid4().hex[:8],
@@ -88,11 +94,12 @@ def create(
         port,
         str(cwd),
         pid,
-        str(log),
+        str(log) if log else "",
         project,
         bridge_project,
         command,
         bridge_yaml,
+        detached,
     )
     save(session)
     return session
@@ -117,29 +124,55 @@ def alive(session: Session) -> bool:
     return True
 
 
-def find_matching(*, name: str, cwd: Path) -> Session | None:
+def live(name: str) -> Session | None:
+    """The running session serving `name`; a hostname is only served once."""
     return next(
-        (
-            item
-            for item in sessions()
-            if item.name == name
-            and Path(item.cwd).resolve() == cwd.resolve()
-            and alive(item)
-        ),
-        None,
+        (item for item in sessions() if item.name == name and alive(item)), None
     )
+
+
+def find(target: str) -> Session | None:
+    """Resolve an exact session ID, else a project name.
+
+    A name resolves to its running session, else its most recent record.
+    """
+    records = sessions()
+    exact = next((item for item in records if item.id == target), None)
+    if exact is not None:
+        return exact
+    named = [item for item in records if item.name == target]
+    running = next((item for item in named if alive(item)), None)
+    if running is not None or not named:
+        return running
+    return max(named, key=_recorded_at)
+
+
+def _recorded_at(session: Session) -> float:
+    try:
+        return _path(session.id).stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def discard(session: Session) -> None:
+    """Drop a record whose application has already shut itself down."""
+    _path(session.id).unlink(missing_ok=True)
 
 
 def stop(session: Session) -> None:
     if session.mode == "host" and session.pid and alive(session):
+        # A detached record holds the application's process group. A
+        # foreground one holds the localghost process, which tears down its
+        # application and bridge on SIGTERM, so it gets longer to do that.
+        kill = os.killpg if session.detached else os.kill
         with suppress(ProcessLookupError, PermissionError):
-            os.killpg(session.pid, signal.SIGTERM)
-        deadline = time.monotonic() + 2
+            kill(session.pid, signal.SIGTERM)
+        deadline = time.monotonic() + (2 if session.detached else 10)
         while alive(session) and time.monotonic() < deadline:
             time.sleep(0.05)
         if alive(session):
             with suppress(ProcessLookupError, PermissionError):
-                os.killpg(session.pid, signal.SIGKILL)
+                kill(session.pid, signal.SIGKILL)
         if alive(session):
             # Removing the record here would orphan the process: nothing else
             # remembers its pid, bridge, or log.
@@ -158,10 +191,11 @@ def stop(session: Session) -> None:
     _path(session.id).unlink(missing_ok=True)
 
 
-def clean() -> int:
+def clean(name: str | None = None) -> int:
+    """Remove stopped records, every name's or just `name`'s."""
     removed = 0
     for session in sessions():
-        if not alive(session):
+        if (name is None or session.name == name) and not alive(session):
             if session.bridge_project:
                 _stop_bridge(session)
             _path(session.id).unlink(missing_ok=True)
