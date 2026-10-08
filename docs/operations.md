@@ -100,7 +100,9 @@ replace application logs when a backend itself is failing.
 Nothing is ever hosted at bare `localhost`, so
 [http://localhost](http://localhost) serves the hub's welcome page: the
 logo, the list of remembered projects, and links to the Traefik dashboard
-and this documentation. The page is styled to match these docs.
+and this documentation. A project something is serving right now, as Traefik's
+own router list reports it, reads "Running in the foreground" or "Running
+detached"; the rest show when they last started. The page is styled to match these docs.
 
 The hub remembers every project it has routed. Visiting a remembered
 hostname whose application is stopped returns **503 Service Unavailable**

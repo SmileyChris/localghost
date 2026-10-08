@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -21,9 +22,14 @@ import (
 
 type Config struct {
 	RegistryPath string `json:"registryPath,omitempty"`
+	// RoutersURL is Traefik's own router API, reached through the dashboard
+	// route on the web entrypoint. Empty turns the online check off.
+	RoutersURL string `json:"routersURL,omitempty"`
 }
 
-func CreateConfig() *Config { return &Config{} }
+func CreateConfig() *Config {
+	return &Config{RoutersURL: "http://127.0.0.1/api/http/routers?per_page=1000"}
+}
 
 type entry struct {
 	Hostname    string `json:"hostname"`
@@ -31,18 +37,26 @@ type entry struct {
 	Directory   string `json:"directory"`
 	Type        string `json:"type"`
 	LastStarted string `json:"last_started"`
+	Detached    bool   `json:"detached"`
 }
 
 type Fallback struct {
 	name         string
 	registryPath string
+	routersURL   string
+	client       *http.Client
 }
 
 func New(_ context.Context, _ http.Handler, config *Config, name string) (http.Handler, error) {
 	if config == nil || config.RegistryPath == "" {
 		return nil, fmt.Errorf("localghost fallback: registryPath is required")
 	}
-	return &Fallback{name: name, registryPath: config.RegistryPath}, nil
+	return &Fallback{
+		name:         name,
+		registryPath: config.RegistryPath,
+		routersURL:   config.RoutersURL,
+		client:       &http.Client{Timeout: time.Second},
+	}, nil
 }
 
 func (f *Fallback) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
@@ -101,6 +115,47 @@ func (f *Fallback) entries() []entry {
 		result = append(result, e)
 	}
 	return result
+}
+
+var hostRule = regexp.MustCompile("Host\\(\\s*`([^`]+)`\\s*\\)")
+
+// onlineHosts asks Traefik which hostnames a router serves right now: the
+// same "is anything answering at this name" a visitor would get. When that
+// can't be known it returns nil, and every project reads as not running.
+func (f *Fallback) onlineHosts() map[string]bool {
+	if f.routersURL == "" {
+		return nil
+	}
+	req, err := http.NewRequest(http.MethodGet, f.routersURL, nil)
+	if err != nil {
+		return nil
+	}
+	req.Host = "traefik.localhost"
+	resp, err := f.client.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	var routers []struct {
+		Rule   string `json:"rule"`
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&routers); err != nil {
+		return nil
+	}
+	hosts := map[string]bool{}
+	for _, router := range routers {
+		if router.Status != "enabled" {
+			continue
+		}
+		for _, match := range hostRule.FindAllStringSubmatch(router.Rule, -1) {
+			hosts[strings.ToLower(match[1])] = true
+		}
+	}
+	return hosts
 }
 
 func relativeTime(stamp string) string {
@@ -181,6 +236,8 @@ const pageTemplate = `<!doctype html>
                  color: var(--quiet); overflow-wrap: anywhere; }
   .project-when { grid-column: 2; justify-self: end; font-size: .8rem;
                   color: var(--quiet); white-space: nowrap; }
+  .running { color: var(--link); font-weight: 600; }
+  .running::before { content: "●"; margin-right: .3em; }
   .empty { color: var(--quiet); border-top: 1px solid var(--line); padding-top: .8rem; }
 
   .cmd { font-family: var(--mono); background: var(--tint); border: 1px solid var(--accent);
@@ -216,16 +273,9 @@ const pageTemplate = `<!doctype html>
      own <code>.localhost</code> hostname.</p>
   <h2>Remembered projects</h2>
   {{if .Known}}
-  <ul class="projects">
-  {{range .Known}}
-    <li class="project">
-      <a class="project-name" href="//{{.Hostname}}{{if $.Port}}:{{$.Port}}{{end}}">{{.Hostname}}</a>
-      <span class="project-type">{{.Type}}</span>
-      <span class="project-dir">{{.Directory}}</span>
-      <span class="project-when">started {{.Relative}}</span>
-    </li>
-  {{end}}
-  </ul>
+  {{template "projects" .}}
+  <p class="muted">Bring one back with <code>localghost restart NAME</code>, or see
+     which are running with <code>localghost sessions</code>.</p>
   {{else}}
   <p class="empty">Nothing yet. A project appears here once <code>localghost run</code>
      starts it or <code>localghost save</code> remembers it.</p>
@@ -235,24 +285,15 @@ const pageTemplate = `<!doctype html>
   <p>A {{.Ghost.Type}} project last started {{.Ghost.Relative}} from
      <code>{{.Ghost.Directory}}</code>.</p>
   <p>Bring it back:</p>
-  <p><button class="cmd" data-cmd="uvx localghost summon {{.Ghost.Name}}">uvx localghost summon {{.Ghost.Name}}</button></p>
+  <p><button class="cmd" data-cmd="uvx localghost restart {{.Ghost.Name}}">uvx localghost restart {{.Ghost.Name}}</button></p>
   <p class="muted">Or lay it to rest:
-     <button class="cmd cmd-quiet" data-cmd="uvx localghost forget {{.Ghost.Name}}">uvx localghost forget {{.Ghost.Name}}</button></p>
+     <button class="cmd cmd-quiet" data-cmd="uvx localghost sessions forget {{.Ghost.Name}}">uvx localghost sessions forget {{.Ghost.Name}}</button></p>
 {{else}}
   <h1><img class="ghost-inline" src="{{.Icon}}" alt="">Nothing haunts <span class="quiet">{{.Host}}</span></h1>
   <p>No running application and no remembered project answers to this name.</p>
   {{if .Known}}
   <h2>Localghost does remember</h2>
-  <ul class="projects">
-  {{range .Known}}
-    <li class="project">
-      <a class="project-name" href="//{{.Hostname}}{{if $.Port}}:{{$.Port}}{{end}}">{{.Hostname}}</a>
-      <span class="project-type">{{.Type}}</span>
-      <span class="project-dir">{{.Directory}}</span>
-      <span class="project-when">started {{.Relative}}</span>
-    </li>
-  {{end}}
-  </ul>
+  {{template "projects" .}}
   {{end}}
 {{end}}
 <footer>
@@ -278,7 +319,19 @@ for (const chip of document.querySelectorAll(".cmd")) {
 </script>
 </body>
 </html>
-`
+{{define "projects"}}
+  <ul class="projects">
+  {{range .Known}}
+    <li class="project">
+      <a class="project-name" href="//{{.Hostname}}{{if $.Port}}:{{$.Port}}{{end}}">{{.Hostname}}</a>
+      <span class="project-type">{{.Type}}</span>
+      <span class="project-dir">{{.Directory}}</span>
+      {{if .Running}}<span class="project-when running">Running {{.Mode}}</span>
+      {{else}}<span class="project-when">Last started {{.Relative}}</span>{{end}}
+    </li>
+  {{end}}
+  </ul>
+{{end}}`
 
 type pageEntry struct {
 	Hostname  string
@@ -286,6 +339,8 @@ type pageEntry struct {
 	Directory string
 	Type      string
 	Relative  string
+	Running   bool
+	Mode      string // "in the foreground" or "detached"
 }
 
 type pageData struct {
@@ -308,7 +363,7 @@ var (
 	ghostURL = template.URL("data:image/png;base64," + ghostBase64)
 )
 
-func pageEntries(entries []entry) []pageEntry {
+func pageEntries(entries []entry, online map[string]bool) []pageEntry {
 	known := make([]pageEntry, 0, len(entries))
 	for _, e := range entries {
 		known = append(known, pageEntry{
@@ -317,9 +372,18 @@ func pageEntries(entries []entry) []pageEntry {
 			Directory: e.Directory,
 			Type:      e.Type,
 			Relative:  relativeTime(e.LastStarted),
+			Running:   online[e.Hostname],
+			Mode:      mode(e.Detached),
 		})
 	}
 	return known
+}
+
+func mode(detached bool) string {
+	if detached {
+		return "detached"
+	}
+	return "in the foreground"
 }
 
 func (f *Fallback) respondWelcome(rw http.ResponseWriter, port string, entries []entry, wantsHTML bool) {
@@ -338,7 +402,7 @@ func (f *Fallback) respondWelcome(rw http.ResponseWriter, port string, entries [
 		Welcome: true,
 		Logo:    logoURL,
 		Icon:    ghostURL,
-		Known:   pageEntries(entries),
+		Known:   pageEntries(entries, f.onlineHosts()),
 	})
 }
 
@@ -347,7 +411,7 @@ func (f *Fallback) respondGhost(rw http.ResponseWriter, e entry, wantsHTML bool)
 	if !wantsHTML {
 		rw.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		rw.WriteHeader(http.StatusServiceUnavailable)
-		fmt.Fprintf(rw, "%s is offline. Last started %s from %s.\nRun: uvx localghost summon %s\n",
+		fmt.Fprintf(rw, "%s is offline. Last started %s from %s.\nRun: uvx localghost restart %s\n",
 			e.Name, relative, e.Directory, e.Name)
 		return
 	}
@@ -380,6 +444,6 @@ func (f *Fallback) respondUnknown(rw http.ResponseWriter, host, port string, ent
 		Host:  host,
 		Port:  port,
 		Icon:  ghostURL,
-		Known: pageEntries(entries),
+		Known: pageEntries(entries, f.onlineHosts()),
 	})
 }

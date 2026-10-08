@@ -32,11 +32,19 @@ func writeEntryDir(t *testing.T, dir, name, hostname, directory string) {
 
 func handler(t *testing.T, registry string) http.Handler {
 	t.Helper()
+	return handlerWithRouters(t, registry, "")
+}
+
+// handlerWithRouters points the online check at routersURL; empty turns it
+// off, so tests never reach a real hub on this machine.
+func handlerWithRouters(t *testing.T, registry, routersURL string) http.Handler {
+	t.Helper()
 	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("fallback must not call the next handler")
 	})
 	config := CreateConfig()
 	config.RegistryPath = registry
+	config.RoutersURL = routersURL
 	h, err := New(context.Background(), next, config, "localghost-fallback")
 	if err != nil {
 		t.Fatal(err)
@@ -63,7 +71,7 @@ func TestKnownHostServes503GhostPage(t *testing.T) {
 		t.Fatalf("status = %d, want 503", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"blog", "/home/dev/blog", "uvx localghost summon blog", "uvx localghost forget blog", "data:image/png;base64,"} {
+	for _, want := range []string{"blog", "/home/dev/blog", "uvx localghost restart blog", "uvx localghost sessions forget blog", "data:image/png;base64,"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("body missing %q:\n%s", want, body)
 		}
@@ -134,12 +142,12 @@ func TestMalformedEntryIsSkipped(t *testing.T) {
 	}
 }
 
-func TestPlainTextGhostSuggestsSummon(t *testing.T) {
+func TestPlainTextGhostSuggestsRestart(t *testing.T) {
 	dir := t.TempDir()
 	writeEntry(t, dir, "blog", "blog.localhost")
 	rec := get(handler(t, dir), "blog.localhost", "application/json")
-	if !strings.Contains(rec.Body.String(), "uvx localghost summon blog") {
-		t.Fatalf("plain-text ghost should suggest summon: %q", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "uvx localghost restart blog") {
+		t.Fatalf("plain-text ghost should suggest restart: %q", rec.Body.String())
 	}
 }
 
@@ -170,7 +178,7 @@ func TestLocalhostServesWelcomePage(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"localghost", "blog.localhost", "data:image/png;base64,", "traefik.localhost"} {
+	for _, want := range []string{"localghost", "blog.localhost", "data:image/png;base64,", "traefik.localhost", "localghost restart NAME"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("welcome body missing %q", want)
 		}
@@ -207,5 +215,62 @@ func TestWelcomeWithoutRegistryStillRenders(t *testing.T) {
 	rec := get(handler(t, filepath.Join(t.TempDir(), "absent")), "localhost", "text/html")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+}
+
+func TestWelcomeShowsOnlineStateAndMode(t *testing.T) {
+	dir := t.TempDir()
+	writeEntry(t, dir, "blog", "blog.localhost")
+	writeEntry(t, dir, "shop", "shop.localhost")
+	detached := `{"hostname": "api.localhost", "name": "api", "directory": "/home/dev/api",
+  "type": "django", "last_started": "2026-01-01T00:00:00Z", "detached": true}`
+	if err := os.WriteFile(filepath.Join(dir, "api.json"), []byte(detached), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var askedHost string
+	api := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		askedHost = req.Host
+		_, _ = rw.Write([]byte(`[
+  {"name": "blog@docker", "rule": "Host(` + "`blog.localhost`" + `)", "status": "enabled"},
+  {"name": "api@docker", "rule": "Host(` + "`api.localhost`" + `) || Host(` + "`api.tail`" + `)", "status": "enabled"},
+  {"name": "shop@docker", "rule": "Host(` + "`shop.localhost`" + `)", "status": "disabled"}
+]`))
+	}))
+	defer api.Close()
+
+	body := get(handlerWithRouters(t, dir, api.URL), "localhost", "text/html").Body.String()
+
+	if askedHost != "traefik.localhost" {
+		t.Fatalf("router API asked with Host %q, want traefik.localhost", askedHost)
+	}
+	for _, want := range []string{
+		`<span class="project-when running">Running in the foreground</span>`,
+		`<span class="project-when running">Running detached</span>`,
+		`<span class="project-when">Last started 26 hours ago</span>`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("welcome body missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Count(body, `class="project-when running"`) != 2 {
+		t.Fatalf("only blog and api are online:\n%s", body)
+	}
+}
+
+func TestWelcomeShowsStartTimesWhenTheRouterAPIFails(t *testing.T) {
+	dir := t.TempDir()
+	writeEntry(t, dir, "blog", "blog.localhost")
+	api := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		rw.WriteHeader(http.StatusNotFound)
+	}))
+	defer api.Close()
+
+	body := get(handlerWithRouters(t, dir, api.URL), "localhost", "text/html").Body.String()
+
+	if strings.Contains(body, "Running ") {
+		t.Fatalf("unknown state must not claim running:\n%s", body)
+	}
+	if !strings.Contains(body, `<span class="project-when">Last started 26 hours ago</span>`) {
+		t.Fatalf("welcome body missing start time:\n%s", body)
 	}
 }

@@ -39,6 +39,12 @@ This is a 4.0 release: `sessions list --json` changes shape.
   `--json` `remembered` entries gain `detached` and `state`.
 - Registry entries gain `detached`, recording how the project last ran;
   session records gain `detached` too. Older files read as before.
+- Ghost pages and the welcome page suggest `localghost restart` and
+  `localghost sessions forget`.
+- The welcome page at `http://localhost`, and the not-found page's project
+  list, show a running project as "Running in the foreground" or "Running
+  detached", using Traefik's own router list, and the rest by when they last
+  started.
 
 ### Deprecated
 
