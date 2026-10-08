@@ -178,7 +178,7 @@ func TestLocalhostServesWelcomePage(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"localghost", "blog.localhost", "data:image/png;base64,", "traefik.localhost", "localghost restart NAME"} {
+	for _, want := range []string{"localghost", "blog.localhost", "data:image/png;base64,", "traefik.localhost"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("welcome body missing %q", want)
 		}
@@ -272,5 +272,22 @@ func TestWelcomeShowsStartTimesWhenTheRouterAPIFails(t *testing.T) {
 	}
 	if !strings.Contains(body, `<span class="project-when">Last started 26 hours ago</span>`) {
 		t.Fatalf("welcome body missing start time:\n%s", body)
+	}
+}
+
+func TestProjectsListRunningByNameThenMostRecentlyStarted(t *testing.T) {
+	entries := []entry{
+		{Name: "alpha", Hostname: "alpha.localhost", LastStarted: "2026-01-03T00:00:00Z"},
+		{Name: "beta", Hostname: "beta.localhost", LastStarted: "2026-01-01T00:00:00Z"},
+		{Name: "gamma", Hostname: "gamma.localhost", LastStarted: "2026-01-05T00:00:00Z"},
+		{Name: "omega", Hostname: "omega.localhost", LastStarted: "2026-01-02T00:00:00Z"},
+	}
+	online := map[string]bool{"omega.localhost": true, "beta.localhost": true}
+	var names []string
+	for _, e := range pageEntries(entries, online) {
+		names = append(names, e.Name)
+	}
+	if got := strings.Join(names, " "); got != "beta omega gamma alpha" {
+		t.Fatalf("order = %q", got)
 	}
 }

@@ -226,6 +226,8 @@ const pageTemplate = `<!doctype html>
              border-bottom: 1px solid var(--line); transition: background-color .15s; }
   .project:last-child { border-bottom: 0; }
   .project:hover { background: var(--tint); }
+  .project.idle:hover { background: none; }
+  .idle .project-name { color: var(--accent); }
   .project-name { font-family: var(--heading); font-weight: 700; font-size: 1.05rem;
                   text-decoration: none; }
   .project-name:hover { text-decoration: underline; }
@@ -274,11 +276,8 @@ const pageTemplate = `<!doctype html>
   <h1>local<span class="accent">ghost</span> <span class="quiet">is running</span></h1>
   <p>Nothing lives at <code>{{.Host}}</code> itself — every project gets its
      own <code>.localhost</code> hostname.</p>
-  <h2>Remembered projects</h2>
   {{if .Known}}
   {{template "projects" .}}
-  <p class="muted">Bring one back with <code>localghost restart NAME</code>, or see
-     which are running with <code>localghost sessions</code>.</p>
   {{else}}
   <p class="empty">Nothing yet. A project appears here once <code>localghost run</code>
      starts it or <code>localghost save</code> remembers it.</p>
@@ -325,7 +324,7 @@ for (const chip of document.querySelectorAll(".cmd")) {
 {{define "projects"}}
   <ul class="projects">
   {{range .Known}}
-    <li class="project">
+    <li class="project{{if not .Running}} idle{{end}}">
       <a class="project-name" href="//{{.Hostname}}{{if $.Port}}:{{$.Port}}{{end}}">{{.Hostname}}</a>
       <span class="project-type">{{.Type}}</span>
       <span class="project-dir">{{.Directory}}</span>
@@ -366,7 +365,17 @@ var (
 	ghostURL = template.URL("data:image/png;base64," + ghostBase64)
 )
 
+// pageEntries lists running projects first, by name (entries arrive sorted by
+// name), then the rest by when they last started, most recent first.
 func pageEntries(entries []entry, online map[string]bool) []pageEntry {
+	entries = append([]entry(nil), entries...)
+	sort.SliceStable(entries, func(i, j int) bool {
+		a, b := online[entries[i].Hostname], online[entries[j].Hostname]
+		if a || b {
+			return a && !b
+		}
+		return started(entries[i]).After(started(entries[j]))
+	})
 	known := make([]pageEntry, 0, len(entries))
 	for _, e := range entries {
 		known = append(known, pageEntry{
@@ -380,6 +389,11 @@ func pageEntries(entries []entry, online map[string]bool) []pageEntry {
 		})
 	}
 	return known
+}
+
+func started(e entry) time.Time {
+	when, _ := time.Parse(time.RFC3339, e.LastStarted)
+	return when
 }
 
 func mode(detached bool) string {
