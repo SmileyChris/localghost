@@ -244,7 +244,10 @@ const pageTemplate = `<!doctype html>
          border-radius: .4rem; padding: .4rem .8rem; cursor: pointer; color: var(--link-deep);
          font-size: .95rem; transition: background-color .15s; }
   .cmd:hover { background: var(--tint-strong); }
-  .cmd.copied::after { content: " copied"; color: var(--link); }
+  .cmd.copied::after { content: "copied"; margin-left: .6em; padding: .1em .45em;
+                       border-radius: .25rem; background: var(--link); color: #fff;
+                       font: 700 .65rem/1.4 system-ui, sans-serif; letter-spacing: .05em;
+                       text-transform: uppercase; vertical-align: .15em; }
   .cmd-quiet { border-color: #d3dce2; color: var(--quiet); background: #f7f9fa; }
   .cmd-quiet:hover { background: #eef2f4; }
 
