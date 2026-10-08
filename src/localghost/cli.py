@@ -83,6 +83,7 @@ from .sessions import create as create_session
 from .sessions import discard as discard_session
 from .sessions import find as find_session
 from .sessions import live as live_session
+from .sessions import reap as reap_sessions
 from .sessions import stop as stop_session
 from .tailscale import (
     API as TailscaleAPI,
@@ -243,7 +244,7 @@ def _proxy_status(as_json: bool = False) -> None:
                         for part in (
                             str(project["state"]),
                             _project_mode(project),
-                            str(project["directory"]),
+                            _project_directory(project),
                         )
                         if part
                     ),
@@ -335,6 +336,7 @@ def hub_up(rebuild: bool) -> None:
         https_enabled=https_enabled,
         rebuild=rebuild,
     )
+    reap_sessions()
     scheme = "https" if https_enabled else "http"
     port = _proxy_https_port() if https_enabled else _proxy_http_port()
     default_port = 443 if https_enabled else 80
@@ -550,6 +552,7 @@ def _projects() -> list[dict[str, object]]:
     A running session with no registry entry still appears, since registry
     writes are best-effort.
     """
+    reap_sessions()
     records = sessions()
     projects = [entry.as_dict() for entry in registry.entries()]
     remembered = {project["name"] for project in projects}
@@ -571,8 +574,15 @@ def _projects() -> list[dict[str, object]]:
         running = next((item for item in named if session_alive(item)), None)
         latest = running or (find_session(str(project["name"])) if named else None)
         project["state"] = "running" if running else "stopped"
+        project["directory_exists"] = Path(str(project["directory"])).is_dir()
         project["session"] = latest.as_dict() if latest else None
     return projects
+
+
+def _project_directory(project: dict[str, object]) -> str:
+    """The directory, flagged when it has gone; forgetting stays deliberate."""
+    missing = "" if project["directory_exists"] else " (missing)"
+    return f"{project['directory']}{missing}"
 
 
 def _project_mode(project: dict[str, object]) -> str:
@@ -595,7 +605,7 @@ def _sessions_list(as_json: bool) -> None:
             str(project["hostname"]),
             str(project["state"]),
             _project_mode(project),
-            str(project["directory"]),
+            _project_directory(project),
         )
         for project in projects
     ]
@@ -1643,6 +1653,7 @@ def run(
             project, resolved.root, refuse=resolved.explicit_run_settings
         ):
             return
+        reap_sessions()
         clean_sessions(project)
         _record_registry(resolved, detached=detach)
         _run_compose(
@@ -1675,6 +1686,7 @@ def run(
     if django_warnings:
         warning("Django settings", django_warnings)
     _print_run_plan(plan, dry_run=False, detach=detach)
+    reap_sessions()
     clean_sessions(plan.name)
     _record_registry(resolved, detached=detach)
     if detach:
