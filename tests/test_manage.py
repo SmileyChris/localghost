@@ -555,6 +555,24 @@ def test_sessions_list_joins_projects_with_their_sessions(tmp_path) -> None:
     assert by_name["api"]["last_started"] is None
 
 
+def test_sessions_list_flags_a_project_whose_directory_is_gone(tmp_path) -> None:
+    kept = tmp_path / "kept"
+    kept.mkdir()
+    registry.record("demo", kept, "django")
+    registry.record("gone", tmp_path / "gone", "vite")
+
+    table = CliRunner().invoke(cli, ["sessions"]).output
+    payload = json.loads(CliRunner().invoke(cli, ["sessions", "list", "--json"]).output)
+
+    assert f"{tmp_path / 'gone'} (missing)" in table
+    assert f"{kept} (missing)" not in table
+    assert {item["name"]: item["directory_exists"] for item in payload} == {
+        "demo": True,
+        "gone": False,
+    }
+    assert registry.entries(), "a missing directory is flagged, never forgotten"
+
+
 def test_sessions_forget_removes_the_entry_and_stopped_records(tmp_path) -> None:
     registry.record("demo", tmp_path, "django")
     _session(tmp_path, pid=None)

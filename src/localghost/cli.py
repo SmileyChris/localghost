@@ -244,7 +244,7 @@ def _proxy_status(as_json: bool = False) -> None:
                         for part in (
                             str(project["state"]),
                             _project_mode(project),
-                            str(project["directory"]),
+                            _project_directory(project),
                         )
                         if part
                     ),
@@ -574,8 +574,15 @@ def _projects() -> list[dict[str, object]]:
         running = next((item for item in named if session_alive(item)), None)
         latest = running or (find_session(str(project["name"])) if named else None)
         project["state"] = "running" if running else "stopped"
+        project["directory_exists"] = Path(str(project["directory"])).is_dir()
         project["session"] = latest.as_dict() if latest else None
     return projects
+
+
+def _project_directory(project: dict[str, object]) -> str:
+    """The directory, flagged when it has gone; forgetting stays deliberate."""
+    missing = "" if project["directory_exists"] else " (missing)"
+    return f"{project['directory']}{missing}"
 
 
 def _project_mode(project: dict[str, object]) -> str:
@@ -598,7 +605,7 @@ def _sessions_list(as_json: bool) -> None:
             str(project["hostname"]),
             str(project["state"]),
             _project_mode(project),
-            str(project["directory"]),
+            _project_directory(project),
         )
         for project in projects
     ]

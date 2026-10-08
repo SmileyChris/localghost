@@ -5,6 +5,13 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- `sessions` and `status` mark a remembered project whose directory no
+  longer exists with `(missing)`, and `sessions list --json` gains
+  `directory_exists`. Such projects are never forgotten automatically, since
+  a directory can be absent only for now; `sessions forget NAME` drops one.
+
 ### Fixed
 
 - A detached application that exited, or every one after a reboot, left its
