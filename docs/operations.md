@@ -100,7 +100,9 @@ replace application logs when a backend itself is failing.
 Nothing is ever hosted at bare `localhost`, so
 [http://localhost](http://localhost) serves the hub's welcome page: the
 logo, the list of remembered projects, and links to the Traefik dashboard
-and this documentation. The page is styled to match these docs.
+and this documentation. A project something is serving right now, as Traefik's
+own router list reports it, reads "Running in the foreground" or "Running
+detached"; the rest show when they last started. The page is styled to match these docs.
 
 The hub remembers every project it has routed. Visiting a remembered
 hostname whose application is stopped returns **503 Service Unavailable**
@@ -112,23 +114,44 @@ Bring a remembered project back from anywhere — no need to find its
 directory first:
 
 ```sh
-uvx localghost summon <name>
+uvx localghost restart <name>
 ```
 
-Bare `uvx localghost summon` on a terminal opens an interactive picker:
-arrow keys (or `j`/`k`) move, Enter summons the selected project, Delete
+`restart` stops the project first if it is running, then starts it the way it
+last ran: in the foreground or detached. `--foreground` or `--detach` picks
+the other way, so `restart <name> --foreground` brings a background app into
+this terminal. A project running in the foreground of another terminal is
+stopped and taken over here after you confirm; without a terminal to confirm
+on, `restart` refuses and prints the `sessions stop` command instead. `<name>`
+can also be a session ID.
+
+Bare `uvx localghost restart` restarts the remembered project containing the
+current directory. Outside one, on a terminal, it opens an interactive picker:
+arrow keys (or `j`/`k`) move, Enter restarts the selected project, Delete
 (or Backspace) forgets it, `u` undoes the last forget, and `q` leaves.
-When output is piped it prints a plain listing instead. The commands on a ghost page are click-to-copy.
+When output is piped it prints a plain listing instead.
+
+`uvx localghost sessions` lists every remembered project with whether it is
+running, and how:
+
+```text
+synthesis.localhost  running  detached    ~/dev/synthesis
+gulch.localhost      running  foreground  ~/dev/lab/gulch
+oasis.localhost      stopped              ~/dev/oasis
+``` The commands on a ghost page are click-to-copy.
 
 Entries are JSON files under the state directory's `registry/` folder,
 written on every `run` and `save` and mounted read-only into the hub.
 Remove one with:
 
 ```sh
-uvx localghost forget <name>
+uvx localghost sessions forget <name>
 ```
 
-or clear them all with `uvx localghost forget --all`. Status codes are
+or clear every project that isn't running with
+`uvx localghost sessions forget --all`. Forgetting drops the entry and the
+project's stopped session records; it never touches the project's files, and
+it refuses a project that is still running. Status codes are
 unchanged from a hub without ghost pages, so scripts and health checks
 keep working; only response bodies differ.
 
@@ -144,8 +167,8 @@ once to add the mount; after that the container is stable across runs.
 
 ## Shell completion
 
-Enable Click's standard completion script for your shell so `summon` and
-`forget` can complete remembered project names. For zsh:
+Enable Click's standard completion script for your shell so `restart` and the
+`sessions` commands can complete remembered project names. For zsh:
 
 ```sh
 eval "$(_LOCALGHOST_COMPLETE=zsh_source localghost)"

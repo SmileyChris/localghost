@@ -199,6 +199,8 @@ def test_status_json_is_machine_readable(monkeypatch, tmp_path) -> None:
     payload = json.loads(result.output)
     assert payload["hub"] == "stopped"
     assert payload["remembered"][0]["hostname"] == "blog.localhost"
+    sessions_payload = CliRunner().invoke(cli, ["sessions", "list", "--json"]).output
+    assert payload["remembered"] == json.loads(sessions_payload)
 
 
 def test_status_flag_is_gone() -> None:

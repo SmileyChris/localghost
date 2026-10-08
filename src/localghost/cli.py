@@ -76,10 +76,13 @@ from .runner import (
     start_bridge,
     stop_bridge,
 )
-from .sessions import Session, find_matching, sessions
+from .sessions import Session, sessions
 from .sessions import alive as session_alive
 from .sessions import clean as clean_sessions
 from .sessions import create as create_session
+from .sessions import discard as discard_session
+from .sessions import find as find_session
+from .sessions import live as live_session
 from .sessions import stop as stop_session
 from .tailscale import (
     API as TailscaleAPI,
@@ -194,13 +197,14 @@ def status(as_json: bool) -> None:
 def _proxy_status(as_json: bool = False) -> None:
     """Report only observable hub state; never reconcile the hub."""
     running = proxy_is_running()
-    remembered = registry.entries()
+    remembered = _projects()
     if as_json:
         payload: dict[str, object] = {
             "hub": "running" if running else "stopped",
             "https": "enabled" if _https_configured() else "http-only",
             "routes": [],
-            "remembered": [entry.as_dict() for entry in remembered],
+            # The same project objects `sessions list --json` prints.
+            "remembered": remembered,
         }
         if running:
             try:
@@ -231,7 +235,21 @@ def _proxy_status(as_json: bool = False) -> None:
             idle = not listed
     if remembered:
         details(
-            [(entry.hostname, entry.directory) for entry in remembered],
+            [
+                (
+                    str(project["hostname"]),
+                    " · ".join(
+                        part
+                        for part in (
+                            str(project["state"]),
+                            _project_mode(project),
+                            str(project["directory"]),
+                        )
+                        if part
+                    ),
+                )
+                for project in remembered
+            ],
             title="Remembered projects",
         )
     if idle:
@@ -344,40 +362,93 @@ def _complete_project_name(
     return [entry.name for entry in entries if entry.name.startswith(incomplete)]
 
 
-@cli.command()
-@click.argument("name", required=False, shell_complete=_complete_project_name)
-@click.option("--all", "forget_everything", is_flag=True, help="Forget every project.")
-def forget(name: str | None, forget_everything: bool) -> None:
-    """Drop a project's ghost page entry."""
-    if forget_everything:
-        if name is not None:
-            raise click.UsageError("NAME and --all cannot both be given")
-        removed = registry.forget_all()
-        success(f"Forgot {removed} project(s).")
-        return
-    if name is None:
-        names = ", ".join(sorted(entry.name for entry in registry.entries()))
-        if not names:
-            raise click.UsageError("nothing is remembered; provide NAME or --all")
-        raise click.UsageError(f"provide NAME or --all; remembered: {names}")
-    if not registry.forget(name):
-        raise click.ClickException(f"no ghost page entry for '{name}'")
-    success(f"Forgot {name}.")
-
-
-def _summon_interactive() -> bool:
+def _restart_interactive() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
-def _summon_entry(
-    ctx: click.Context, entry: registry.RegistryEntry, **overrides: object
+def _entry_for_directory(
+    entries: list[registry.RegistryEntry], cwd: Path
+) -> registry.RegistryEntry | None:
+    """The remembered project containing `cwd`, the innermost if nested."""
+    cwd = cwd.resolve()
+    containing = [
+        entry
+        for entry in entries
+        if cwd.is_relative_to(Path(entry.directory).resolve())
+    ]
+    return max(
+        containing, key=lambda entry: len(Path(entry.directory).parts), default=None
+    )
+
+
+def _restart_target(
+    target: str, entries: list[registry.RegistryEntry]
+) -> registry.RegistryEntry:
+    """Resolve a session ID, then a project name, to what `run` needs."""
+    session = find_session(target)
+    name = session.name if session else target
+    entry = next((entry for entry in entries if entry.name == name), None)
+    if entry is not None:
+        return entry
+    if session is not None:
+        # Registry writes are best-effort, so a session can outlive or
+        # predate its entry; its record holds enough to start it again.
+        return registry.RegistryEntry(
+            hostname=f"{session.name}.localhost",
+            name=session.name,
+            directory=session.cwd,
+            type=session.mode,
+            last_started="",
+            detached=session.detached,
+        )
+    known = ", ".join(entry.name for entry in entries) or "nothing"
+    raise click.ClickException(
+        f"no remembered project '{target}' (remembered: {known})"
+    )
+
+
+def _choose_entry(
+    entries: list[registry.RegistryEntry],
+) -> registry.RegistryEntry | None:
+    if not entries:
+        click.echo("Nothing remembered yet; run a project to give it a ghost.")
+        return None
+    if _restart_interactive():
+        return picker.pick(entries, forget=registry.forget, restore=registry.restore)
+    for entry in entries:
+        click.echo(f"{entry.hostname}  {entry.type}  {entry.directory}")
+    return None
+
+
+def _restart_entry(
+    ctx: click.Context,
+    entry: registry.RegistryEntry,
+    *,
+    foreground: bool,
+    **overrides: object,
 ) -> None:
     directory = Path(entry.directory)
     if not directory.is_dir():
         raise click.ClickException(
             f"remembered directory '{directory}' no longer exists; "
-            f"forget it with: localghost forget {entry.name}"
+            f"forget it with: localghost sessions forget {entry.name}"
         )
+    running = None if overrides["dry_run"] else live_session(entry.name)
+    if running is not None:
+        if not running.detached:
+            message = f"{entry.name} is running in the foreground in another terminal"
+            if not _restart_interactive():
+                raise click.ClickException(
+                    f"{message}; stop it with: localghost sessions stop {entry.name}"
+                )
+            click.confirm(f"{message}. Stop it and run it here?", abort=True)
+        stop_session(running)
+        info(f"Stopped {entry.name}.")
+    if not foreground and not overrides["detach"]:
+        overrides["detach"] = entry.detached
+    # The recorded name, not whatever the directory would derive: a project
+    # first run with --name must come back under that name.
+    overrides["name"] = overrides["name"] or entry.name
     ctx.invoke(run, working_directory=directory, **overrides)
 
 
@@ -409,13 +480,19 @@ def _summon_entry(
     "detach",
     "--detach",
     is_flag=True,
-    help="Run in the background and manage it later.",
+    help="Run in the background, whichever way it last ran.",
+)
+@click.option(
+    "foreground",
+    "--foreground",
+    is_flag=True,
+    help="Run in this terminal, whichever way it last ran.",
 )
 @click.option(
     "dry_run",
     "--dry-run",
     is_flag=True,
-    help="Print the plan without starting anything.",
+    help="Print the plan without stopping or starting anything.",
 )
 @click.option(
     "no_status_bar",
@@ -424,39 +501,108 @@ def _summon_entry(
     help="Do not pin the public URL to the bottom of the terminal.",
 )
 @click.pass_context
-def summon(ctx: click.Context, name: str | None, **overrides: object) -> None:
-    """Run a remembered project by name; with no name, pick from the list."""
+def restart(
+    ctx: click.Context, name: str | None, foreground: bool, **overrides: object
+) -> None:
+    """Restart a project, or start a stopped one.
+
+    NAME is a project name or session ID. Without it, restart the project in
+    the current directory, or pick from the remembered projects. A project
+    comes back the way it last ran unless --foreground or --detach says
+    otherwise.
+    """
+    if foreground and overrides["detach"]:
+        raise click.UsageError("--foreground and --detach cannot both be given")
     overrides["name"] = overrides.pop("app_name")
     entries = registry.entries()
-    if name is None:
-        if not entries:
-            click.echo("Nothing remembered yet; run a project to give it a ghost.")
+    if name is not None:
+        entry = _restart_target(name, entries)
+    else:
+        entry = _entry_for_directory(entries, Path.cwd()) or _choose_entry(entries)
+        if entry is None:
             return
-        if _summon_interactive():
-            chosen = picker.pick(
-                entries, forget=registry.forget, restore=registry.restore
-            )
-            if chosen is not None:
-                _summon_entry(ctx, chosen, **overrides)
-            return
-        for entry in entries:
-            click.echo(f"{entry.hostname}  {entry.type}  {entry.directory}")
-        return
-    match = next((entry for entry in entries if entry.name == name), None)
-    if match is None:
-        known = ", ".join(entry.name for entry in entries) or "nothing"
-        raise click.ClickException(
-            f"no remembered project '{name}' (remembered: {known})"
-        )
-    _summon_entry(ctx, match, **overrides)
+    _restart_entry(ctx, entry, foreground=foreground, **overrides)
+
+
+cli.add_command(
+    click.Command(
+        "summon",
+        callback=restart.callback,
+        params=restart.params,
+        help=restart.help,
+        hidden=True,
+        deprecated="Use 'localghost restart' instead.",
+    )
+)
 
 
 @cli.group("sessions", invoke_without_command=True)
 @click.pass_context
 def sessions_group(ctx: click.Context) -> None:
-    """Inspect and control detached application sessions."""
+    """List remembered projects and control their sessions."""
     if ctx.invoked_subcommand is None:
         _sessions_list(False)
+
+
+def _projects() -> list[dict[str, object]]:
+    """Remembered projects joined by name with their session records.
+
+    A running session with no registry entry still appears, since registry
+    writes are best-effort.
+    """
+    records = sessions()
+    projects = [entry.as_dict() for entry in registry.entries()]
+    remembered = {project["name"] for project in projects}
+    for session in records:
+        if session.name not in remembered and session_alive(session):
+            remembered.add(session.name)
+            projects.append(
+                {
+                    "hostname": f"{session.name}.localhost",
+                    "name": session.name,
+                    "directory": session.cwd,
+                    "type": session.mode,
+                    "last_started": None,
+                    "detached": session.detached,
+                }
+            )
+    for project in projects:
+        named = [item for item in records if item.name == project["name"]]
+        running = next((item for item in named if session_alive(item)), None)
+        latest = running or (find_session(str(project["name"])) if named else None)
+        project["state"] = "running" if running else "stopped"
+        project["session"] = latest.as_dict() if latest else None
+    return projects
+
+
+def _project_mode(project: dict[str, object]) -> str:
+    session = project["session"]
+    if project["state"] != "running" or not isinstance(session, dict):
+        return ""
+    return "detached" if session["detached"] else "foreground"
+
+
+def _sessions_list(as_json: bool) -> None:
+    projects = _projects()
+    if as_json:
+        click.echo(json.dumps(projects, indent=2))
+        return
+    if not projects:
+        click.echo("Nothing remembered yet; run a project to give it a ghost.")
+        return
+    rows = [
+        (
+            str(project["hostname"]),
+            str(project["state"]),
+            _project_mode(project),
+            str(project["directory"]),
+        )
+        for project in projects
+    ]
+    widths = [max(len(row[column]) for row in rows) for column in range(3)]
+    for row in rows:
+        cells = [cell.ljust(width) for cell, width in zip(row, widths, strict=False)]
+        click.echo("  ".join([*cells, row[3]]))
 
 
 @sessions_group.command("list")
@@ -464,35 +610,22 @@ def sessions_group(ctx: click.Context) -> None:
     "--json",
     "as_json",
     is_flag=True,
-    help="Print the session records as JSON instead of a table.",
+    help="Print the projects and their session records as JSON.",
 )
 def sessions_list(as_json: bool) -> None:
-    """List detached sessions and whether each one is still running."""
+    """List remembered projects and whether each one is running."""
     _sessions_list(as_json)
 
 
-def _sessions_list(as_json: bool) -> None:
-    records = []
-    for session in sessions():
-        status = "running" if session_alive(session) else "stopped"
-        item = session.as_dict()
-        item["status"] = status
-        records.append(item)
-    if as_json:
-        click.echo(json.dumps(records, indent=2))
-        return
-    if not records:
-        click.echo("No managed sessions.")
-        return
-    for item in records:
-        click.echo(
-            f"{item['id']}  {item['mode']}  {item['name']}.localhost  "
-            f"{item['status']}  {item['log']}"
-        )
+def _target_session(target: str) -> Session:
+    session = find_session(target)
+    if session is None:
+        raise click.ClickException(f"no session for '{target}'")
+    return session
 
 
 @sessions_group.command("logs")
-@click.argument("session_id")
+@click.argument("target", shell_complete=_complete_project_name)
 @click.option(
     "follow",
     "--follow",
@@ -500,11 +633,9 @@ def _sessions_list(as_json: bool) -> None:
     is_flag=True,
     help="Keep printing new output until interrupted.",
 )
-def sessions_logs(session_id: str, follow: bool) -> None:
-    """Print the captured log of a detached session."""
-    session = next((item for item in sessions() if item.id == session_id), None)
-    if session is None:
-        raise click.ClickException(f"unknown session '{session_id}'")
+def sessions_logs(target: str, follow: bool) -> None:
+    """Print the captured log of a session, by project name or session ID."""
+    session = _target_session(target)
     if session.mode == "compose" and session.project:
         command = [
             "docker",
@@ -522,9 +653,15 @@ def sessions_logs(session_id: str, follow: bool) -> None:
         if result.returncode:
             raise click.exceptions.Exit(result.returncode)
         return
+    if not session.detached:
+        click.echo(
+            f"{session.name} is running in the foreground in another terminal; "
+            "its output is there, not in a log."
+        )
+        return
     log = Path(session.log)
     if not log.exists():
-        click.echo(f"Session {session.id} has no log yet.")
+        click.echo(f"{session.name} has no log yet.")
         return
     with log.open("r", encoding="utf-8", errors="replace") as handle:
         click.echo(handle.read(), nl=False)
@@ -541,23 +678,17 @@ def sessions_logs(session_id: str, follow: bool) -> None:
 
 
 @sessions_group.command("stop")
-@click.argument("session_id", required=False)
-@click.option(
-    "--all", "stop_all", is_flag=True, help="Stop every detached session."
-)
-def sessions_stop(session_id: str | None, stop_all: bool) -> None:
-    """Stop one detached session, or every session with --all.
+@click.argument("target", required=False, shell_complete=_complete_project_name)
+@click.option("--all", "stop_all", is_flag=True, help="Stop every session.")
+def sessions_stop(target: str | None, stop_all: bool) -> None:
+    """Stop one session, by project name or session ID, or every one with --all.
 
     A host session is asked to exit with SIGTERM and force-quit with SIGKILL
-    after a two second grace period; its bridge is removed either way.
+    after a grace period; its bridge is removed either way.
     """
-    if bool(session_id) == stop_all:
-        raise click.UsageError("provide a session ID or --all")
-    targets = (
-        sessions()
-        if stop_all
-        else [item for item in sessions() if item.id == session_id]
-    )
+    if bool(target) == stop_all:
+        raise click.UsageError("provide a project name, a session ID, or --all")
+    targets = sessions() if stop_all else [_target_session(target)]
     if not targets:
         raise click.ClickException("no matching managed session")
     stopped = 0
@@ -574,6 +705,60 @@ def sessions_stop(session_id: str | None, stop_all: bool) -> None:
         success(f"Stopped {stopped} session(s).")
     if failures:
         raise click.ClickException("; ".join(failures))
+
+
+@sessions_group.command("forget")
+@click.argument("name", required=False, shell_complete=_complete_project_name)
+@click.option(
+    "--all",
+    "forget_everything",
+    is_flag=True,
+    help="Forget every project that isn't running.",
+)
+def sessions_forget(name: str | None, forget_everything: bool) -> None:
+    """Drop a remembered project, its ghost page, and its stopped sessions.
+
+    The project's own files are never touched.
+    """
+    if forget_everything:
+        if name is not None:
+            raise click.UsageError("NAME and --all cannot both be given")
+        running = sorted({item.name for item in sessions() if session_alive(item)})
+        removed = sum(
+            registry.forget(entry.name)
+            for entry in registry.entries()
+            if entry.name not in running
+        )
+        clean_sessions()
+        success(f"Forgot {removed} project(s).")
+        if running:
+            info(f"Kept running project(s): {', '.join(running)}")
+        return
+    if name is None:
+        names = ", ".join(sorted(entry.name for entry in registry.entries()))
+        if not names:
+            raise click.UsageError("nothing is remembered; provide NAME or --all")
+        raise click.UsageError(f"provide NAME or --all; remembered: {names}")
+    if live_session(name) is not None:
+        raise click.ClickException(
+            f"{name} is running; stop it first with: localghost sessions stop {name}"
+        )
+    cleaned = clean_sessions(name)
+    if not registry.forget(name) and not cleaned:
+        raise click.ClickException(f"no remembered project '{name}'")
+    success(f"Forgot {name}.")
+
+
+cli.add_command(
+    click.Command(
+        "forget",
+        callback=sessions_forget.callback,
+        params=sessions_forget.params,
+        help=sessions_forget.help,
+        hidden=True,
+        deprecated="Use 'localghost sessions forget' instead.",
+    )
+)
 
 
 @sessions_group.command("clean")
@@ -1452,13 +1637,14 @@ def run(
             compose_dry_run(project=project, url=_proxy_origin(project))
             return
         # Same guard as the host branch below: a second run of a stack that
-        # is already detached would add a second session record to the same
+        # is already running would add a second session record to the same
         # containers, and stopping either would take the whole stack down.
-        matching = find_matching(name=project, cwd=resolved.root)
-        if matching:
-            _report_live_session(matching, refuse=resolved.explicit_run_settings)
+        if _already_serving(
+            project, resolved.root, refuse=resolved.explicit_run_settings
+        ):
             return
-        _record_registry(resolved)
+        clean_sessions(project)
+        _record_registry(resolved, detached=detach)
         _run_compose(
             resolved.root,
             resolved.name,
@@ -1468,9 +1654,11 @@ def run(
         return
     plan = resolved.plan
     assert plan is not None
-    matching = find_matching(name=plan.name, cwd=plan.project_root or resolved.cwd)
-    if matching:
-        _report_live_session(matching, refuse=resolved.explicit_run_settings)
+    if _already_serving(
+        plan.name,
+        plan.project_root or resolved.cwd,
+        refuse=resolved.explicit_run_settings,
+    ):
         return
     if dry_run:
         _print_run_plan(plan, dry_run=True)
@@ -1487,33 +1675,70 @@ def run(
     if django_warnings:
         warning("Django settings", django_warnings)
     _print_run_plan(plan, dry_run=False, detach=detach)
-    _record_registry(resolved)
+    clean_sessions(plan.name)
+    _record_registry(resolved, detached=detach)
     if detach:
         _detach_host(plan, resolved.cwd)
         return
-    status = execute(
-        plan,
-        lambda: _run_proxy("up", https_enabled=_https_configured()),
-        cwd=plan.working_directory or resolved.cwd,
-        public_origin=_proxy_origin(plan.name),
-        secondary_origin=_tailnet_origin(plan.name),
-        status_bar=not no_status_bar,
+    # The record lets other terminals see this run, and stop or take it over.
+    session = create_session(
+        mode="host",
+        name=plan.name,
+        port=plan.port,
+        cwd=plan.project_root or resolved.cwd,
+        command=plan.command,
+        log=None,
+        pid=os.getpid(),
+        bridge_project=plan.project,
+        bridge_yaml=plan.bridge_yaml,
+        detached=False,
     )
+    try:
+        status = execute(
+            plan,
+            lambda: _run_proxy("up", https_enabled=_https_configured()),
+            cwd=plan.working_directory or resolved.cwd,
+            public_origin=_proxy_origin(plan.name),
+            secondary_origin=_tailnet_origin(plan.name),
+            status_bar=not no_status_bar,
+        )
+    finally:
+        discard_session(session)
     _report_application_exit(plan.name, status)
     if status:
         raise click.exceptions.Exit(status)
 
 
+def _already_serving(name: str, directory: Path, *, refuse: bool) -> bool:
+    """Report a live session already serving `name`; True if one is.
+
+    The same name from another directory (a second worktree, say) would
+    fight the first for NAME.localhost, so that is always refused.
+    """
+    session = live_session(name)
+    if session is None:
+        return False
+    if Path(session.cwd).resolve() != directory.resolve():
+        raise click.ClickException(
+            f"{name}.localhost is already served from {session.cwd}; run this "
+            "copy under another name with --name, or stop that one with: "
+            f"localghost sessions stop {name}"
+        )
+    _report_live_session(session, refuse=refuse)
+    return True
+
+
 def _report_live_session(session: Session, *, refuse: bool) -> None:
-    """Point at the detached session already serving this project.
+    """Point at the session already serving this project.
 
     Explicit run settings mean the user wanted something other than what
     is running, so that is an error; a plain `run` is just informed.
     """
+    name = session.name
     message = (
-        f"Session {session.id} is already running; view logs with: "
-        f"localghost sessions logs {session.id}, or stop it with: "
-        f"localghost sessions stop {session.id}"
+        f"{name} is already running; restart it with: localghost restart "
+        f"{name}, view logs with: localghost sessions logs {name}, or stop "
+        f"it with: localghost sessions stop {name}"
     )
     if refuse:
         raise click.ClickException(message)
@@ -1689,6 +1914,22 @@ def _run_compose(
     command = ["docker", "compose", "--project-name", project, "up"]
     if detach:
         command.append("--detach")
+    # A foreground stack is recorded for as long as `up` holds the terminal.
+    foreground = (
+        None
+        if detach
+        else create_session(
+            mode="compose",
+            name=project,
+            port=0,
+            cwd=cwd,
+            command=(),
+            log=None,
+            pid=os.getpid(),
+            project=project,
+            detached=False,
+        )
+    )
     with statusbar.pinned(
         public_origin,
         secondary_url=_tailnet_origin(project),
@@ -1707,7 +1948,11 @@ def _run_compose(
         info(f"Public URL: {public_origin}")
         _report_tailnet_origin(project)
         bar.status("starting")
-        result = subprocess.run(command, cwd=cwd, check=False)
+        try:
+            result = subprocess.run(command, cwd=cwd, check=False)
+        finally:
+            if foreground is not None:
+                discard_session(foreground)
     if result.returncode:
         _report_application_exit(project, result.returncode)
         raise click.exceptions.Exit(result.returncode)
@@ -2162,16 +2407,24 @@ def _state_directory() -> Path:
     return state_directory()
 
 
-def _record_registry(resolved: ResolvedApplication) -> None:
-    """Remember this project so the hub can serve its ghost page later."""
+def _record_registry(
+    resolved: ResolvedApplication, *, detached: bool | None = None
+) -> None:
+    """Remember this project so the hub can serve its ghost page later.
+
+    `detached` is how it is being started; a save leaves it as `None`.
+    """
     if resolved.selected_type == "compose":
         registry.record(
             resolved.name or _local_project_name(resolved.root),
             resolved.root,
             "compose",
+            detached=detached,
         )
     elif resolved.plan is not None:
-        registry.record(resolved.plan.name, resolved.cwd, resolved.plan.type)
+        registry.record(
+            resolved.plan.name, resolved.cwd, resolved.plan.type, detached=detached
+        )
 
 
 def _public_root_path() -> Path:

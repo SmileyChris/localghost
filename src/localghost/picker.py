@@ -1,7 +1,7 @@
 """Interactive terminal picker for remembered projects.
 
-`summon` with no name uses this when attached to a terminal: navigate the
-registry with the arrow keys, Enter summons, Delete forgets, q leaves.
+`restart` with no name uses this outside a project on a terminal: navigate the
+registry with the arrow keys, Enter restarts, Delete forgets, q leaves.
 The model and key handling are pure so they can be tested without a TTY;
 only `pick` touches the terminal, mirroring how the status bar keeps its
 raw-terminal handling at the edge.
@@ -141,7 +141,8 @@ def _tilde(directory: str) -> str:
 
 def render_lines(model: PickerModel, width: int = 80) -> list[str]:
     lines = [
-        f"{_DIM}Remembered projects — Enter summon · Del forget · q or Esc quit{_RESET}"
+        f"{_DIM}Remembered projects — Enter restart · Del forget · q or Esc quit"
+        f"{_RESET}"
     ]
     host_width = max((len(e.hostname) for e in model.entries), default=0)
     type_width = max((len(e.type) for e in model.entries), default=0)
@@ -173,7 +174,7 @@ def pick(
     forget: Callable[[str], bool],
     restore: Callable[[RegistryEntry], None],
 ) -> RegistryEntry | None:
-    """Run the picker; return the entry to summon, or None."""
+    """Run the picker; return the entry to restart, or None."""
     model = PickerModel(list(entries))
     out = sys.stdout
     fd = sys.stdin.fileno()

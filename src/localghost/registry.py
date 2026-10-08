@@ -2,7 +2,7 @@
 
 Ghost pages read this: the hub's fallback middleware serves a "project is
 offline" page for any hostname remembered here. Entries persist until
-`localghost forget` removes them; stale entries only make the page report
+`localghost sessions forget` removes them; stale entries only make the page report
 an old date.
 """
 
@@ -24,8 +24,10 @@ class RegistryEntry:
     directory: str
     type: str
     last_started: str
+    # How the project last ran, so `restart` can bring it back the same way.
+    detached: bool = False
 
-    def as_dict(self) -> dict[str, str]:
+    def as_dict(self) -> dict[str, object]:
         return self.__dict__.copy()
 
 
@@ -33,12 +35,18 @@ def registry_dir() -> Path:
     return state_directory() / "registry"
 
 
-def record(name: str, directory: Path, run_type: str) -> None:
+def record(
+    name: str, directory: Path, run_type: str, *, detached: bool | None = None
+) -> None:
     """Remember that `name.localhost` routes to a project in `directory`.
 
-    Best-effort: a run must never fail because its ghost could not be
-    written.
+    `detached` is how it was started; `None` (a save, not a run) keeps what
+    was last recorded. Best-effort: a run must never fail because its ghost
+    could not be written.
     """
+    if detached is None:
+        previous = next((item for item in entries() if item.name == name), None)
+        detached = previous.detached if previous else False
     entry = RegistryEntry(
         hostname=f"{name}.localhost",
         name=name,
@@ -47,6 +55,7 @@ def record(name: str, directory: Path, run_type: str) -> None:
         last_started=datetime.now(UTC)
         .astimezone()
         .isoformat(timespec="seconds"),
+        detached=detached,
     )
     try:
         _write(entry)
@@ -88,6 +97,7 @@ def entries() -> list[RegistryEntry]:
                     directory=payload["directory"],
                     type=payload["type"],
                     last_started=payload["last_started"],
+                    detached=payload.get("detached") is True,
                 )
             )
         except (OSError, ValueError, KeyError, TypeError):

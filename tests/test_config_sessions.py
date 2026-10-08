@@ -43,7 +43,8 @@ def test_config_update_requires_extend_noninteractive_and_backups(tmp_path: Path
     ("content", "message"),
     [
         ('[run]\nmode = "other"\n', "mode"),
-        ('[run]\nframework = "other"\n', "must be"),
+        ('[run]\nframework = "django"\n', "rename it to \\[run\\].type"),
+        ('[run]\ntype = "other"\n', "must be"),
         ('[run]\nport = true\n', "port"),
         ('[run]\ncommand = "server --port 80"\n', "argv array"),
         ('[run]\nprot = 8000\n', "unknown"),
@@ -58,13 +59,13 @@ def test_config_rejects_invalid_or_misspelled_values(tmp_path, content, message)
 
 
 @pytest.mark.parametrize(
-    "framework", ["django", "vite", "astro", "cakephp", "laravel"]
+    "run_type", ["django", "vite", "astro", "cakephp", "laravel"]
 )
-def test_config_accepts_every_framework_the_runner_supports(tmp_path, framework):
+def test_config_accepts_every_type_the_runner_supports(tmp_path, run_type):
     path = tmp_path / ".localghost.toml"
-    path.write_text(f'[run]\nframework = "{framework}"\n')
+    path.write_text(f'[run]\ntype = "{run_type}"\n')
 
-    assert load_config(path).type == framework
+    assert load_config(path).type == run_type
 
 
 @pytest.mark.parametrize("value", ["compose", "django", "cakephp", "php"])
@@ -86,24 +87,6 @@ def test_config_rejects_dockerfile_as_a_run_type(tmp_path):
     path.write_text('[run]\ntype = "dockerfile"\n')
 
     with pytest.raises(click.ClickException, match="must be"):
-        load_config(path)
-
-
-def test_config_accepts_framework_as_a_deprecated_alias(tmp_path, capsys):
-    path = tmp_path / ".localghost.toml"
-    path.write_text('[run]\nframework = "django"\n')
-
-    config = load_config(path)
-
-    assert config.type == "django"
-    assert "framework" in capsys.readouterr().err
-
-
-def test_config_rejects_both_type_and_framework(tmp_path):
-    path = tmp_path / ".localghost.toml"
-    path.write_text('[run]\ntype = "django"\nframework = "vite"\n')
-
-    with pytest.raises(click.ClickException, match="sets both type and framework"):
         load_config(path)
 
 

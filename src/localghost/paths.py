@@ -11,7 +11,7 @@ def state_directory() -> Path:
 
     `LOCALGHOST_STATE_DIR` overrides everything; otherwise the XDG base
     directory specification applies. Both the retained public root and the
-    detached session records live here, so every caller must agree on it.
+    session records live here, so every caller must agree on it.
     """
     configured = os.environ.get("LOCALGHOST_STATE_DIR")
     if configured:

@@ -11,7 +11,6 @@ from pathlib import Path
 
 import click
 
-from .feedback import warning
 from .runner import RUN_TYPES, type_choices
 
 CONFIG_NAME = ".localghost.toml"
@@ -37,8 +36,9 @@ def load_config(path: Path) -> RunConfig:
     values = document.get("run", {})
     if not isinstance(values, dict):
         raise click.ClickException(f"'{path}' [run] must be a table")
-    # `mode` is checked before the unknown-key scan would otherwise reject
-    # it, so the migration message wins; keep it out of the known-key set.
+    # Removed keys are checked before the unknown-key scan would otherwise
+    # reject them, so the migration message wins; keep them out of the
+    # known-key set.
     if "mode" in values:
         migration = (
             'type = "compose"'
@@ -46,22 +46,14 @@ def load_config(path: Path) -> RunConfig:
             else "remove the key and let detection choose, or name the type"
         )
         raise click.ClickException(f"[run].mode was removed in 2.0; use {migration}")
-    unknown = sorted(
-        set(values) - {"type", "framework", "name", "root", "port", "command"}
-    )
+    if "framework" in values:
+        raise click.ClickException(
+            "[run].framework was removed in 4.0; rename it to [run].type"
+        )
+    unknown = sorted(set(values) - {"type", "name", "root", "port", "command"})
     if unknown:
         raise click.ClickException(f"unknown [run] setting '{unknown[0]}'")
     selected_type = values.get("type")
-    if "framework" in values:
-        if selected_type is not None:
-            raise click.ClickException(
-                "[run] sets both type and framework; keep type"
-            )
-        warning(
-            "Deprecated configuration",
-            ["[run].framework is deprecated; rename it to [run].type"],
-        )
-        selected_type = values["framework"]
     if selected_type is not None and selected_type not in RUN_TYPES:
         # [run].type configures `run`, which never runs `dockerfile`
         # directly -- that value only makes `save --type dockerfile`
