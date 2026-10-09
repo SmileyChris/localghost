@@ -427,6 +427,9 @@ for `--host 0.0.0.0` where one is available.
 When a relay starts, the run says so: `Application bound 127.0.0.1:5173;
 relaying from 172.17.0.1:5173 so the hub can reach it.`
 
+A detached run relays too: a small localghost process leads the session's
+process group, raises the relay, and notes it in the session log.
+
 Where no relay can be raised, localghost passes `--host 0.0.0.0` instead. On
 Linux with a native Docker daemon, an application that still comes up on
 loopback is then stopped, and the run ends with an explanation rather than
@@ -463,8 +466,7 @@ reached over the namespace's gateway address rather than `127.0.0.1`.
 Isolation needs Linux and [pasta](https://passt.top/) (the `passt` package),
 which provides the namespace's networking without root. Where either is missing
 the run warns and continues with the host's ports, so a shared
-`.localghost.toml` keeps working on every machine. Detached runs cannot relay
-from the gateway yet, so isolate a project only in foreground runs for now.
+`.localghost.toml` keeps working on every machine.
 
 ## Notes
 

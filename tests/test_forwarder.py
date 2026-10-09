@@ -1,5 +1,6 @@
 """The host-side relay that lets the hub reach a loopback-bound application."""
 
+import contextlib
 import socket
 import socketserver
 import subprocess
@@ -225,3 +226,26 @@ def test_a_long_lived_connection_survives_others_coming_and_going(echo):
         # Still the same socket, still relaying, after all of that.
         hmr.sendall(b"update")
         assert hmr.recv(4096) == b"UPDATE"
+
+
+def test_detached_leader_relays_a_loopback_application(monkeypatch):
+    from localghost import detached
+
+    relayed = []
+
+    @contextlib.contextmanager
+    def forwarding(target, *, bind, port):
+        relayed.append((target, bind, port))
+        yield
+
+    monkeypatch.setattr(detached.forwarder, "hub_reaches_loopback", lambda: False)
+    monkeypatch.setattr(detached.forwarder, "gateway", lambda: "172.17.0.1")
+    monkeypatch.setattr(detached.forwarder, "forwarding", forwarding)
+    monkeypatch.setattr(detached, "_POLL", 0.05)
+
+    # Nothing is left of a detached run but this leader, so it has to raise
+    # the relay a foreground run would, and still report the app's status.
+    status = detached.main(["8001", "isolated", "sh", "-c", "sleep 0.3; exit 4"])
+
+    assert status == 4
+    assert relayed == [(ports.Listener("127.0.0.1", 8001), "172.17.0.1", 8001)]

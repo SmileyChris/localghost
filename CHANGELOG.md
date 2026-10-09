@@ -13,6 +13,13 @@ uses [Semantic Versioning](https://semver.org/).
   route points at a free host port instead. Without Linux and pasta the run
   warns and goes ahead unisolated.
 
+### Fixed
+
+- A detached run now relays a loopback-bound application from the Docker
+  gateway, as a foreground run does. Before, the hub answered 502 for such an
+  application -- a Vite or Astro dev server, or Django's default `runserver`
+  -- whenever it was started with `--detach` or restarted detached.
+
 ## [4.1.0] - 2026-10-09
 
 ### Changed

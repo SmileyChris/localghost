@@ -1860,8 +1860,18 @@ def _detach_host(plan: RunPlan, cwd: Path) -> None:
         with log.open("ab") as handle:
             # `start_new_session` makes the child a process-group leader, which
             # is what lets `sessions.stop` signal the group by its recorded pid.
+            # The leader stays behind to relay a loopback-bound application,
+            # which a foreground run would otherwise do itself.
             child = subprocess.Popen(
-                list(plan.launch),
+                [
+                    sys.executable,
+                    "-I",
+                    "-m",
+                    "localghost.detached",
+                    str(plan.port),
+                    "shared" if plan.app_port is None else "isolated",
+                    *plan.launch,
+                ],
                 cwd=plan.working_directory or cwd,
                 stdout=handle,
                 stderr=subprocess.STDOUT,
