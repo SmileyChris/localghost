@@ -647,7 +647,7 @@ def test_save_uses_run_detection_when_dockerfile_and_django_are_present() -> Non
 
 
 def test_run_pins_the_root_with_the_flag(monkeypatch, tmp_path) -> None:
-    root = tmp_path / "backend"
+    root = tmp_path / "billing"
     root.mkdir()
     (root / "manage.py").touch()
     (tmp_path / ".git").mkdir()
@@ -660,7 +660,7 @@ def test_run_pins_the_root_with_the_flag(monkeypatch, tmp_path) -> None:
     )
 
     assert result.exit_code == 0, result.output
-    assert "backend.localhost" in result.output
+    assert "billing.localhost" in result.output
 
 
 def test_run_project_root_discovers_config_inside_the_pinned_root(
@@ -1268,6 +1268,22 @@ def test_save_host_defaults_to_toml_with_project_name_from_dotenv(monkeypatch) -
         config = Path(".localghost.toml").read_text()
         assert 'type = "php"' in config
         assert "port = 3000" in config
+
+
+def test_save_pins_the_name_of_a_project_in_a_generic_folder(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.delenv("COMPOSE_PROJECT_NAME", raising=False)
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path / "state"))
+    (tmp_path / "cineshelf" / ".git").mkdir(parents=True)
+    web = tmp_path / "cineshelf" / "web"
+    web.mkdir()
+    (web / "manage.py").touch()
+
+    result = CliRunner().invoke(cli, ["save", "--no-input", "-C", str(web)])
+
+    assert result.exit_code == 0, result.output
+    assert 'name = "cineshelf"' in (web / ".localghost.toml").read_text()
 
 
 def test_save_host_defaults_reject_compose_options_and_refuse_overwrite(

@@ -11,9 +11,8 @@ from pathlib import Path
 
 import click
 
+from .runner import CONFIG_NAME as CONFIG_NAME  # re-exported; runner owns it
 from .runner import RUN_TYPES, type_choices
-
-CONFIG_NAME = ".localghost.toml"
 
 
 @dataclass(frozen=True)

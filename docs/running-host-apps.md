@@ -55,6 +55,19 @@ cd my-django-project
 uvx localghost run
 ```
 
+The app is served at `NAME.localhost`, where `NAME` is the project folder's
+name. A folder whose name says what it holds rather than which project it is
+(`web`, `www`, `site`, `app`, `frontend`, `client`, `ui`, `backend`,
+`server`, `api`, `apps`, `packages`, `src`, `dist`, `build`, `out` or
+`public`) takes the name of the folder above it instead, so
+`cineshelf/web` serves at `cineshelf.localhost`. That only happens inside a
+repository, and never past its root or a folder holding `.localghost.toml`,
+so `projects/web` with nothing above it tying the two together stays `web`.
+A project localghost already remembers under its folder name keeps it.
+`save` writes the name into `.localghost.toml` for a folder like this, and
+`--name` or `[run].name` always wins. Compose projects keep Compose's own
+naming, so `docker compose` agrees on the project.
+
 A `compose` type hands the project straight to `docker compose up` after
 starting the hub. Because Compose owns the application's configuration, the
 host-only options (`--type` for a framework, `--port`, and a `--` command)
@@ -96,7 +109,7 @@ command = ["./server", "--port", "{port}"]
 | Key | Type | Meaning |
 |-----|------|---------|
 | `type` | one of the seven types `run --type` accepts (not `dockerfile`, which is save-only) | Resolves otherwise ambiguous detection, exactly like `--type`. Detected when omitted. |
-| `name` | string | Public name, serving the app at `NAME.localhost`. Defaults to the project root's name. |
+| `name` | string | Public name, serving the app at `NAME.localhost`. Defaults to the project root's name, or its repository's for a generic folder name like `web` (see [Usage](#usage)). |
 | `root` | path, relative to the config file | Treat this directory as the project root instead of searching. See [Project root and configuration discovery](#project-root-and-configuration-discovery). |
 | `port` | integer, 1–65535 | Host HTTP port. The type's default is used when omitted, except alongside `command`, where it is required. |
 | `command` | array of strings | Argv to run instead of the type's own server. `{port}` is replaced with the selected port. |

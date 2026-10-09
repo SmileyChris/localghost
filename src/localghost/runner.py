@@ -19,7 +19,7 @@ from pathlib import Path
 import click
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
-from . import forwarder, ports, statusbar
+from . import forwarder, ports, registry, statusbar
 from .feedback import info, interrupt_break, warning
 from .generator import (
     DNS_SAFE_PROJECT,
@@ -103,16 +103,65 @@ class _ForceQuit(_TerminationSignal):
     """A termination signal repeated after the grace period has elapsed."""
 
 
+CONFIG_NAME = ".localghost.toml"
+
+# Folder names that say what a directory holds rather than which project it
+# is; a host project in one is named after the repository folder above it.
+GENERIC_NAMES = frozenset(
+    {
+        "web", "www", "site", "app", "frontend", "client", "ui",
+        "backend", "server", "api",
+        "apps", "packages", "src",
+        "dist", "build", "out", "public",
+    }
+)  # fmt: skip
+
+
 def resolve_name(cwd: Path) -> str:
     """Resolve the public name with Compose-compatible precedence."""
     value = os.environ.get("COMPOSE_PROJECT_NAME") or _dotenv_name(cwd / ".env")
     if not value:
-        value = "".join(
-            char for char in cwd.name.lower() if char.isalnum() or char in "-_"
-        )
-        value = value.lstrip("-_")
+        value = _folder_name(cwd)
+        named = _named_directory(cwd)
+        # A project already remembered under its folder name keeps it, so
+        # this naming never strands an existing route as a duplicate.
+        if named != cwd and not any(
+            entry.name == value and Path(entry.directory) == cwd
+            for entry in registry.entries()
+        ):
+            value = _folder_name(named)
     validate_name(value)
     return value
+
+
+def _folder_name(path: Path) -> str:
+    value = "".join(
+        char for char in path.name.lower() if char.isalnum() or char in "-_"
+    )
+    return value.lstrip("-_")
+
+
+def _named_directory(root: Path) -> Path:
+    """The folder a project is named after: `root`, unless its name is generic.
+
+    A generic name climbs to the nearest non-generic parent, but only inside a
+    repository and never past a folder holding .localghost.toml or the
+    repository root, since outside them the parent says nothing about the
+    project. A climb that ends on another generic name keeps `root`.
+    """
+    candidates = _search_path(root.resolve())
+    if not candidates or not _is_repository(candidates[-1]):
+        return root
+    for path in candidates:
+        if path.name.lower() not in GENERIC_NAMES:
+            return path
+        if (path / CONFIG_NAME).exists() or _is_repository(path):
+            break
+    return root
+
+
+def _is_repository(path: Path) -> bool:
+    return any((path / marker).exists() for marker in VCS_MARKERS)
 
 
 def validate_name(name: str) -> None:

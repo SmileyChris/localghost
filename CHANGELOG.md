@@ -3,6 +3,22 @@
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- A host project in a folder with a generic name, such as `web`, `app`,
+  `frontend`, `src`, `dist` or `build`, is named after the folder above it
+  inside the same repository, so `cineshelf/web` serves at
+  `cineshelf.localhost`. The climb stops at the repository root or a folder
+  holding `.localghost.toml`, a project already remembered under its folder
+  name keeps it, and `save` writes the name into `.localghost.toml` for such a
+  folder. Compose projects are unchanged.
+- The hub's welcome page lists running projects first by name, then the rest
+  by when they last started, with stopped projects' links in a lighter green.
+  It drops the "Remembered projects" heading and the restart hint, and the
+  "copied" note on a command is now a badge.
+
 ## [4.0.1] - 2026-10-09
 
 ### Changed

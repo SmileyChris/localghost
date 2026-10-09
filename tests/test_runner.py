@@ -7,7 +7,7 @@ from subprocess import CompletedProcess
 import click
 import pytest
 
-from localghost import forwarder, ports, runner
+from localghost import forwarder, ports, registry, runner
 
 
 @pytest.fixture(autouse=True)
@@ -2268,3 +2268,43 @@ def test_execute_forgets_the_grace_once_the_planned_port_is_taken(
     plan = runner.RunPlan("demo", "vite", ("x",), 6100, "p", "")
 
     assert runner.execute(plan, lambda: None, public_origin="http://d.localhost") == 0
+
+
+@pytest.mark.parametrize(
+    ("layout", "project", "expected"),
+    [
+        ({"cineshelf/.git"}, "cineshelf/web", "cineshelf"),
+        ({"acme/.git"}, "acme/apps/web", "acme"),
+        ({"projects/web/.git"}, "projects/web", "web"),
+        (set(), "projects/web", "web"),
+        ({"app/.git"}, "app/web", "web"),
+        ({"cineshelf/.git", "cineshelf/web/.localghost.toml"}, "cineshelf/web", "web"),
+        ({"acme/.git", "acme/apps/.localghost.toml"}, "acme/apps/web", "web"),
+    ],
+)
+def test_generic_folder_names_take_the_repository_folder_name(
+    monkeypatch, tmp_path, layout, project, expected
+):
+    monkeypatch.delenv("COMPOSE_PROJECT_NAME", raising=False)
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path / "state"))
+    (tmp_path / project).mkdir(parents=True)
+    for marker in layout:
+        path = tmp_path / marker
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if marker.endswith(".git"):
+            path.mkdir()
+        else:
+            path.touch()
+
+    assert runner.resolve_name(tmp_path / project) == expected
+
+
+def test_a_project_remembered_under_its_generic_name_keeps_it(monkeypatch, tmp_path):
+    monkeypatch.delenv("COMPOSE_PROJECT_NAME", raising=False)
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path / "state"))
+    project = tmp_path / "cineshelf" / "web"
+    project.mkdir(parents=True)
+    (tmp_path / "cineshelf" / ".git").mkdir()
+    registry.record("web", project, "vite")
+
+    assert runner.resolve_name(project) == "web"

@@ -64,6 +64,7 @@ from .paths import state_directory
 from .roots import discover_config, resolve_root
 from .routes import active_routes, proxy_is_running
 from .runner import (
+    GENERIC_NAMES,
     RUN_TYPES,
     RunPlan,
     _compose_file,
@@ -3178,9 +3179,13 @@ def _persist_resolved_application(
     """
     plan = resolved.plan
     assert plan is not None
+    # A generic folder's name came from a parent, and the file written here
+    # stops that climb, so the name is pinned in it; moving the folder later
+    # can't change it either.
+    generic = resolved.root.name.lower() in GENERIC_NAMES
     saved_config = _run_config_from_plan(
         plan,
-        explicit_name=resolved.name,
+        explicit_name=resolved.name or (plan.name if generic else None),
         source_command=resolved.command,
     )
     if dry_run:
