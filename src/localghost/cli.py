@@ -1830,6 +1830,7 @@ def _resolve_application(
         command,
         pinned=pinned,
         pinned_from_flag=root_from_flag,
+        isolate=settings.isolate,
     )
     return ResolvedApplication(
         cwd=cwd,
@@ -1860,7 +1861,7 @@ def _detach_host(plan: RunPlan, cwd: Path) -> None:
             # `start_new_session` makes the child a process-group leader, which
             # is what lets `sessions.stop` signal the group by its recorded pid.
             child = subprocess.Popen(
-                list(plan.command),
+                list(plan.launch),
                 cwd=plan.working_directory or cwd,
                 stdout=handle,
                 stderr=subprocess.STDOUT,
@@ -2001,6 +2002,7 @@ def _print_run_plan(plan: RunPlan, dry_run: bool, detach: bool = False) -> None:
         type=plan.type,
         command=plan.command,
         port=plan.port,
+        app_port=plan.app_port,
         url=public_origin,
         dry_run=dry_run,
         project_root=plan.project_root,
@@ -3256,8 +3258,9 @@ def _run_config_from_plan(
     return RunConfig(
         type=None if plan.type == "custom" else plan.type,
         name=explicit_name,
-        port=plan.port,
+        port=plan.app_port or plan.port,
         command=(source_command or plan.command) if plan.type == "custom" else (),
+        isolate=plan.isolate,
     )
 
 

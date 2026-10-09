@@ -113,6 +113,7 @@ command = ["./server", "--port", "{port}"]
 | `root` | path, relative to the config file | Treat this directory as the project root instead of searching. See [Project root and configuration discovery](#project-root-and-configuration-discovery). |
 | `port` | integer, 1–65535 | Host HTTP port. The type's default is used when omitted, except alongside `command`, where it is required. |
 | `command` | array of strings | Argv to run instead of the type's own server. `{port}` is replaced with the selected port. |
+| `isolate` | boolean | Run the application in its own network namespace, so it keeps its port whatever else holds it. Linux with [pasta](#isolated-runs) only; elsewhere the run warns and goes ahead without. |
 
 Setting `command` makes the run a custom one: the type is reported as `custom`,
 `type` has no effect, and `port` becomes required because there is no framework
@@ -437,6 +438,33 @@ a gateway that lives inside a VM or a user namespace, so no relay is raised
 there and Vite and Astro are still asked for `--host 0.0.0.0`. Those
 installations proxy the bridge's route to the host through a process that
 reaches loopback, so a loopback bind is left alone rather than refused.
+
+### Isolated runs
+
+Two projects that both want port 8000 cannot share the host's loopback, and a
+project made of several servers -- Django talking to a Vite dev server, say --
+breaks if one of them is moved to a free port the others do not know about.
+`isolate = true` gives the whole run its own network namespace instead:
+
+```toml
+[run]
+port = 8000
+command = ["just", "dev"]
+isolate = true
+```
+
+Everything the command starts shares the namespace's own `127.0.0.1`, so each
+server keeps its usual port and they find each other as they always do. Only
+`port` comes out, on a free host port that the route points at; the run lists
+it as the host port, beside the isolated one. The application still reaches the
+internet; services on the host's loopback, such as a local database, are
+reached over the namespace's gateway address rather than `127.0.0.1`.
+
+Isolation needs Linux and [pasta](https://passt.top/) (the `passt` package),
+which provides the namespace's networking without root. Where either is missing
+the run warns and continues with the host's ports, so a shared
+`.localghost.toml` keeps working on every machine. Detached runs cannot relay
+from the gateway yet, so isolate a project only in foreground runs for now.
 
 ## Notes
 

@@ -190,6 +190,7 @@ def run_plan(
     port: int,
     url: str,
     dry_run: bool,
+    app_port: int | None = None,
     project_root: Path | None = None,
     working_directory: Path | None = None,
 ) -> None:
@@ -202,9 +203,11 @@ def run_plan(
         [
             ("Command", shlex.join(command)),
             ("Host port", str(port)),
-            ("Public URL", url),
         ]
     )
+    if app_port is not None:
+        rows.append(("Isolated port", str(app_port)))
+    rows.append(("Public URL", url))
     heading = f"Dry run: {name}" if dry_run else f"Running {name}"
     # A custom command says nothing as a type; the Command row shows it.
     if type != "custom":

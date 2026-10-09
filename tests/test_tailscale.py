@@ -1204,6 +1204,7 @@ def test_dry_run_plan_reports_the_tailnet_origin_on_stderr(monkeypatch) -> None:
         type="vite",
         command=("npm", "run", "dev"),
         port=5173,
+        app_port=None,
         project_root=None,
         working_directory=None,
         bridge_yaml="services: {}\n",

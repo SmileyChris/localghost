@@ -1,5 +1,6 @@
 import contextlib
 import json
+import signal
 import socket
 from pathlib import Path
 from subprocess import CompletedProcess
@@ -2308,3 +2309,52 @@ def test_a_project_remembered_under_its_generic_name_keeps_it(monkeypatch, tmp_p
     registry.record("web", project, "vite")
 
     assert runner.resolve_name(project) == "web"
+
+
+def test_isolated_plan_keeps_the_app_port_and_walks_the_host_side(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(runner, "isolation_available", lambda: True)
+    monkeypatch.setattr(ports, "port_available", lambda port: port != 8000)
+
+    plan = runner.build_plan(
+        tmp_path, "demo", None, 8000, ("just", "dev", "{port}"), isolate=True
+    )
+
+    # The application has the namespace to itself, so it keeps 8000 even
+    # though the host's 8000 is taken; only the route moves.
+    assert plan.port == 8001
+    assert plan.app_port == 8000
+    assert plan.command == ("just", "dev", "8000")
+    launch = plan.launch
+    assert launch[0] == "pasta"
+    assert "127.0.0.1/8001:8000" in launch
+    assert "--host-lo-to-ns-lo" in launch
+    assert launch[-3:] == ("just", "dev", "8000")
+
+
+def test_isolation_without_pasta_warns_and_runs_shared(monkeypatch, tmp_path):
+    monkeypatch.setattr(runner, "isolation_available", lambda: False)
+    monkeypatch.setattr(ports, "port_available", lambda port: True)
+    warnings = []
+    monkeypatch.setattr(
+        runner, "warning", lambda title, messages: warnings.append(title)
+    )
+
+    plan = runner.build_plan(
+        tmp_path, "demo", None, 8000, ("just", "dev"), isolate=True
+    )
+
+    # A shared .localghost.toml may ask for isolation on a machine that
+    # cannot give it; the run goes ahead, and save keeps the request.
+    assert warnings == ["Running without isolation"]
+    assert plan.app_port is None
+    assert plan.isolate
+    assert plan.launch == ("just", "dev")
+
+
+def test_isolation_init_reports_the_command_status():
+    from localghost import init
+
+    assert init.main(["sh", "-c", "exit 3"]) == 3
+    assert init.main(["sh", "-c", "kill -TERM $$"]) == 128 + signal.SIGTERM

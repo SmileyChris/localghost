@@ -294,3 +294,13 @@ def test_detached_bridge_cleanup_reuses_stored_compose_yaml(tmp_path, monkeypatc
     ]
     assert kwargs["input"] == "services:\n  bridge: {}\n"
     assert not sessions()
+
+
+def test_isolate_round_trips_and_must_be_a_boolean(tmp_path):
+    path = tmp_path / ".localghost.toml"
+    path.write_text(render_run_config(RunConfig(port=8000, isolate=True)))
+    assert load_config(path).isolate is True
+
+    path.write_text('[run]\nisolate = "yes"\n')
+    with pytest.raises(click.ClickException, match="isolate"):
+        load_config(path)

@@ -22,6 +22,7 @@ class RunConfig:
     root: str | None = None
     port: int | None = None
     command: tuple[str, ...] = ()
+    isolate: bool = False
 
 
 def load_config(path: Path) -> RunConfig:
@@ -49,7 +50,8 @@ def load_config(path: Path) -> RunConfig:
         raise click.ClickException(
             "[run].framework was removed in 4.0; rename it to [run].type"
         )
-    unknown = sorted(set(values) - {"type", "name", "root", "port", "command"})
+    known = {"type", "name", "root", "port", "command", "isolate"}
+    unknown = sorted(set(values) - known)
     if unknown:
         raise click.ClickException(f"unknown [run] setting '{unknown[0]}'")
     selected_type = values.get("type")
@@ -78,12 +80,16 @@ def load_config(path: Path) -> RunConfig:
         isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535
     ):
         raise click.ClickException("[run].port must be between 1 and 65535")
+    isolate = values.get("isolate", False)
+    if not isinstance(isolate, bool):
+        raise click.ClickException("[run].isolate must be true or false")
     return RunConfig(
         selected_type,
         name,
         root,
         port,
         tuple(command),
+        isolate,
     )
 
 
@@ -111,6 +117,8 @@ def render_run_config(config: RunConfig, existing: str = "") -> str:
     if config.command:
         escaped = ", ".join(json.dumps(item) for item in config.command)
         lines += f"command = [{escaped}]\n"
+    if config.isolate:
+        lines += "isolate = true\n"
     return lines
 
 

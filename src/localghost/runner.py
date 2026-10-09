@@ -10,6 +10,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import time
 import uuid
 from collections.abc import Callable
@@ -39,6 +40,18 @@ class RunPlan:
     bridge_yaml: str
     project_root: Path | None = None
     working_directory: Path | None = None
+    # Whether the project asked for isolation, kept even where it could not
+    # be had, so saving the project does not quietly drop the request.
+    isolate: bool = False
+    # The application's port inside its own network namespace, when
+    # isolation is in effect; `port` is then only the host side of it.
+    app_port: int | None = None
+
+    @property
+    def launch(self) -> tuple[str, ...]:
+        if self.app_port is None:
+            return self.command
+        return (*isolation(self.port, self.app_port), *self.command)
 
 
 SUPPORTED_TYPES = (
@@ -226,17 +239,30 @@ def build_plan(
     *,
     pinned: Path | None = None,
     pinned_from_flag: bool = True,
+    isolate: bool = False,
 ) -> RunPlan:
     cwd = cwd.resolve()
+    isolated = isolate and isolation_available()
+    if isolate and not isolated:
+        warning(
+            "Running without isolation",
+            [
+                "[run].isolate needs pasta (the passt package) on Linux; "
+                "the application shares the host's ports instead"
+            ],
+        )
     if command:
         project_root = cwd
         working_directory = cwd
         if port is None:
             raise click.ClickException("a custom command requires --port")
         selected_type = "custom"
-        selected_port = ports.select_port(port, strict=True)
+        # Isolated, the application keeps its own port inside the namespace
+        # and only the host side has to find a free one.
+        selected_port = ports.select_port(port, strict=not isolated)
+        app_port = port if isolated else selected_port
         selected_command = tuple(
-            part.replace("{port}", str(selected_port)) for part in command
+            part.replace("{port}", str(app_port)) for part in command
         )
     else:
         if pinned is not None:
@@ -265,11 +291,14 @@ def build_plan(
         else:  # Click validates the public option; retain this for direct callers.
             raise click.ClickException(type_choices("--type"))
         wanted_port = port or default_port
-        selected_port = ports.select_port(wanted_port, strict=port is not None)
-        if selected_port != wanted_port:
+        selected_port = ports.select_port(
+            wanted_port, strict=port is not None and not isolated
+        )
+        if selected_port != wanted_port and not isolated:
             _report_skipped_port(wanted_port, selected_port)
+        app_port = wanted_port if isolated else selected_port
         selected_command = tuple(
-            part.format(port=selected_port) for part in selected_command
+            part.format(port=app_port) for part in selected_command
         )
     public_name = name or resolve_name(project_root)
     validate_name(public_name)
@@ -285,6 +314,48 @@ def build_plan(
         ),
         project_root,
         working_directory,
+        isolate,
+        app_port if isolated else None,
+    )
+
+
+def isolation_available() -> bool:
+    return sys.platform.startswith("linux") and shutil.which("pasta") is not None
+
+
+def isolation(host_port: int, app_port: int) -> tuple[str, ...]:
+    """Run a command in its own network namespace, reachable on `host_port`.
+
+    pasta gives the namespace its own loopback and outbound access, so the
+    application and its helpers keep their usual ports whatever the host or
+    another run already holds. Only `app_port` comes out, on host loopback,
+    where the gateway relay picks it up like any loopback-bound application.
+
+    --host-lo-to-ns-lo delivers that to the namespace's loopback, which is
+    where a dev server binds; without it pasta targets the namespace's
+    public address. -T/-U none stop pasta mirroring host loopback ports into
+    the namespace, which would otherwise claim the very ports the
+    application wants -- host services are reached over the gateway instead.
+    """
+    return (
+        "pasta",
+        "--config-net",
+        "--foreground",
+        "--quiet",
+        "--host-lo-to-ns-lo",
+        "-t",
+        f"127.0.0.1/{host_port}:{app_port}",
+        "-u",
+        "none",
+        "-T",
+        "none",
+        "-U",
+        "none",
+        "--",
+        sys.executable,
+        "-I",
+        "-m",
+        "localghost.init",
     )
 
 
@@ -855,7 +926,13 @@ def execute(
             public_origin or f"http://{plan.name}.localhost",
             secondary_url=secondary_origin,
             enabled=status_bar and public_origin is not None,
-            probe=statusbar.tcp_probe(plan.port),
+            # pasta accepts on the host port before the application is up,
+            # so only an HTTP answer shows an isolated run is ready.
+            probe=(
+                statusbar.http_probe(f"http://127.0.0.1:{plan.port}/")
+                if plan.app_port is not None
+                else statusbar.tcp_probe(plan.port)
+            ),
             message="starting hub",
             diagnose=hopeless,
         ) as bar:
@@ -869,9 +946,19 @@ def execute(
                 # tell the squatter apart from the application, so the run
                 # ends here rather than at a URL serving the wrong thing.
                 raise click.ClickException(ports.in_use_message(plan.port))
+            if plan.app_port is not None and not forwarder.hub_reaches_loopback():
+                # pasta always takes host loopback, and hides its sockets
+                # from /proc, so the relay cannot wait to be discovered.
+                relay(
+                    ports.Listener("127.0.0.1", plan.port),
+                    lambda address: (
+                        f"Relaying {address}:{plan.port} into the isolated "
+                        "network namespace."
+                    ),
+                )
             try:
                 child = subprocess.Popen(
-                    list(plan.command),
+                    list(plan.launch),
                     cwd=plan.working_directory or cwd or Path.cwd(),
                     start_new_session=True,
                 )
