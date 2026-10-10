@@ -590,7 +590,8 @@ def _project_mode(project: dict[str, object]) -> str:
     session = project["session"]
     if project["state"] != "running" or not isinstance(session, dict):
         return ""
-    return "detached" if session["detached"] else "foreground"
+    mode = "detached" if session["detached"] else "foreground"
+    return f"{mode} isolated" if session.get("isolated") else mode
 
 
 def _sessions_list(as_json: bool) -> None:
@@ -1713,6 +1714,7 @@ def run(
         bridge_project=plan.project,
         bridge_yaml=plan.bridge_yaml,
         detached=False,
+        isolated=plan.app_port is not None,
     )
     try:
         status = execute(
@@ -1898,6 +1900,7 @@ def _detach_host(plan: RunPlan, cwd: Path) -> None:
                 pid=child.pid,
                 bridge_project=plan.project,
                 bridge_yaml=plan.bridge_yaml,
+                isolated=plan.app_port is not None,
             )
     except OSError as exc:
         if child is not None:
@@ -2456,10 +2459,15 @@ def _record_registry(
             resolved.root,
             "compose",
             detached=detached,
+            isolated=None if detached is None else False,
         )
     elif resolved.plan is not None:
         registry.record(
-            resolved.plan.name, resolved.cwd, resolved.plan.type, detached=detached
+            resolved.plan.name,
+            resolved.cwd,
+            resolved.plan.type,
+            detached=detached,
+            isolated=None if detached is None else resolved.plan.app_port is not None,
         )
 
 

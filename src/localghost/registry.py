@@ -26,6 +26,8 @@ class RegistryEntry:
     last_started: str
     # How the project last ran, so `restart` can bring it back the same way.
     detached: bool = False
+    # Whether it last ran in its own network namespace, for the hub's page.
+    isolated: bool = False
 
     def as_dict(self) -> dict[str, object]:
         return self.__dict__.copy()
@@ -36,17 +38,24 @@ def registry_dir() -> Path:
 
 
 def record(
-    name: str, directory: Path, run_type: str, *, detached: bool | None = None
+    name: str,
+    directory: Path,
+    run_type: str,
+    *,
+    detached: bool | None = None,
+    isolated: bool | None = None,
 ) -> None:
     """Remember that `name.localhost` routes to a project in `directory`.
 
-    `detached` is how it was started; `None` (a save, not a run) keeps what
-    was last recorded. Best-effort: a run must never fail because its ghost
-    could not be written.
+    `detached` and `isolated` are how it was started; `None` (a save, not a
+    run) keeps what was last recorded. Best-effort: a run must never fail
+    because its ghost could not be written.
     """
+    previous = next((item for item in entries() if item.name == name), None)
     if detached is None:
-        previous = next((item for item in entries() if item.name == name), None)
         detached = previous.detached if previous else False
+    if isolated is None:
+        isolated = previous.isolated if previous else False
     entry = RegistryEntry(
         hostname=f"{name}.localhost",
         name=name,
@@ -56,6 +65,7 @@ def record(
         .astimezone()
         .isoformat(timespec="seconds"),
         detached=detached,
+        isolated=isolated,
     )
     try:
         _write(entry)
@@ -98,6 +108,7 @@ def entries() -> list[RegistryEntry]:
                     type=payload["type"],
                     last_started=payload["last_started"],
                     detached=payload.get("detached") is True,
+                    isolated=payload.get("isolated") is True,
                 )
             )
         except (OSError, ValueError, KeyError, TypeError):

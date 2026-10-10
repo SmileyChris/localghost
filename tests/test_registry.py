@@ -411,3 +411,14 @@ def test_restore_preserves_original_entry(tmp_path, monkeypatch):
     assert registry.forget("blog")
     registry.restore(original)
     assert registry.entries() == [original]
+
+
+def test_record_keeps_isolation_across_a_save(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    registry.record("blog", tmp_path, "django", detached=False, isolated=True)
+    # A save says nothing about how the project runs, so the hub page should
+    # keep showing how it last did.
+    registry.record("blog", tmp_path, "django")
+
+    [entry] = registry.entries()
+    assert entry.isolated is True

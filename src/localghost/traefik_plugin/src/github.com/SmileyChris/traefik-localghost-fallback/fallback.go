@@ -38,6 +38,7 @@ type entry struct {
 	Type        string `json:"type"`
 	LastStarted string `json:"last_started"`
 	Detached    bool   `json:"detached"`
+	Isolated    bool   `json:"isolated"`
 }
 
 type Fallback struct {
@@ -342,7 +343,7 @@ type pageEntry struct {
 	Type      string
 	Relative  string
 	Running   bool
-	Mode      string // "in the foreground" or "detached"
+	Mode      string // "in the foreground" or "detached", then ", isolated"
 }
 
 type pageData struct {
@@ -385,7 +386,7 @@ func pageEntries(entries []entry, online map[string]bool) []pageEntry {
 			Type:      e.Type,
 			Relative:  relativeTime(e.LastStarted),
 			Running:   online[e.Hostname],
-			Mode:      mode(e.Detached),
+			Mode:      mode(e.Detached, e.Isolated),
 		})
 	}
 	return known
@@ -396,11 +397,15 @@ func started(e entry) time.Time {
 	return when
 }
 
-func mode(detached bool) string {
+func mode(detached, isolated bool) string {
+	m := "in the foreground"
 	if detached {
-		return "detached"
+		m = "detached"
 	}
-	return "in the foreground"
+	if isolated {
+		m += ", isolated"
+	}
+	return m
 }
 
 func (f *Fallback) respondWelcome(rw http.ResponseWriter, port string, entries []entry, wantsHTML bool) {

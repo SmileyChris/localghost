@@ -37,6 +37,8 @@ class Session:
     command: tuple[str, ...] = ()
     bridge_yaml: str = ""
     detached: bool = True
+    # Ran in its own network namespace, so `port` is only the host side.
+    isolated: bool = False
 
     def as_dict(self) -> dict[str, object]:
         return self.__dict__.copy()
@@ -87,6 +89,7 @@ def create(
     bridge_project: str | None = None,
     bridge_yaml: str = "",
     detached: bool = True,
+    isolated: bool = False,
 ) -> Session:
     session = Session(
         uuid.uuid4().hex[:8],
@@ -101,6 +104,7 @@ def create(
         command,
         bridge_yaml,
         detached,
+        isolated,
     )
     save(session)
     return session

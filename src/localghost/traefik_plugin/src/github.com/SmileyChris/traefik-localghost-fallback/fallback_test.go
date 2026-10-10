@@ -223,7 +223,8 @@ func TestWelcomeShowsOnlineStateAndMode(t *testing.T) {
 	writeEntry(t, dir, "blog", "blog.localhost")
 	writeEntry(t, dir, "shop", "shop.localhost")
 	detached := `{"hostname": "api.localhost", "name": "api", "directory": "/home/dev/api",
-  "type": "django", "last_started": "2026-01-01T00:00:00Z", "detached": true}`
+  "type": "django", "last_started": "2026-01-01T00:00:00Z", "detached": true,
+  "isolated": true}`
 	if err := os.WriteFile(filepath.Join(dir, "api.json"), []byte(detached), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +246,7 @@ func TestWelcomeShowsOnlineStateAndMode(t *testing.T) {
 	}
 	for _, want := range []string{
 		`<span class="project-when running">Running in the foreground</span>`,
-		`<span class="project-when running">Running detached</span>`,
+		`<span class="project-when running">Running detached, isolated</span>`,
 		`<span class="project-when">Last started 26 hours ago</span>`,
 	} {
 		if !strings.Contains(body, want) {

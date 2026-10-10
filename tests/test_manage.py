@@ -613,3 +613,15 @@ def test_top_level_forget_is_a_deprecated_alias(tmp_path) -> None:
     assert result.exit_code == 0, result.output
     assert "localghost sessions forget" in result.output
     assert registry.entries() == []
+
+
+def test_sessions_list_marks_an_isolated_session(tmp_path) -> None:
+    registry.record("demo", tmp_path, "django")
+    _session(tmp_path, pid=os.getpid(), isolated=True)
+
+    result = CliRunner().invoke(cli, ["sessions", "list"])
+    as_json = CliRunner().invoke(cli, ["sessions", "list", "--json"])
+
+    # Its port is only the host side, so the list says why it is not 8000.
+    assert "running  detached isolated" in result.output
+    assert json.loads(as_json.output)[0]["session"]["isolated"] is True

@@ -14,6 +14,9 @@ uses [Semantic Versioning](https://semver.org/).
   points at a host port from the kernel's ephemeral range instead. Without
   Linux and pasta the run warns and goes ahead unisolated. Where it is
   available, a busy-port error or warning suggests retrying with `--isolate`.
+- `sessions list` tags a running isolated session `isolated`, beside
+  `detached` or `foreground`, and the hub's welcome page says "Running
+  detached, isolated". `sessions list --json` gains `isolated` on the session.
 
 ### Changed
 
