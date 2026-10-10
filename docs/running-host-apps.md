@@ -112,7 +112,7 @@ command = ["./server", "--port", "{port}"]
 | `name` | string | Public name, serving the app at `NAME.localhost`. Defaults to the project root's name, or its repository's for a generic folder name like `web` (see [Usage](#usage)). |
 | `root` | path, relative to the config file | Treat this directory as the project root instead of searching. See [Project root and configuration discovery](#project-root-and-configuration-discovery). |
 | `port` | integer, 1–65535 | Host HTTP port. The type's default is used when omitted, except alongside `command`, where it is required. |
-| `command` | array of strings | Argv to run instead of the type's own server. `{port}` is replaced with the selected port. |
+| `command` | array of strings | Argv to run instead of the type's own server. `{port}` is replaced with the selected port, and lets the run walk past a busy one (see [Custom command](#custom-command)). |
 | `isolate` | boolean | Run the application in its own network namespace, so it keeps its port whatever else holds it. Linux with [pasta](#isolated-runs) only; elsewhere the run warns and goes ahead without. |
 
 Setting `command` makes the run a custom one: the type is reported as `custom`,
@@ -308,6 +308,17 @@ Run an arbitrary process with a custom port:
 
 ```sh
 uvx localghost run --port 8080 -- my-custom-server --port 8080
+```
+
+Write `{port}` where the command takes its port and the port becomes flexible:
+if it is busy, the run walks to the next free one, substitutes that, and warns
+about the one it skipped, whether the port came from `--port` or
+`.localghost.toml`. A command that names its port itself, as above, cannot be
+moved, so a busy port is an error instead. `save` keeps the port you asked for,
+not the one a busy run walked to.
+
+```sh
+uvx localghost run --port 8000 -- just dev {port}
 ```
 
 ## How it works

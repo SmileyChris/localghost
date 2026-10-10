@@ -3268,7 +3268,7 @@ def _run_config_from_plan(
     return RunConfig(
         type=None if plan.type == "custom" else plan.type,
         name=explicit_name,
-        port=plan.app_port or plan.port,
+        port=plan.wanted_port or plan.port,
         command=(source_command or plan.command) if plan.type == "custom" else (),
         isolate=plan.isolate,
     )

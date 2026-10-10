@@ -13,6 +13,13 @@ uses [Semantic Versioning](https://semver.org/).
   route points at a free host port instead. Without Linux and pasta the run
   warns and goes ahead unisolated.
 
+### Changed
+
+- A custom command that takes `{port}` walks past a busy port to the next free
+  one, as the built-in types do with their defaults, instead of refusing to
+  start. A command that names its own port stays strict. `save` keeps the port
+  asked for rather than the one a busy run walked to.
+
 ### Fixed
 
 - A detached run now relays a loopback-bound application from the Docker

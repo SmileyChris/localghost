@@ -2358,3 +2358,43 @@ def test_isolation_init_reports_the_command_status():
 
     assert init.main(["sh", "-c", "exit 3"]) == 3
     assert init.main(["sh", "-c", "kill -TERM $$"]) == 128 + signal.SIGTERM
+
+
+def test_custom_command_taking_port_walks_past_a_busy_one(monkeypatch, tmp_path):
+    monkeypatch.setattr(ports, "port_available", lambda port: port != 8000)
+    monkeypatch.setattr(ports, "holder", lambda port: None)
+    warnings = []
+    monkeypatch.setattr(
+        runner, "warning", lambda title, messages: warnings.append(title)
+    )
+
+    plan = runner.build_plan(
+        tmp_path, "demo", None, 8000, ("just", "dev", "{port}")
+    )
+
+    assert plan.port == 8001
+    assert plan.command == ("just", "dev", "8001")
+    # save keeps the port asked for, not the one this run happened to get.
+    assert plan.wanted_port == 8000
+    assert warnings, "expected the skipped port to be reported"
+
+
+def test_custom_command_naming_its_port_stays_strict(monkeypatch, tmp_path):
+    monkeypatch.setattr(ports, "port_available", lambda port: port != 8000)
+    monkeypatch.setattr(ports, "holder", lambda port: None)
+
+    # The application listens where it says, so routing anywhere else would
+    # point the URL at nothing.
+    with pytest.raises(click.ClickException, match="already in use"):
+        runner.build_plan(tmp_path, "demo", None, 8000, ("./server", "8000"))
+
+
+def test_custom_command_keeps_a_free_port(monkeypatch, tmp_path):
+    monkeypatch.setattr(ports, "port_available", lambda port: True)
+
+    plan = runner.build_plan(
+        tmp_path, "demo", None, 8000, ("just", "dev", "{port}")
+    )
+
+    assert plan.port == 8000
+    assert plan.command == ("just", "dev", "8000")

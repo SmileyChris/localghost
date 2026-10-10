@@ -201,8 +201,9 @@ host port 5173 is already in use
 Something else is listening on the port the run planned, so `run` refuses to
 start rather than put its URL in front of whatever is already there. On Linux
 the error names the process and its working directory. Stop that process, or
-pass another port with `--port`. Without `--port`, the run walks to the next
-free port and warns about the one it skipped; a dev server that then ignores
+pass another port with `--port`. Without `--port`, or with a custom command
+that takes `{port}`, the run walks to the next free port and warns about the
+one it skipped; a dev server that then ignores
 `--port` and comes up on its own default is the wrapper-script case described
 in [Wrapper scripts](running-host-apps.md#wrapper-scripts).
 

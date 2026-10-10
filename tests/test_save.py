@@ -508,3 +508,25 @@ def test_save_host_rejects_the_compose_type_with_the_host_choices() -> None:
 
     with pytest.raises(click.ClickException, match="not available here"):
         discover_type(Path.cwd(), "compose", allowed=("django", "php"))
+
+
+def test_save_keeps_a_custom_commands_port_when_it_is_busy(
+    monkeypatch, tmp_path
+) -> None:
+    from localghost import ports
+
+    monkeypatch.setattr(ports, "port_available", lambda port: port != 8000)
+    monkeypatch.setattr(ports, "holder", lambda port: None)
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        ["save", "--no-input", "--name", "demo", "--port", "8000", "--"]
+        + ["just", "dev", "{port}"],
+    )
+
+    # This run would walk to 8001, but the next may find 8000 free again.
+    assert result.exit_code == 0, result.output
+    saved = (tmp_path / ".localghost.toml").read_text()
+    assert "port = 8000" in saved
+    assert '"{port}"' in saved

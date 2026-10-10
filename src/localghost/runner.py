@@ -46,6 +46,9 @@ class RunPlan:
     # The application's port inside its own network namespace, when
     # isolation is in effect; `port` is then only the host side of it.
     app_port: int | None = None
+    # A custom command's port before any walk past a busy one; what `save`
+    # keeps, so the configured port is not rewritten by one busy run.
+    wanted_port: int | None = None
 
     @property
     def launch(self) -> tuple[str, ...]:
@@ -257,9 +260,15 @@ def build_plan(
         if port is None:
             raise click.ClickException("a custom command requires --port")
         selected_type = "custom"
-        # Isolated, the application keeps its own port inside the namespace
-        # and only the host side has to find a free one.
-        selected_port = ports.select_port(port, strict=not isolated)
+        wanted_port = port
+        # A command that takes {port} runs wherever it is told, so a busy
+        # port can be walked past; one that names its own port cannot move.
+        # Isolated, the application keeps its port inside the namespace and
+        # only the host side has to find a free one.
+        flexible = isolated or any("{port}" in part for part in command)
+        selected_port = ports.select_port(port, strict=not flexible)
+        if selected_port != port and not isolated:
+            _report_skipped_port(port, selected_port)
         app_port = port if isolated else selected_port
         selected_command = tuple(
             part.replace("{port}", str(app_port)) for part in command
@@ -316,6 +325,9 @@ def build_plan(
         working_directory,
         isolate,
         app_port if isolated else None,
+        # Only a custom command can walk from a saved port; a built-in type
+        # holds a saved port strictly, so it has to save the one it got.
+        wanted_port if selected_type == "custom" else None,
     )
 
 
