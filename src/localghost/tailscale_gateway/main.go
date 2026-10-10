@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"flag"
@@ -393,8 +394,11 @@ func startHTTP(ctx context.Context, server *tsnet.Server, cfg configuration, err
 }
 
 // serveTrust owns the root download on the hub's own hosts: localghost.<suffix>,
-// whose index page Traefik renders, and the deprecated trust.<suffix>, which
-// still serves the root to older CLIs but sends browsers on to the index.
+// whose index page Traefik renders, the deprecated trust.<suffix>, which still
+// serves the root to older CLIs but sends browsers on to the index, and the
+// gateway's bare tailnet address. That last is how `tailscale trust` finds a
+// hub without DNS: it takes the address from its own network map, so
+// WireGuard vouches for who answers, and asks here for the suffix and root.
 // Every other request belongs to the reverse proxy.
 func serveTrust(w http.ResponseWriter, request *http.Request, cfg configuration) bool {
 	if !cfg.servesHTTPS() {
@@ -404,20 +408,36 @@ func serveTrust(w http.ResponseWriter, request *http.Request, cfg configuration)
 	if parsed, _, err := net.SplitHostPort(host); err == nil {
 		host = parsed
 	}
-	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	host = strings.TrimSuffix(strings.ToLower(strings.Trim(host, "[]")), ".")
 	index := "localghost." + cfg.suffix
-	if host != index && host != "trust."+cfg.suffix {
+	direct := net.ParseIP(host) != nil
+	if host != index && host != "trust."+cfg.suffix && !direct {
 		return false
 	}
 	switch {
 	case request.URL.Path == "/.well-known/localghost/root.pem":
 		serveRoot(w, cfg.rootCA)
-	case host == index:
+	case request.URL.Path == "/.well-known/localghost/hub.json":
+		serveHub(w, cfg)
+	case host == index || direct:
 		return false
 	default:
 		http.Redirect(w, request, "http://"+index+"/", http.StatusMovedPermanently)
 	}
 	return true
+}
+
+// serveHub describes this hub to a client that reached it by node: the
+// suffix it routes and the root it signs that suffix with.
+func serveHub(w http.ResponseWriter, cfg configuration) {
+	value, _, err := loadRoot(cfg.rootCA)
+	if err != nil {
+		http.Error(w, "public root is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(map[string]string{"suffix": cfg.suffix, "root": string(value)})
 }
 
 func loadRoot(path string) ([]byte, *x509.Certificate, error) {

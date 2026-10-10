@@ -16,6 +16,7 @@ import localghost.tailscale as tailscale_module
 from localghost.cli import cli
 from localghost.tailscale import (
     API,
+    TailnetHub,
     TailscaleError,
     TailscaleState,
     detect_suffix,
@@ -30,6 +31,12 @@ CERTIFICATE_PEM = b"""-----BEGIN CERTIFICATE-----
 MAA=
 -----END CERTIFICATE-----
 """
+
+
+@pytest.fixture(autouse=True)
+def no_tailscale_cli(monkeypatch) -> None:
+    """Keep hub discovery off the real tailnet; tests opt back in."""
+    monkeypatch.setattr(cli_module, "tailnet_hubs", lambda: None)
 
 
 def test_state_round_trip_is_private(monkeypatch, tmp_path) -> None:
@@ -1038,7 +1045,7 @@ def test_trust_alias_requires_enabled_state(monkeypatch) -> None:
     monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: None)
     result = CliRunner().invoke(cli, ["tailscale", "trust"])
     assert result.exit_code != 0
-    assert "not enabled" in result.output
+    assert "pass --fingerprint" in result.output
 
 
 def test_run_proxy_repairs_authorities_after_a_failed_up(monkeypatch) -> None:
@@ -2096,3 +2103,116 @@ def test_status_explains_a_public_suffix_instead_of_offering_trust(
     assert "Trust https://" not in result.output
     # '-' is the credential's own tailnet, which says nothing worth a row.
     assert "Tailnet:" not in result.output
+
+
+def test_tailnet_hubs_reads_online_tagged_peers_from_the_network_map(
+    monkeypatch,
+) -> None:
+    status = {
+        "Peer": {
+            "a": {"DNSName": "localghost-wrk.tail.ts.net.", "Online": True,
+                  "Tags": ["tag:localghost"], "TailscaleIPs": ["100.64.0.10"]},
+            "b": {"DNSName": "localghost-old.tail.ts.net.", "Online": False,
+                  "Tags": ["tag:localghost"], "TailscaleIPs": ["100.64.0.11"]},
+            "c": {"DNSName": "laptop.tail.ts.net.", "Online": True,
+                  "TailscaleIPs": ["100.64.0.12"]},
+        }
+    }  # fmt: skip
+    monkeypatch.setattr(
+        tailscale_module.subprocess,
+        "run",
+        lambda *args, **kwargs: CompletedProcess(args, 0, json.dumps(status), ""),
+    )
+
+    assert tailscale_module.tailnet_hubs() == [
+        TailnetHub("localghost-wrk.tail.ts.net", ("100.64.0.10",))
+    ]
+
+
+def test_describe_hub_asks_the_gateway_at_its_tailnet_address(monkeypatch) -> None:
+    urls = []
+
+    def open_hub(url, **kwargs):
+        urls.append(url)
+        if len(urls) == 1:
+            raise URLError("no route")
+        payload = {"suffix": "wrk", "root": CERTIFICATE_PEM.decode()}
+        return Response(json.dumps(payload).encode())
+
+    monkeypatch.setattr(tailscale_module.urllib.request, "urlopen", open_hub)
+    hub = TailnetHub("localghost-wrk.tail.ts.net", ("100.64.0.10", "fd7a::1"))
+
+    described = tailscale_module.describe_hub(hub)
+
+    assert urls == [
+        "http://100.64.0.10/.well-known/localghost/hub.json",
+        "http://[fd7a::1]/.well-known/localghost/hub.json",
+    ]
+    assert (described.suffix, described.root) == ("wrk", CERTIFICATE_PEM)
+    assert described.answers_to("wrk")
+    assert described.answers_to("localghost-wrk")
+
+
+def _hub(label: str, suffix: str) -> TailnetHub:
+    return TailnetHub(f"{label}.tail.ts.net", ("100.64.0.10",), suffix, CERTIFICATE_PEM)
+
+
+def _discovered(monkeypatch, *hubs: TailnetHub) -> list:
+    installed = []
+    monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: None)
+    monkeypatch.setattr(cli_module, "tailnet_hubs", lambda: list(hubs))
+    monkeypatch.setattr(cli_module, "describe_tailnet_hub", lambda hub: hub)
+    monkeypatch.setattr(
+        cli_module,
+        "_install_tailnet_trust",
+        lambda suffix, **kwargs: installed.append((suffix, kwargs)),
+    )
+    return installed
+
+
+def test_tailnet_trust_without_a_fingerprint_trusts_the_hub_the_tailnet_names(
+    monkeypatch,
+) -> None:
+    wrk = _hub("localghost-wrk", "wrk")
+    installed = _discovered(monkeypatch, wrk, _hub("localghost-pc", "pc"))
+
+    result = CliRunner().invoke(cli, ["tailscale", "trust", "wrk"])
+
+    assert result.exit_code == 0, result.output
+    [(suffix, kwargs)] = installed
+    assert suffix == "wrk"
+    assert kwargs["verified_by"] == wrk
+    assert kwargs["certificate"].pem == PublicCertificate.parse(CERTIFICATE_PEM).pem
+
+
+def test_tailnet_trust_refuses_to_guess_between_hubs_claiming_one_suffix(
+    monkeypatch,
+) -> None:
+    installed = _discovered(
+        monkeypatch, _hub("localghost-a", "wrk"), _hub("localghost-b", "wrk")
+    )
+
+    result = CliRunner().invoke(cli, ["tailscale", "trust", "wrk"])
+
+    # Only the device name is the coordination server's to vouch for; a
+    # suffix is whatever a gateway claims.
+    assert result.exit_code != 0
+    assert "more than one hub" in result.output
+    assert "localghost-a (.wrk)" in result.output
+    assert installed == []
+    result = CliRunner().invoke(cli, ["tailscale", "trust", "localghost-b"])
+    assert result.exit_code == 0, result.output
+    assert installed[0][1]["verified_by"].label == "localghost-b"
+
+
+def test_tailnet_trust_without_the_tailscale_cli_warns_and_trusts_dns(
+    monkeypatch,
+) -> None:
+    installed = _discovered(monkeypatch)
+    monkeypatch.setattr(cli_module, "tailnet_hubs", lambda: None)
+
+    result = CliRunner().invoke(cli, ["tailscale", "trust", "wrk"])
+
+    assert result.exit_code == 0, result.output
+    assert "not verified by the tailnet" in result.output
+    assert installed == [("wrk", {})]

@@ -13,6 +13,13 @@ uses [Semantic Versioning](https://semver.org/).
   the tailnet, the hub's pages list only running projects, without their
   local folders.
   `tailscale status` shows its address.
+- `tailscale trust` no longer needs a fingerprint. It finds the hub in the
+  local Tailscale client's network map, by suffix, machine, or gateway
+  device, and asks the gateway at its tailnet address for its suffix and
+  root, so the tailnet vouches for what is installed and split DNS cannot
+  redirect it. Two hubs claiming one suffix must be told apart by device.
+  Without the tailscale CLI it falls back to the DNS download and warns;
+  `--fingerprint` still pins it.
 
 ### Changed
 
@@ -24,8 +31,8 @@ uses [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - Not-found pages read over the tailnet link projects under the tailnet
-  suffix instead of `.localhost`. The pinned trust command `tailscale status`
-  prints now starts with `uvx`, so it runs on a machine without localghost.
+  suffix instead of `.localhost`. The trust commands `tailscale status`
+  prints now start with `uvx`, so they run on a machine without localghost.
 
 ## [4.1.0] - 2026-10-09
 

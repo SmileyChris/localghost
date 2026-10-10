@@ -157,7 +157,7 @@ func (f *Fallback) trust(v view) *trust {
 	digest := sha256.Sum256(block.Bytes)
 	fingerprint := "SHA256:" + strings.ToUpper(hex.EncodeToString(digest[:]))
 	return &trust{
-		Command:     fmt.Sprintf("uvx localghost tailscale trust %s --fingerprint %s", v.Suffix, fingerprint),
+		Command:     "uvx localghost tailscale trust " + v.Suffix,
 		Fingerprint: fingerprint,
 	}
 }
@@ -363,8 +363,11 @@ const pageTemplate = `<!doctype html>
   {{with .Trust}}
   <h2>Trust this hub's HTTPS</h2>
   <p><button class="cmd" data-cmd="{{.Command}}">{{.Command}}</button></p>
-  <p class="muted">Or install the <a href="http://{{$.Home}}/.well-known/localghost/root.pem">root
-     certificate</a> by hand. Its fingerprint must be <code>{{.Fingerprint}}</code>.</p>
+  <p class="muted">It finds this hub through Tailscale, which vouches for it.
+     Without the tailscale CLI, pin the fingerprint you get from this hub's
+     owner instead, or install the
+     <a href="http://{{$.Home}}/.well-known/localghost/root.pem">root certificate</a>
+     by hand. It must be <code>{{.Fingerprint}}</code>.</p>
   {{end}}
   {{if .Known}}
   {{if .Trust}}<h2>Projects</h2>{{end}}

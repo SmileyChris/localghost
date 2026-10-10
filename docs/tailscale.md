@@ -131,19 +131,32 @@ When tailnet hosting is enabled, the standard trust command installs both the
 `.localhost` root and the active tailnet root. It downloads the latter from
 `http://localghost.tail1234` over the tailnet. Private CA keys never leave Docker volumes.
 
-On another device, name the suffix instead:
+On another device, name the hub — by its suffix, its machine, or its
+gateway device:
 
 ```sh
-localghost tailscale trust tail1234
+uvx localghost tailscale trust tail1234
 ```
 
-That download is plain HTTP, and the tailnet is what secures it: split DNS
-resolves the name to the tagged gateway, and the connection to it is
-WireGuard-encrypted and gated by tailnet policy. Whoever can rewrite the
-tailnet's DNS configuration can therefore answer for `localghost.tail1234`. To close
-that gap, pin the fingerprint: a successful enable — and `localghost
-tailscale status` afterwards — prints a ready-to-paste command for other
-machines, and the download is installed only if it matches:
+That finds the hub without DNS. The local Tailscale client's network map,
+which the coordination server signs off on, lists each online device tagged
+`tag:localghost` with its tailnet addresses; localghost asks each gateway at
+its address which suffix and root it serves, and WireGuard guarantees which
+device answered. Split DNS, which anyone who can edit the tailnet's DNS
+settings could point anywhere, plays no part. The setup output names the
+device it trusted. With no name and a single hub online, that hub is trusted.
+
+A suffix is only what a gateway claims, so when two hubs claim the same one
+the command refuses to choose and lists them; name the device instead
+(`localghost-<machine>`), which MagicDNS keeps unique across the tailnet.
+What this trusts in the end is the tailnet itself: faking a hub takes control
+of its gateway device, or the admin rights to replace it.
+
+Without the tailscale CLI there is no network map to ask, so the command
+falls back to downloading from `http://localghost.tail1234` by DNS and warns
+that it did. Pin the fingerprint there: a successful enable — and
+`localghost tailscale status` afterwards — prints it in a ready-to-paste
+command, and the download is installed only if it matches:
 
 ```sh
 uvx localghost tailscale trust tail1234 --fingerprint SHA256:1A2B…
@@ -151,10 +164,11 @@ uvx localghost tailscale trust tail1234 --fingerprint SHA256:1A2B…
 
 Devices without the localghost CLI (a phone, a colleague's untooled laptop)
 can open `http://localghost.tail1234` in a browser instead: the hub's page
-shows the pinned command, the expected fingerprint, and a direct link to the
-root certificate for manual installation. Read over the tailnet, it lists only
-running projects, linked under the suffix and without their local folders;
-stopped projects stay this machine's business.
+shows the trust command, the expected fingerprint, and a direct link to the
+root certificate for manual installation. That page arrives over the same
+DNS, so check the fingerprint against the one the hub's owner reports. Read
+over the tailnet, it lists only running projects, linked under the suffix and
+without their local folders; stopped projects stay this machine's business.
 The older `http://trust.tail1234` is deprecated: it still serves the root to
 earlier CLIs and redirects browsers to the hub's page.
 

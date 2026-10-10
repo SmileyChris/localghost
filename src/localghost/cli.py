@@ -92,14 +92,19 @@ from .tailscale import (
 from .tailscale import (
     OAUTH_CONSOLE_URL,
     POLICY_CONSOLE_URL,
+    TailnetHub,
     TailscaleError,
     TailscaleState,
+    tailnet_hubs,
 )
 from .tailscale import (
     default_node as default_tailscale_node,
 )
 from .tailscale import (
     delete_credential as delete_tailscale_credential,
+)
+from .tailscale import (
+    describe_hub as describe_tailnet_hub,
 )
 from .tailscale import (
     detect_suffix as detect_tailscale_suffix,
@@ -960,10 +965,7 @@ def _tailscale_status() -> None:
     if root_path.is_file():
         with suppress(TrustError):
             certificate = PublicCertificate.parse(root_path.read_bytes())
-            action(
-                f"Trust https://*.{state.suffix} on other machines",
-                _share_command(state.suffix, certificate),
-            )
+            _share_trust(state.suffix, certificate)
 
 
 def _tailscale_gateway_health() -> str:
@@ -1278,10 +1280,7 @@ def _offer_tailnet_trust(
 ) -> None:
     if certificate is None:
         return
-    action(
-        f"Trust https://*.{suffix} on other machines",
-        _share_command(suffix, certificate),
-    )
+    _share_trust(suffix, certificate)
     if localhost_trusted:
         info("Installing the tailnet HTTPS root (sudo may be requested)…")
         try:
@@ -1382,35 +1381,94 @@ def tailscale_disable(client_id: str | None, client_secret: str | None) -> None:
 
 
 @tailscale.command("trust")
-@click.argument("suffix", required=False)
+@click.argument("target", required=False)
 @click.option(
     "fingerprint",
     "--fingerprint",
     help=(
         "Install the root only when it has this SHA-256 fingerprint, as shown "
-        "by `localghost trust status` on the hosting machine."
+        "by `localghost tailscale status` on the hosting machine. TARGET is "
+        "then the suffix, and no tailscale CLI is needed."
     ),
 )
-def tailscale_trust(suffix: str | None, fingerprint: str | None) -> None:
-    """Compatibility alias for trusting the active tailnet root."""
-    if suffix is None:
-        state = load_tailscale_state()
-        if state is None:
-            raise click.ClickException("tailnet hosting is not enabled")
+def tailscale_trust(target: str | None, fingerprint: str | None) -> None:
+    """Trust a tailnet hub's HTTPS root on this client.
+
+    TARGET names the hub by suffix, machine, or gateway device. Without
+    --fingerprint the hub is found in this client's Tailscale network map, so
+    the tailnet itself vouches for the root. With no TARGET, the one hub on the
+    tailnet is trusted, or on a hosting machine its own.
+    """
+    state = load_tailscale_state()
+    if state is not None and target in (None, state.suffix):
         if not state.https:
             raise click.ClickException(
                 f"tailnet routes for .{state.suffix} are HTTP only, so there "
                 "is no root to trust"
             )
-        suffix = state.suffix
-    _install_tailnet_trust(suffix, expected_fingerprint=fingerprint)
+        _install_tailnet_trust(state.suffix, expected_fingerprint=fingerprint)
+    elif fingerprint is not None:
+        if target is None:
+            raise click.UsageError("name the suffix to trust with --fingerprint")
+        _install_tailnet_trust(target, expected_fingerprint=fingerprint)
+    else:
+        _trust_tailnet_hub(target)
 
 
-def _share_command(suffix: str, certificate: PublicCertificate) -> str:
-    """The pinned trust command another tailnet machine can paste."""
-    return (
+def _trust_tailnet_hub(target: str | None) -> None:
+    """Find a hub in the network map and trust the root it serves."""
+    hubs = tailnet_hubs()
+    if hubs is None:
+        if target is None:
+            raise click.ClickException(
+                "the tailscale CLI is unavailable to find a hub; name the suffix "
+                "and pass --fingerprint"
+            )
+        warning(
+            f"The .{target} root is not verified by the tailnet",
+            [
+                "the tailscale CLI is unavailable, so the download trusts DNS",
+                "pass --fingerprint to pin it",
+            ],
+        )
+        _install_tailnet_trust(target)
+        return
+    described: list[TailnetHub] = []
+    unreachable: list[str] = []
+    for hub in hubs:
+        try:
+            described.append(describe_tailnet_hub(hub))
+        except TailscaleError as exc:
+            unreachable.append(str(exc))
+    matches = [hub for hub in described if target is None or hub.answers_to(target)]
+    if len(matches) == 1:
+        hub = matches[0]
+        try:
+            certificate = PublicCertificate.parse(hub.root)
+        except TrustError as exc:
+            raise click.ClickException(str(exc)) from exc
+        _install_tailnet_trust(hub.suffix, certificate=certificate, verified_by=hub)
+        return
+    if matches:
+        message = "more than one hub matches; name one as TARGET"
+    elif target:
+        message = f"no online localghost hub answers to {target}"
+    else:
+        message = "no online localghost hub was found in this tailnet"
+    found = [f"{hub.label} (.{hub.suffix})" for hub in described] + unreachable
+    raise click.ClickException("\n  ".join([message, *found]))
+
+
+def _share_trust(suffix: str, certificate: PublicCertificate) -> None:
+    """Show another tailnet machine how to trust this hub's root."""
+    action(
+        f"Trust https://*.{suffix} on other machines",
+        f"uvx localghost tailscale trust {suffix}",
+    )
+    action(
+        "Without the tailscale CLI",
         f"uvx localghost tailscale trust {suffix} "
-        f"--fingerprint {certificate.fingerprint}"
+        f"--fingerprint {certificate.fingerprint}",
     )
 
 
@@ -1476,16 +1534,23 @@ def _install_tailnet_trust(
     *,
     show_details: bool = True,
     expected_fingerprint: str | None = None,
+    certificate: PublicCertificate | None = None,
+    verified_by: TailnetHub | None = None,
 ) -> None:
+    """Install a tailnet root: `certificate` when a caller already has it,
+    otherwise downloaded by suffix."""
     expected = _normalize_fingerprint(expected_fingerprint)
     try:
         require_mkcert()
         suffix = validate_tailscale_suffix(suffix)
-        state = load_tailscale_state()
-        gateway_ips = state.gateway_ips if state and state.suffix == suffix else ()
-        certificate = PublicCertificate.parse(
-            fetch_tailscale_root(suffix, gateway_ips)
-        )
+        if certificate is None:
+            state = load_tailscale_state()
+            gateway_ips = (
+                state.gateway_ips if state and state.suffix == suffix else ()
+            )
+            certificate = PublicCertificate.parse(
+                fetch_tailscale_root(suffix, gateway_ips)
+            )
     except (TailscaleError, TrustError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     if expected is not None and expected != certificate.fingerprint:
@@ -1504,6 +1569,11 @@ def _install_tailnet_trust(
                 ("Authorization", "sudo password may be requested for system trust"),
                 ("Scope", f"development names under .{suffix}"),
                 ("Public-root fingerprint", certificate.fingerprint),
+                *(
+                    [("Verified by", f"tailnet node {verified_by.name}")]
+                    if verified_by
+                    else []
+                ),
                 ("Private keys", "remain on the hosting machine"),
             ],
             title="Tailnet HTTPS setup",

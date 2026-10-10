@@ -329,14 +329,15 @@ func TestTailnetIndexLinksUnderItsSuffixAndPinsTheRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(der)
-	command := "uvx localghost tailscale trust tail1234 --fingerprint SHA256:" + strings.ToUpper(hex.EncodeToString(digest[:]))
+	fingerprint := "SHA256:" + strings.ToUpper(hex.EncodeToString(digest[:]))
+	command := "uvx localghost tailscale trust tail1234"
 
 	rec := get(h, "localghost.tail1234", "text/html")
 	body := rec.Body.String()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	for _, want := range []string{command, "//blog.tail1234", "//traefik.tail1234", "http://localghost.tail1234/.well-known/localghost/root.pem"} {
+	for _, want := range []string{command, fingerprint, "//blog.tail1234", "//traefik.tail1234", "http://localghost.tail1234/.well-known/localghost/root.pem"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("tailnet index missing %q:\n%s", want, body)
 		}

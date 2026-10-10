@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"io"
 	"math/big"
@@ -116,6 +117,30 @@ func TestIndexHostServesTheRootAndProxiesTheRest(t *testing.T) {
 	request = httptest.NewRequest("GET", "http://localghost.tail1234/", nil)
 	if serveTrust(httptest.NewRecorder(), request, cfg) {
 		t.Fatal("expected the index page to be left to Traefik")
+	}
+}
+
+func TestTailnetAddressDescribesTheHub(t *testing.T) {
+	path, _ := testRootCA(t)
+	cfg := configuration{suffix: "tail1234", rootCA: path}
+	expected, _ := os.ReadFile(path)
+	for _, host := range []string{"100.64.0.10", "[fd7a:115c:a1e0::1]"} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest("GET", "http://"+host+"/.well-known/localghost/hub.json", nil)
+		if !serveTrust(recorder, request, cfg) {
+			t.Fatalf("expected %s to be handled", host)
+		}
+		var hub struct{ Suffix, Root string }
+		if err := json.NewDecoder(recorder.Body).Decode(&hub); err != nil {
+			t.Fatal(err)
+		}
+		if hub.Suffix != "tail1234" || hub.Root != string(expected) {
+			t.Fatalf("hub = %+v", hub)
+		}
+	}
+	request := httptest.NewRequest("GET", "http://100.64.0.10/", nil)
+	if serveTrust(httptest.NewRecorder(), request, cfg) {
+		t.Fatal("expected other paths on the address to be left to Traefik")
 	}
 }
 
