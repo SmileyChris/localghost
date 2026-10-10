@@ -872,7 +872,7 @@ def _remove_trust() -> None:
     if tailnet_active:
         info(
             "Tailnet hosting keeps the hub serving HTTPS; run "
-            "`localghost tailscale disable` to turn the mirror off."
+            "`localghost tailscale unshare` to turn the mirror off."
         )
 
 
@@ -939,10 +939,10 @@ def _tailscale_status() -> None:
     except TailscaleError as exc:
         raise click.ClickException(str(exc)) from exc
     if state is None:
-        details([("Tailnet hosting", "disabled")], title="Tailscale status")
+        details([("Tailnet sharing", "off")], title="Tailscale status")
         return
     details(
-        [("Tailnet hosting", "enabled")]
+        [("Tailnet sharing", "on")]
         + _explicit_tailnet_row(state.tailnet)
         + [
             ("Route suffix", f".{state.suffix}"),
@@ -1053,7 +1053,7 @@ def _unmirrored_router_names() -> list[str]:
     return names
 
 
-@tailscale.command("enable")
+@tailscale.command("share")
 @click.option(
     "tailnet",
     "--tailnet",
@@ -1075,7 +1075,7 @@ def _unmirrored_router_names() -> list[str]:
     "--client-secret",
     envvar="TAILSCALE_CLIENT_SECRET",
 )
-def tailscale_enable(
+def tailscale_share(
     tailnet: str,
     suffix: str | None,
     tag: str,
@@ -1083,9 +1083,10 @@ def tailscale_enable(
     client_id: str | None,
     client_secret: str | None,
 ) -> None:
-    """Enroll a tagged gateway and add split DNS for the chosen suffix.
+    """Share this machine's hub on the tailnet under a route suffix.
 
-    When tailnet hosting is already enabled, a different suffix, given or
+    Enrolls a tagged gateway device and points split DNS for the suffix at
+    it. When the hub is already shared, a different suffix, given or
     detected, moves the routes to it, keeping the same gateway device.
     """
     title()
@@ -1152,7 +1153,7 @@ def tailscale_enable(
     except (TailscaleError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     _remember_tailscale_credential(client_id, client_secret)
-    success(f"Tailnet routes are enabled at {_tailnet_url(state, '<project>')}.")
+    success(f"Shared on the tailnet at {_tailnet_url(state, '<project>')}.")
     _offer_tailnet_trust(chosen_suffix, certificate, localhost_trusted)
 
 
@@ -1181,7 +1182,7 @@ def _switch_tailnet_suffix(
         chosen_suffix = current.suffix
     if chosen_suffix == current.suffix:
         raise click.ClickException(
-            f"tailnet hosting is already enabled at .{current.suffix}; pass "
+            f"the hub is already shared at .{current.suffix}; pass "
             "--suffix to move it to another suffix"
         )
     old_suffix = current.suffix
@@ -1271,7 +1272,7 @@ def _remember_tailscale_credential(client_id: str, client_secret: str) -> None:
     if not store_tailscale_credential(client_id, client_secret):
         warning(
             "The OAuth credential was not stored",
-            ["no usable system keyring; disable will ask for the credential again"],
+            ["no usable system keyring; unshare will ask for the credential again"],
         )
 
 
@@ -1336,21 +1337,21 @@ def _resolve_tailscale_credential(
     return client_id, client_secret
 
 
-@tailscale.command("disable")
+@tailscale.command("unshare")
 @click.option("client_id", "--client-id", envvar="TAILSCALE_CLIENT_ID")
 @click.option(
     "client_secret",
     "--client-secret",
     envvar="TAILSCALE_CLIENT_SECRET",
 )
-def tailscale_disable(client_id: str | None, client_secret: str | None) -> None:
-    """Restore the prior tailnet DNS configuration and stop the gateway."""
+def tailscale_unshare(client_id: str | None, client_secret: str | None) -> None:
+    """Stop sharing the hub: restore prior tailnet DNS and stop the gateway."""
     try:
         state = load_tailscale_state()
     except TailscaleError as exc:
         raise click.ClickException(str(exc)) from exc
     if state is None:
-        raise click.ClickException("tailnet hosting is not enabled")
+        raise click.ClickException("the hub is not shared on the tailnet")
     client_id, client_secret = _resolve_tailscale_credential(client_id, client_secret)
     try:
         api = TailscaleAPI.authenticate(client_id, client_secret)
@@ -1378,6 +1379,28 @@ def tailscale_disable(client_id: str | None, client_secret: str | None) -> None:
         f"Remove the offline tagged localghost-{state.node_label} device in the "
         "Tailscale admin console."
     )
+
+
+tailscale.add_command(
+    click.Command(
+        "enable",
+        callback=tailscale_share.callback,
+        params=tailscale_share.params,
+        help=tailscale_share.help,
+        hidden=True,
+        deprecated="Use 'localghost tailscale share' instead.",
+    )
+)
+tailscale.add_command(
+    click.Command(
+        "disable",
+        callback=tailscale_unshare.callback,
+        params=tailscale_unshare.params,
+        help=tailscale_unshare.help,
+        hidden=True,
+        deprecated="Use 'localghost tailscale unshare' instead.",
+    )
+)
 
 
 @tailscale.command("trust")
@@ -1479,7 +1502,7 @@ def _rollback_enable(
     """Return to the pre-enable state after a late enable failure.
 
     The suffix's split-DNS entry goes back to its previous value and the
-    saved state is removed so `enable` can simply be run again. The enrolled
+    saved state is removed so `share` can simply be run again. The enrolled
     gateway device stays: retrying reuses its persisted node state, and
     giving up only needs the admin console.
     """
@@ -1489,8 +1512,8 @@ def _rollback_enable(
         warning("Tailnet DNS was not restored", [str(exc)])
     remove_tailscale_state()
     warning(
-        "Enable failed and was rolled back",
-        [f"run `localghost tailscale enable` again to retry .{suffix}"],
+        "Sharing failed and was rolled back",
+        [f"run `localghost tailscale share` again to retry .{suffix}"],
     )
 
 
@@ -2332,7 +2355,7 @@ def _repair_authorities(tailscale_state: TailscaleState | None) -> bool:
     """Re-run the idempotent CA bootstraps after a failed HTTPS start.
 
     A pruned or half-created signer volume aborts Traefik's CA plugins, and
-    nothing else recreates the material outside `trust` and `enable`.
+    nothing else recreates the material outside `trust` and `share`.
     Bootstrap validates a healthy authority untouched, so retrying is safe.
     Returns False when repair itself fails so the original failure is the
     one reported.

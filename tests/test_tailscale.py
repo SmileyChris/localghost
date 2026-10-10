@@ -525,7 +525,7 @@ def test_status_reports_disabled_state(monkeypatch) -> None:
     monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: None)
     result = CliRunner().invoke(cli, ["tailscale", "status"])
     assert result.exit_code == 0, result.output
-    assert "disabled" in result.output
+    assert "Tailnet sharing: off" in result.output
 
 
 def test_status_reports_invalid_state(monkeypatch) -> None:
@@ -595,7 +595,7 @@ def _patch_enable(monkeypatch, events, saved, state_dir):
 
 
 ENABLE_ARGS = [
-    "tailscale", "enable", "--tailnet", "example.com", "--suffix", "tail1234"
+    "tailscale", "share", "--tailnet", "example.com", "--suffix", "tail1234"
 ]
 CREDENTIAL_ARGS = ["--client-id", "id", "--client-secret", "secret"]
 
@@ -631,7 +631,7 @@ def test_enable_with_a_public_suffix_skips_the_tailnet_authority(
         lambda *args, **kwargs: pytest.fail("nothing to trust"),
     )
 
-    args = ["tailscale", "enable", "--tailnet", "example.com", "--suffix", "work"]
+    args = ["tailscale", "share", "--tailnet", "example.com", "--suffix", "work"]
     result = CliRunner().invoke(cli, args + CREDENTIAL_ARGS)
     assert result.exit_code == 0, result.output
     assert saved[0].suffix == "work"
@@ -939,7 +939,7 @@ def test_disable_uses_the_stored_credential_and_deletes_it(monkeypatch) -> None:
 
     monkeypatch.setattr(cli_module, "delete_tailscale_credential", delete_credential)
 
-    result = CliRunner().invoke(cli, ["tailscale", "disable"])
+    result = CliRunner().invoke(cli, ["tailscale", "unshare"])
     assert result.exit_code == 0, result.output
     assert events[0] == ("kid", "ksecret")
     assert "deleted" in events
@@ -971,7 +971,7 @@ def test_disable_notes_that_other_machines_still_trust_the_root(monkeypatch) -> 
     )
     monkeypatch.setattr(cli_module, "delete_tailscale_credential", lambda: None)
 
-    result = CliRunner().invoke(cli, ["tailscale", "disable"])
+    result = CliRunner().invoke(cli, ["tailscale", "unshare"])
     assert result.exit_code == 0, result.output
     assert "still trust" in result.output
     assert "localghost trust remove" in result.output
@@ -979,9 +979,9 @@ def test_disable_notes_that_other_machines_still_trust_the_root(monkeypatch) -> 
 
 def test_disable_requires_enabled_state(monkeypatch) -> None:
     monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: None)
-    result = CliRunner().invoke(cli, ["tailscale", "disable"])
+    result = CliRunner().invoke(cli, ["tailscale", "unshare"])
     assert result.exit_code != 0
-    assert "not enabled" in result.output
+    assert "not shared" in result.output
 
 
 def test_disable_reports_invalid_state(monkeypatch) -> None:
@@ -989,7 +989,7 @@ def test_disable_reports_invalid_state(monkeypatch) -> None:
         raise TailscaleError("invalid saved state")
 
     monkeypatch.setattr(cli_module, "load_tailscale_state", broken)
-    result = CliRunner().invoke(cli, ["tailscale", "disable"])
+    result = CliRunner().invoke(cli, ["tailscale", "unshare"])
     assert result.exit_code != 0
     assert "invalid saved state" in result.output
 
@@ -1014,7 +1014,7 @@ def test_disable_reports_api_failure(monkeypatch) -> None:
         lambda: tailscale_module.Credential("kid", "ksecret"),
     )
 
-    result = CliRunner().invoke(cli, ["tailscale", "disable"])
+    result = CliRunner().invoke(cli, ["tailscale", "unshare"])
     assert result.exit_code != 0
     assert "could not reach the Tailscale API" in result.output
 
@@ -1864,7 +1864,7 @@ def test_disable_without_a_stored_credential_names_the_scope_it_needs(
     monkeypatch.setattr(cli_module, "delete_tailscale_credential", lambda: False)
 
     result = CliRunner().invoke(
-        cli, ["tailscale", "disable"], input="typed\ntyped-secret\n"
+        cli, ["tailscale", "unshare"], input="typed\ntyped-secret\n"
     )
     assert result.exit_code == 0, result.output
     assert "No OAuth credential is stored" in result.output
@@ -1977,9 +1977,9 @@ def test_enable_while_enabled_needs_another_suffix(
     _patch_switch(monkeypatch, events, saved, tmp_path)
     monkeypatch.setattr(cli_module, "detect_tailscale_suffix", lambda: "old1234")
 
-    result = CliRunner().invoke(cli, ["tailscale", "enable", *args])
+    result = CliRunner().invoke(cli, ["tailscale", "share", *args])
     assert result.exit_code != 0
-    assert "already enabled at .old1234" in result.output
+    assert "already shared at .old1234" in result.output
     assert "--suffix" in result.output
     assert saved == []
 
@@ -1992,7 +1992,7 @@ def test_enable_with_another_suffix_moves_the_routes_to_the_same_device(
     _patch_switch(monkeypatch, events, saved, tmp_path)
 
     result = CliRunner().invoke(
-        cli, ["tailscale", "enable", "--suffix", "wrk"] + CREDENTIAL_ARGS
+        cli, ["tailscale", "share", "--suffix", "wrk"] + CREDENTIAL_ARGS
     )
     assert result.exit_code == 0, result.output
     assert saved[0] == TailscaleState(
@@ -2021,7 +2021,7 @@ def test_switching_refuses_a_suffix_another_machine_hosts(
     )
 
     result = CliRunner().invoke(
-        cli, ["tailscale", "enable", "--suffix", "wrk"] + CREDENTIAL_ARGS
+        cli, ["tailscale", "share", "--suffix", "wrk"] + CREDENTIAL_ARGS
     )
     assert result.exit_code != 0
     assert "100.9.9.9" in result.output
@@ -2043,7 +2043,7 @@ def test_switching_rolls_back_to_the_old_suffix_when_the_hub_fails(
     )
 
     result = CliRunner().invoke(
-        cli, ["tailscale", "enable", "--suffix", "wrk"] + CREDENTIAL_ARGS
+        cli, ["tailscale", "share", "--suffix", "wrk"] + CREDENTIAL_ARGS
     )
     assert result.exit_code != 0
     assert ("example.com", {"wrk": None, "old1234": ["100.64.0.1"]}) in events
@@ -2059,7 +2059,7 @@ def test_enable_follows_a_renamed_machine_to_its_new_suffix(
     _patch_switch(monkeypatch, events, saved, tmp_path)
     monkeypatch.setattr(cli_module, "detect_tailscale_suffix", lambda: "wrk")
 
-    result = CliRunner().invoke(cli, ["tailscale", "enable"] + CREDENTIAL_ARGS)
+    result = CliRunner().invoke(cli, ["tailscale", "share"] + CREDENTIAL_ARGS)
     assert result.exit_code == 0, result.output
     assert saved[0].suffix == "wrk"
     assert ".old1234 → .wrk" in result.output
@@ -2077,9 +2077,9 @@ def test_enable_while_enabled_without_detection_keeps_the_suffix(
 
     monkeypatch.setattr(cli_module, "detect_tailscale_suffix", undetectable)
 
-    result = CliRunner().invoke(cli, ["tailscale", "enable"])
+    result = CliRunner().invoke(cli, ["tailscale", "share"])
     assert result.exit_code != 0
-    assert "already enabled at .old1234" in result.output
+    assert "already shared at .old1234" in result.output
     assert saved == []
 
 
@@ -2212,3 +2212,11 @@ def test_tailnet_trust_without_the_tailscale_cli_warns_and_trusts_dns(
     assert result.exit_code == 0, result.output
     assert "not verified by the tailnet" in result.output
     assert installed == [("wrk", {})]
+
+
+@pytest.mark.parametrize(("old", "new"), [("enable", "share"), ("disable", "unshare")])
+def test_enable_and_disable_remain_as_deprecated_aliases(old, new) -> None:
+    alias = cli_module.tailscale.commands[old]
+    assert alias.callback is cli_module.tailscale.commands[new].callback
+    assert alias.hidden
+    assert alias.deprecated == f"Use 'localghost tailscale {new}' instead."
