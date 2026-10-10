@@ -2314,7 +2314,7 @@ def test_a_project_remembered_under_its_generic_name_keeps_it(monkeypatch, tmp_p
 def test_isolated_plan_keeps_the_app_port_and_routes_an_ephemeral_one(
     monkeypatch, tmp_path
 ):
-    monkeypatch.setattr(runner, "isolation_available", lambda: True)
+    monkeypatch.setattr(ports, "isolation_available", lambda: True)
     monkeypatch.setattr(ports, "port_available", lambda port: port != 8000)
     monkeypatch.setattr(ports, "ephemeral_port", lambda: 41873)
 
@@ -2336,7 +2336,7 @@ def test_isolated_plan_keeps_the_app_port_and_routes_an_ephemeral_one(
 
 
 def test_isolation_without_pasta_warns_and_runs_shared(monkeypatch, tmp_path):
-    monkeypatch.setattr(runner, "isolation_available", lambda: False)
+    monkeypatch.setattr(ports, "isolation_available", lambda: False)
     monkeypatch.setattr(ports, "port_available", lambda port: True)
     warnings = []
     monkeypatch.setattr(
@@ -2400,3 +2400,22 @@ def test_custom_command_keeps_a_free_port(monkeypatch, tmp_path):
 
     assert plan.port == 8000
     assert plan.command == ("just", "dev", "8000")
+
+
+def test_a_busy_port_suggests_isolation_only_where_it_works(monkeypatch):
+    monkeypatch.setattr(ports, "holder", lambda port: None)
+    said = []
+    monkeypatch.setattr(
+        runner, "warning", lambda title, messages: said.extend(messages)
+    )
+
+    monkeypatch.setattr(ports, "isolation_available", lambda: True)
+    runner._report_skipped_port(8000, 8001)
+    assert "--isolate" in ports.in_use_message(8000)
+
+    monkeypatch.setattr(ports, "isolation_available", lambda: False)
+    runner._report_skipped_port(8000, 8001)
+    assert "--isolate" not in ports.in_use_message(8000)
+
+    assert "Retry with --isolate to keep 8000." in said[0]
+    assert "--isolate" not in said[1]

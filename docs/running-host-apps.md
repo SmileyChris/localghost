@@ -458,7 +458,13 @@ reaches loopback, so a loopback bind is left alone rather than refused.
 Two projects that both want port 8000 cannot share the host's loopback, and a
 project made of several servers -- Django talking to a Vite dev server, say --
 breaks if one of them is moved to a free port the others do not know about.
-`isolate = true` gives the whole run its own network namespace instead:
+`--isolate` gives the whole run its own network namespace instead:
+
+```sh
+uvx localghost run --isolate
+```
+
+`localghost save --isolate` keeps it, as `isolate = true`:
 
 ```toml
 [run]
@@ -476,6 +482,9 @@ route points there, and the run lists it as the host port beside the isolated
 one; it changes from run to run, so use the public URL rather than the number. The application still reaches the
 internet; services on the host's loopback, such as a local database, are
 reached over the namespace's gateway address rather than `127.0.0.1`.
+
+When a port is already taken, the error or warning says so and, where
+isolation is available, suggests retrying with `--isolate`.
 
 Isolation needs Linux and [pasta](https://passt.top/) (the `passt` package),
 which provides the namespace's networking without root. Where either is missing

@@ -1600,6 +1600,12 @@ def _remove_superseded_root(
     help="Run configuration TOML path.",
 )
 @click.option(
+    "isolate",
+    "--isolate",
+    is_flag=True,
+    help="Run in its own network namespace so it keeps its port (Linux, pasta).",
+)
+@click.option(
     "dry_run",
     "--dry-run",
     is_flag=True,
@@ -1620,6 +1626,7 @@ def run(
     port: int | None,
     detach: bool,
     config: Path | None,
+    isolate: bool,
     dry_run: bool,
     no_status_bar: bool,
     command: tuple[str, ...],
@@ -1633,14 +1640,15 @@ def run(
         port=port,
         config=config,
         command=command,
+        isolate=isolate,
     )
     if resolved.selected_type == "compose":
         # Compose owns the application's configuration; --project-root is
         # orthogonal and stays allowed.
-        if resolved.command or resolved.port is not None:
+        if resolved.command or resolved.port is not None or isolate:
             raise click.ClickException(
-                "compose does not accept a host command or --port; Compose "
-                "owns them"
+                "compose does not accept a host command, --port or --isolate; "
+                "Compose owns them"
             )
         project = resolved.name or _local_project_name(resolved.root)
         _check_compose_routing(resolved.root, project)
@@ -1767,6 +1775,7 @@ def _resolve_application(
     port: int | None,
     config: Path | None,
     command: tuple[str, ...],
+    isolate: bool = False,
 ) -> ResolvedApplication:
     """Resolve the effective application once for running and persistence."""
     cwd = working_directory or Path.cwd()
@@ -1780,8 +1789,10 @@ def _resolve_application(
     config_file = config or discover_config(flagged_root or cwd)
     settings = load_config(config_file) if config_file else RunConfig()
     config_dir = config_file.parent if config_file else None
-    explicit_run_settings = bool(command) or any(
-        value is not None for value in (name, selected_type, port, config)
+    explicit_run_settings = (
+        bool(command)
+        or isolate
+        or any(value is not None for value in (name, selected_type, port, config))
     )
     command = command or settings.command
     name = name or settings.name
@@ -1830,7 +1841,7 @@ def _resolve_application(
         command,
         pinned=pinned,
         pinned_from_flag=root_from_flag,
-        isolate=settings.isolate,
+        isolate=isolate or settings.isolate,
     )
     return ResolvedApplication(
         cwd=cwd,
@@ -2687,6 +2698,7 @@ _SAVE_FLAG_KINDS: dict[str, tuple[str, ...]] = {
     "--name": ("host",),
     "--config": ("host",),
     "a trailing command": ("host",),
+    "--isolate": ("host",),
 }
 _SAVE_KIND_LABELS = {
     "compose": "Compose",
@@ -2782,6 +2794,12 @@ def _save_kind(selected_type: str) -> str:
 @click.option(
     "run_after", "--run", is_flag=True, help="Start the application after saving."
 )
+@click.option(
+    "isolate",
+    "--isolate",
+    is_flag=True,
+    help="Run in its own network namespace so it keeps its port (Linux, pasta).",
+)
 @click.argument("command", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def save(
@@ -2799,6 +2817,7 @@ def save(
     dry_run: bool,
     no_input: bool,
     run_after: bool,
+    isolate: bool,
     command: tuple[str, ...],
 ) -> None:
     """Save Localghost setup for the current application.
@@ -2842,6 +2861,7 @@ def save(
             "--name": name is not None,
             "--config": config is not None,
             "a trailing command": bool(command),
+            "--isolate": isolate,
         },
     )
     if not dry_run:
@@ -2930,6 +2950,7 @@ def save(
         port=port,
         config=config,
         command=command,
+        isolate=isolate,
     )
     assert resolved.selected_type != "compose"
     _persist_resolved_application(

@@ -530,3 +530,23 @@ def test_save_keeps_a_custom_commands_port_when_it_is_busy(
     saved = (tmp_path / ".localghost.toml").read_text()
     assert "port = 8000" in saved
     assert '"{port}"' in saved
+
+
+def test_save_isolate_writes_it_to_the_config(monkeypatch, tmp_path) -> None:
+    from localghost import ports
+
+    monkeypatch.setattr(ports, "isolation_available", lambda: True)
+    monkeypatch.setattr(ports, "ephemeral_port", lambda: 41873)
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        ["save", "--no-input", "--name", "demo", "--port", "8000", "--isolate", "--"]
+        + ["just", "dev"],
+    )
+
+    assert result.exit_code == 0, result.output
+    saved = (tmp_path / ".localghost.toml").read_text()
+    # The application's own port is saved, never the ephemeral host side.
+    assert "port = 8000" in saved
+    assert "isolate = true" in saved

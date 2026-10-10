@@ -6,6 +6,7 @@ import errno
 import glob
 import ipaddress
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -79,6 +80,11 @@ def ephemeral_port() -> int:
             return port
 
 
+def isolation_available() -> bool:
+    """Can a run have its own network namespace here? See runner.isolation."""
+    return sys.platform.startswith("linux") and shutil.which("pasta") is not None
+
+
 def in_use_message(port: int) -> str:
     """Say a port is taken, naming its holder whenever the host will tell us.
 
@@ -87,6 +93,8 @@ def in_use_message(port: int) -> str:
     """
     taken = f"host port {port} is already in use"
     remedy = "stop it, or choose another port with --port"
+    if isolation_available():
+        remedy += f", or retry with --isolate to keep {port}"
     found = holder(port)
     detail = []
     if found is not None and found.pid is not None:

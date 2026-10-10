@@ -245,7 +245,7 @@ def build_plan(
     isolate: bool = False,
 ) -> RunPlan:
     cwd = cwd.resolve()
-    isolated = isolate and isolation_available()
+    isolated = isolate and ports.isolation_available()
     if isolate and not isolated:
         warning(
             "Running without isolation",
@@ -332,10 +332,6 @@ def build_plan(
         # holds a saved port strictly, so it has to save the one it got.
         wanted_port if selected_type == "custom" else None,
     )
-
-
-def isolation_available() -> bool:
-    return sys.platform.startswith("linux") and shutil.which("pasta") is not None
 
 
 def isolation(host_port: int, app_port: int) -> tuple[str, ...]:
@@ -1315,6 +1311,8 @@ def _report_skipped_port(wanted: int, selected: int) -> None:
         detail += "."
         if held.directory:
             detail += f" Working directory: {held.directory}."
+    if ports.isolation_available():
+        detail += f" Retry with --isolate to keep {wanted}."
     warning("Port in use", [detail])
 
 
