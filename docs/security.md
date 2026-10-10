@@ -184,9 +184,14 @@ operate from an unconstrained root posing as a tailnet authority; only the
 `.localhost` authority accepts its legacy unconstrained roots, and that root
 is installed only on the machine that hosts it.
 
-Clients should pin the download: enable and `localghost tailscale status`
-print a `--fingerprint` trust command that installs the root only when it
-matches, which removes the residual trust in tailnet DNS configuration.
+Clients find the hub through their own Tailscale client rather than DNS:
+`localghost tailscale trust` takes the gateway's tailnet address from the
+network map the coordination server provides and asks the gateway there for
+its root, so WireGuard vouches for which device served it and tailnet DNS
+configuration plays no part. What remains trusted is the tailnet itself:
+control of the gateway device, or admin rights to replace it. A client
+without the tailscale CLI falls back to DNS and should pin the download with
+the `--fingerprint` that enable and `localghost tailscale status` print.
 
 Trusting a tailnet root replaces any earlier root for the same suffix: the
 superseded certificate is removed from this client's trust stores before the

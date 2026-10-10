@@ -155,7 +155,7 @@ of its gateway device, or the admin rights to replace it.
 Without the tailscale CLI there is no network map to ask, so the command
 falls back to downloading from `http://localghost.tail1234` by DNS and warns
 that it did. Pin the fingerprint there: a successful enable — and
-`localghost tailscale status` afterwards — prints it in a ready-to-paste
+`localghost tailscale status` afterwards — prints it beneath the trust
 command, and the download is installed only if it matches:
 
 ```sh

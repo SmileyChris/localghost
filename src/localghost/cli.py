@@ -1465,10 +1465,11 @@ def _share_trust(suffix: str, certificate: PublicCertificate) -> None:
         f"Trust https://*.{suffix} on other machines",
         f"uvx localghost tailscale trust {suffix}",
     )
-    action(
-        "Without the tailscale CLI",
-        f"uvx localghost tailscale trust {suffix} "
-        f"--fingerprint {certificate.fingerprint}",
+    # The fingerprint is for clients that cannot ask Tailscale for the hub;
+    # the plain command above is the way forward for everyone else.
+    info(
+        "Without the tailscale CLI, add --fingerprint "
+        f"{certificate.fingerprint} to pin the root."
     )
 
 

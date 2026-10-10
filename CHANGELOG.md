@@ -19,7 +19,8 @@ uses [Semantic Versioning](https://semver.org/).
   root, so the tailnet vouches for what is installed and split DNS cannot
   redirect it. Two hubs claiming one suffix must be told apart by device.
   Without the tailscale CLI it falls back to the DNS download and warns;
-  `--fingerprint` still pins it.
+  `--fingerprint` still pins it. Enable and `tailscale status` now offer the
+  plain command, with the fingerprint as a note for clients without the CLI.
 
 ### Changed
 

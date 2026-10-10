@@ -793,10 +793,8 @@ def test_enable_prints_the_share_command(monkeypatch, tmp_path) -> None:
     result = CliRunner().invoke(cli, ENABLE_ARGS + CREDENTIAL_ARGS)
     assert result.exit_code == 0, result.output
     fingerprint = PublicCertificate.parse(CERTIFICATE_PEM).fingerprint
-    assert (
-        f"localghost tailscale trust tail1234 --fingerprint {fingerprint}"
-        in result.output
-    )
+    assert "uvx localghost tailscale trust tail1234\n" in result.output
+    assert f"--fingerprint {fingerprint}" in result.output
 
 
 def test_enable_saves_the_tailnet_root_for_later_status(monkeypatch, tmp_path) -> None:
@@ -903,10 +901,8 @@ def test_status_prints_the_share_command(monkeypatch, tmp_path) -> None:
     result = CliRunner().invoke(cli, ["tailscale", "status"])
     assert result.exit_code == 0, result.output
     fingerprint = PublicCertificate.parse(CERTIFICATE_PEM).fingerprint
-    assert (
-        f"localghost tailscale trust tail1234 --fingerprint {fingerprint}"
-        in result.output
-    )
+    assert "uvx localghost tailscale trust tail1234\n" in result.output
+    assert f"--fingerprint {fingerprint}" in result.output
 
 
 def test_disable_uses_the_stored_credential_and_deletes_it(monkeypatch) -> None:
@@ -2008,7 +2004,7 @@ def test_enable_with_another_suffix_moves_the_routes_to_the_same_device(
     assert events[-1] == {"https_enabled": True, "force_recreate": True}
     assert "localghost-t16 (unchanged)" in result.output
     assert "Machines that trusted the .old1234 root still trust it" in result.output
-    assert "localghost tailscale trust wrk --fingerprint" in result.output
+    assert "uvx localghost tailscale trust wrk\n" in result.output
 
 
 def test_switching_refuses_a_suffix_another_machine_hosts(
