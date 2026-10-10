@@ -380,10 +380,16 @@ _MAX_ROOT_BYTES = 65536
 
 def fetch_public_root(suffix: str, gateway_ips: tuple[str, ...] = ()) -> bytes:
     suffix = validate_suffix(suffix)
-    host = f"trust.{suffix}"
-    candidates = gateway_ips or (host,)
+    # trust.<suffix> is deprecated, but hubs older than localghost.<suffix>
+    # serve the root only there.
+    hosts = (f"localghost.{suffix}", f"trust.{suffix}")
+    attempts = (
+        [(address, host) for address in gateway_ips for host in hosts]
+        if gateway_ips
+        else [(host, host) for host in hosts]
+    )
     last_error: urllib.error.URLError | None = None
-    for candidate in candidates:
+    for candidate, host in attempts:
         try:
             address = str(ipaddress.ip_address(candidate))
             if ":" in address:

@@ -3,6 +3,29 @@
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- With tailnet hosting enabled, `http://localghost.<suffix>` is the hub's page
+  on the tailnet: its projects linked under the suffix, and for a private
+  suffix the pinned trust command, fingerprint, and root download. Read from
+  another device, the hub's pages leave out local folders and CLI commands.
+  `tailscale status` shows its address.
+
+### Changed
+
+- `localghost`, `trust`, and `traefik` are reserved project names: the hub
+  answers at those names itself, so a project there was never reachable.
+- `http://trust.<suffix>` is deprecated in favor of `localghost.<suffix>`. It
+  still serves the root certificate to earlier CLIs and redirects browsers.
+
+### Fixed
+
+- Ghost and not-found pages read over the tailnet link projects under the
+  tailnet suffix instead of `.localhost`, and a ghost page answers at a
+  project's tailnet name.
+
 ## [4.1.0] - 2026-10-09
 
 ### Changed

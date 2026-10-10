@@ -2,6 +2,9 @@ package traefik_localghost_fallback
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -284,10 +287,70 @@ func TestProjectsListRunningByNameThenMostRecentlyStarted(t *testing.T) {
 	}
 	online := map[string]bool{"omega.localhost": true, "beta.localhost": true}
 	var names []string
-	for _, e := range pageEntries(entries, online) {
+	for _, e := range pageEntries(entries, online, view{Suffix: "localhost"}) {
 		names = append(names, e.Name)
 	}
 	if got := strings.Join(names, " "); got != "beta omega gamma alpha" {
 		t.Fatalf("order = %q", got)
+	}
+}
+
+func TestTailnetIndexLinksUnderItsSuffixAndPinsTheRoot(t *testing.T) {
+	dir := t.TempDir()
+	writeEntry(t, dir, "blog", "blog.localhost")
+	der := []byte("not really DER, but the digest only needs bytes")
+	root := filepath.Join(t.TempDir(), "rootCA.pem")
+	if err := os.WriteFile(root, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config := CreateConfig()
+	config.RegistryPath = dir
+	config.RoutersURL = ""
+	config.TailnetSuffix = "tail1234"
+	config.TailnetRoot = root
+	h, err := New(context.Background(), nil, config, "localghost-fallback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(der)
+	command := "uvx localghost tailscale trust tail1234 --fingerprint SHA256:" + strings.ToUpper(hex.EncodeToString(digest[:]))
+
+	rec := get(h, "localghost.tail1234", "text/html")
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	for _, want := range []string{command, "//blog.tail1234", "//traefik.tail1234", "http://localghost.tail1234/.well-known/localghost/root.pem"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("tailnet index missing %q:\n%s", want, body)
+		}
+	}
+	for _, unwanted := range []string{"blog.localhost", "/home/dev/blog"} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("tailnet index leaks %q", unwanted)
+		}
+	}
+
+	// Another suffix is not this root's to vouch for.
+	if body := get(h, "localghost.other", "text/html").Body.String(); strings.Contains(body, "tailscale trust") {
+		t.Fatal("trust command shown under a foreign suffix")
+	}
+}
+
+func TestTailnetGhostPageLeavesOutLocalDetails(t *testing.T) {
+	dir := t.TempDir()
+	writeEntry(t, dir, "blog", "blog.localhost")
+	rec := get(handler(t, dir), "blog.tail1234", "text/html")
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, unwanted := range []string{"/home/dev/blog", "localghost restart"} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("tailnet ghost page leaks %q", unwanted)
+		}
+	}
+	if !strings.Contains(body, `href="//localghost.tail1234"`) {
+		t.Fatalf("wordmark should link to the tailnet index:\n%s", body)
 	}
 }

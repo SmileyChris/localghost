@@ -2308,3 +2308,9 @@ def test_a_project_remembered_under_its_generic_name_keeps_it(monkeypatch, tmp_p
     registry.record("web", project, "vite")
 
     assert runner.resolve_name(project) == "web"
+
+
+@pytest.mark.parametrize("name", ["localghost", "trust", "traefik"])
+def test_hub_names_are_reserved(name) -> None:
+    with pytest.raises(click.ClickException, match="reserved for the localghost hub"):
+        runner.validate_name(name)

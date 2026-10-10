@@ -941,6 +941,7 @@ def _tailscale_status() -> None:
         + _explicit_tailnet_row(state.tailnet)
         + [
             ("Route suffix", f".{state.suffix}"),
+            ("Hub page", f"http://localghost.{state.suffix}"),
             ("Gateway", ", ".join(state.gateway_ips)),
             ("Gateway health", _tailscale_gateway_health()),
             ("Device tag", state.tag),

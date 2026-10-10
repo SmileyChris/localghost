@@ -394,7 +394,7 @@ def test_fetch_public_root_success_and_failure(monkeypatch) -> None:
         "tail1234", ("100.64.0.10",)
     ) == CERTIFICATE_PEM
     assert requests[0].full_url.startswith("http://100.64.0.10/")
-    assert requests[0].get_header("Host") == "trust.tail1234"
+    assert requests[0].get_header("Host") == "localghost.tail1234"
     monkeypatch.setattr(
         tailscale_module.urllib.request,
         "urlopen",
@@ -1791,7 +1791,7 @@ def test_gateway_health_survives_a_missing_docker(monkeypatch) -> None:
     assert cli_module._tailscale_gateway_health() == "unknown"
 
 
-def test_fetch_public_root_falls_back_to_the_trust_hostname(monkeypatch) -> None:
+def test_fetch_public_root_falls_back_to_the_hub_hostname(monkeypatch) -> None:
     requests = []
 
     def open_root(request, **kwargs):
@@ -1801,7 +1801,27 @@ def test_fetch_public_root_falls_back_to_the_trust_hostname(monkeypatch) -> None
     monkeypatch.setattr(tailscale_module.urllib.request, "urlopen", open_root)
 
     assert tailscale_module.fetch_public_root("tail1234") == CERTIFICATE_PEM
-    assert requests[0].full_url.startswith("http://trust.tail1234/")
+    assert requests[0].full_url.startswith("http://localghost.tail1234/")
+
+
+def test_fetch_public_root_falls_back_to_the_deprecated_trust_host(
+    monkeypatch,
+) -> None:
+    hosts = []
+
+    def open_root(request, **kwargs):
+        hosts.append(request.get_header("Host"))
+        if len(hosts) == 1:
+            raise HTTPError(request.full_url, 404, "", {}, None)
+        return Response(CERTIFICATE_PEM)
+
+    monkeypatch.setattr(tailscale_module.urllib.request, "urlopen", open_root)
+
+    assert (
+        tailscale_module.fetch_public_root("tail1234", ("100.64.0.10",))
+        == CERTIFICATE_PEM
+    )
+    assert hosts == ["localghost.tail1234", "trust.tail1234"]
 
 
 def test_create_auth_key_reraises_unexpected_api_errors(monkeypatch) -> None:

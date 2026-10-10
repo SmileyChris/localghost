@@ -3,7 +3,9 @@
 Localghost can expose every opted-in local route to devices in one Tailscale
 tailnet. If the local route is `https://shop.localhost`, enabling the suffix
 `tail1234` adds `https://shop.tail1234`; `api.shop.localhost` becomes
-`api.shop.tail1234`, and the dashboard becomes `traefik.tail1234`. There is no route at
+`api.shop.tail1234`, and the dashboard becomes `traefik.tail1234`. The hub's
+own page is `http://localghost.tail1234`: it lists the hub's projects under the
+suffix and, for a private suffix, how to trust its HTTPS. There is no route at
 the bare `tail1234` name.
 
 This is an opt-in extension of the local hub. The normal `.localhost` routes
@@ -95,8 +97,8 @@ even though the root is name-constrained, an anchor scoped to a real TLD could
 impersonate real websites on every machine that trusts it, so no tailnet
 authority is minted for such a suffix. Requests are still encrypted by the
 tailnet's WireGuard tunnel; what is lost is the browser's secure context
-(service workers, `crypto.subtle`, camera access) and the `trust.<suffix>`
-page. `enable`, `hub up`, and `localghost tailscale status` say so, the
+(service workers, `crypto.subtle`, camera access) and the trust details on
+the `localghost.<suffix>` page. `enable`, `hub up`, and `localghost tailscale status` say so, the
 last in place of the trust command a private suffix shows. Detection never picks a public label; one has to
 be passed as `--suffix` deliberately. Choose a private label such as
 `tail1234` for trusted HTTPS.
@@ -127,7 +129,7 @@ localghost trust install
 
 When tailnet hosting is enabled, the standard trust command installs both the
 `.localhost` root and the active tailnet root. It downloads the latter from
-`http://trust.tail1234` over the tailnet. Private CA keys never leave Docker volumes.
+`http://localghost.tail1234` over the tailnet. Private CA keys never leave Docker volumes.
 
 On another device, name the suffix instead:
 
@@ -138,7 +140,7 @@ localghost tailscale trust tail1234
 That download is plain HTTP, and the tailnet is what secures it: split DNS
 resolves the name to the tagged gateway, and the connection to it is
 WireGuard-encrypted and gated by tailnet policy. Whoever can rewrite the
-tailnet's DNS configuration can therefore answer for `trust.tail1234`. To close
+tailnet's DNS configuration can therefore answer for `localghost.tail1234`. To close
 that gap, pin the fingerprint: a successful enable — and `localghost
 tailscale status` afterwards — prints a ready-to-paste command for other
 machines, and the download is installed only if it matches:
@@ -148,9 +150,12 @@ localghost tailscale trust tail1234 --fingerprint SHA256:1A2B…
 ```
 
 Devices without the localghost CLI (a phone, a colleague's untooled laptop)
-can open `http://trust.tail1234` in a browser instead: the gateway serves a
-small page with the pinned command, the expected fingerprint, and a direct
-link to the root certificate for manual installation.
+can open `http://localghost.tail1234` in a browser instead: the hub's page
+shows the pinned command, the expected fingerprint, and a direct link to the
+root certificate for manual installation. Read from another device, it links
+each project under the suffix and leaves out local folders and CLI commands.
+The older `http://trust.tail1234` is deprecated: it still serves the root to
+earlier CLIs and redirects browsers to the hub's page.
 
 Trusting a root again replaces the one this client had for that suffix; the
 superseded certificate leaves the trust stores first, and the `.localhost`

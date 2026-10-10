@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"crypto/x509"
-	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"flag"
@@ -394,9 +392,10 @@ func startHTTP(ctx context.Context, server *tsnet.Server, cfg configuration, err
 	}()
 }
 
-// serveTrust owns every request addressed to the trust.<suffix> host: the
-// machine-readable root, and a help page carrying the pinned trust command.
-// Other hosts belong to the reverse proxy.
+// serveTrust owns the root download on the hub's own hosts: localghost.<suffix>,
+// whose index page Traefik renders, and the deprecated trust.<suffix>, which
+// still serves the root to older CLIs but sends browsers on to the index.
+// Every other request belongs to the reverse proxy.
 func serveTrust(w http.ResponseWriter, request *http.Request, cfg configuration) bool {
 	if !cfg.servesHTTPS() {
 		return false
@@ -406,16 +405,17 @@ func serveTrust(w http.ResponseWriter, request *http.Request, cfg configuration)
 		host = parsed
 	}
 	host = strings.TrimSuffix(strings.ToLower(host), ".")
-	if host != "trust."+cfg.suffix {
+	index := "localghost." + cfg.suffix
+	if host != index && host != "trust."+cfg.suffix {
 		return false
 	}
-	switch request.URL.Path {
-	case "/.well-known/localghost/root.pem":
+	switch {
+	case request.URL.Path == "/.well-known/localghost/root.pem":
 		serveRoot(w, cfg.rootCA)
-	case "", "/":
-		serveTrustPage(w, cfg)
+	case host == index:
+		return false
 	default:
-		http.NotFound(w, request)
+		http.Redirect(w, request, "http://"+index+"/", http.StatusMovedPermanently)
 	}
 	return true
 }
@@ -445,40 +445,6 @@ func serveRoot(w http.ResponseWriter, path string) {
 	w.Header().Set("Content-Type", "application/x-pem-file")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(value)
-}
-
-func serveTrustPage(w http.ResponseWriter, cfg configuration) {
-	_, certificate, err := loadRoot(cfg.rootCA)
-	if err != nil {
-		http.Error(w, "public root is unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	digest := sha256.Sum256(certificate.Raw)
-	fingerprint := "SHA256:" + strings.ToUpper(hex.EncodeToString(digest[:]))
-	command := fmt.Sprintf("localghost tailscale trust %s --fingerprint %s", cfg.suffix, fingerprint)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	fmt.Fprintf(w, `<!doctype html>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>localghost trust — .%[1]s</title>
-<style>
- body{font-family:system-ui,sans-serif;max-width:44rem;margin:3rem auto;padding:0 1rem;line-height:1.5}
- code,pre{background:#f0f0f0;border-radius:4px;padding:.15rem .35rem;word-break:break-all}
- pre{padding:.75rem}
- @media (prefers-color-scheme:dark){body{background:#111;color:#eee}code,pre{background:#222}}
-</style>
-<h1>Trust localghost HTTPS for <code>.%[1]s</code></h1>
-<p>With the localghost CLI installed, run:</p>
-<pre>%[2]s</pre>
-<p>Or download the public root directly from
-<a href="/.well-known/localghost/root.pem">/.well-known/localghost/root.pem</a>
-and install it with your platform's certificate tools.</p>
-<p>Its SHA-256 fingerprint must be:</p>
-<pre>%[3]s</pre>
-<p>The root only signs names under <code>.%[1]s</code>; its private keys stay
-on the hosting machine.</p>
-`, cfg.suffix, command, fingerprint)
 }
 
 func startTCPProxy(ctx context.Context, server *tsnet.Server, address, target string, proxyProtocol bool, errCh chan<- error) {

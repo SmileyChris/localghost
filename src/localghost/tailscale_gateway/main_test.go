@@ -88,25 +88,34 @@ func testRootCA(t *testing.T) (string, string) {
 	return path, "SHA256:" + strings.ToUpper(hex.EncodeToString(digest[:]))
 }
 
-func TestTrustHostServesAHelpPageWithThePinnedCommand(t *testing.T) {
-	path, fingerprint := testRootCA(t)
+func TestTrustHostRedirectsBrowsersToTheIndex(t *testing.T) {
+	path, _ := testRootCA(t)
 	cfg := configuration{suffix: "tail1234", rootCA: path}
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest("GET", "http://trust.tail1234/", nil)
 	if !serveTrust(recorder, request, cfg) {
 		t.Fatal("expected the trust host to be handled")
 	}
-	body, _ := io.ReadAll(recorder.Result().Body)
-	page := string(body)
-	if recorder.Result().StatusCode != http.StatusOK {
-		t.Fatalf("status = %d", recorder.Result().StatusCode)
+	if recorder.Code != http.StatusMovedPermanently || recorder.Header().Get("Location") != "http://localghost.tail1234/" {
+		t.Fatalf("status = %d, location = %q", recorder.Code, recorder.Header().Get("Location"))
 	}
-	command := "localghost tailscale trust tail1234 --fingerprint " + fingerprint
-	if !strings.Contains(page, command) {
-		t.Fatalf("page lacks pinned command: %s", page)
+}
+
+func TestIndexHostServesTheRootAndProxiesTheRest(t *testing.T) {
+	path, _ := testRootCA(t)
+	cfg := configuration{suffix: "tail1234", rootCA: path}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest("GET", "http://localghost.tail1234/.well-known/localghost/root.pem", nil)
+	if !serveTrust(recorder, request, cfg) {
+		t.Fatal("expected the root download to be handled")
 	}
-	if !strings.Contains(page, "/.well-known/localghost/root.pem") {
-		t.Fatalf("page lacks the root download path: %s", page)
+	expected, _ := os.ReadFile(path)
+	if recorder.Body.String() != string(expected) {
+		t.Fatalf("root.pem body = %q", recorder.Body.String())
+	}
+	request = httptest.NewRequest("GET", "http://localghost.tail1234/", nil)
+	if serveTrust(httptest.NewRecorder(), request, cfg) {
+		t.Fatal("expected the index page to be left to Traefik")
 	}
 }
 

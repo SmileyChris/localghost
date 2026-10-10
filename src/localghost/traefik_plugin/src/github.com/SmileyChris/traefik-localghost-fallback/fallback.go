@@ -7,7 +7,10 @@ package traefik_localghost_fallback
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"html/template"
 	"net"
@@ -25,6 +28,11 @@ type Config struct {
 	// RoutersURL is Traefik's own router API, reached through the dashboard
 	// route on the web entrypoint. Empty turns the online check off.
 	RoutersURL string `json:"routersURL,omitempty"`
+	// TailnetSuffix and TailnetRoot name the private tailnet suffix and its
+	// public root, so the tailnet index can show the pinned trust command.
+	// Empty, as on a hub without a tailnet authority, leaves it out.
+	TailnetSuffix string `json:"tailnetSuffix,omitempty"`
+	TailnetRoot   string `json:"tailnetRoot,omitempty"`
 }
 
 func CreateConfig() *Config {
@@ -41,10 +49,12 @@ type entry struct {
 }
 
 type Fallback struct {
-	name         string
-	registryPath string
-	routersURL   string
-	client       *http.Client
+	name          string
+	registryPath  string
+	routersURL    string
+	tailnetSuffix string
+	tailnetRoot   string
+	client        *http.Client
 }
 
 func New(_ context.Context, _ http.Handler, config *Config, name string) (http.Handler, error) {
@@ -52,34 +62,103 @@ func New(_ context.Context, _ http.Handler, config *Config, name string) (http.H
 		return nil, fmt.Errorf("localghost fallback: registryPath is required")
 	}
 	return &Fallback{
-		name:         name,
-		registryPath: config.RegistryPath,
-		routersURL:   config.RoutersURL,
-		client:       &http.Client{Timeout: time.Second},
+		name:          name,
+		registryPath:  config.RegistryPath,
+		routersURL:    config.RoutersURL,
+		tailnetSuffix: config.TailnetSuffix,
+		tailnetRoot:   config.TailnetRoot,
+		client:        &http.Client{Timeout: time.Second},
 	}, nil
 }
 
 func (f *Fallback) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	host, port := requestHostPort(req)
+	v := viewFor(host, port)
 	entries := f.entries()
 	// Deliberate deviation from the Accept spec's letter: curl and scripts
 	// send `Accept: */*` by default and get plain text; only a request that
 	// literally asks for text/html (browsers, or `curl -H 'Accept: text/html'`)
 	// gets the styled ghost page.
 	wantsHTML := strings.Contains(req.Header.Get("Accept"), "text/html")
-	// Nothing is ever hosted at the bare loopback names themselves, so they
-	// serve the hub's welcome page instead of a not-found ghost page.
-	if host == "localhost" || host == "127.0.0.1" {
-		f.respondWelcome(rw, port, entries, wantsHTML)
+	// Nothing is ever hosted at the bare loopback names or at localghost.*
+	// (a reserved project name), so they serve the hub's welcome page instead
+	// of a not-found ghost page.
+	if host == "localhost" || host == "127.0.0.1" || host == "localghost."+v.Suffix {
+		f.respondWelcome(rw, v, entries, wantsHTML)
 		return
 	}
+	local := v.local(host)
 	for _, e := range entries {
-		if e.Hostname == host {
-			f.respondGhost(rw, e, wantsHTML)
+		if e.Hostname == local {
+			f.respondGhost(rw, v, e, wantsHTML)
 			return
 		}
 	}
-	f.respondUnknown(rw, host, port, entries, wantsHTML)
+	f.respondUnknown(rw, v, host, entries, wantsHTML)
+}
+
+// view is where a page is read from: this machine's .localhost names, or a
+// tailnet suffix, under which every route answers by the same first labels.
+// A tailnet reader is on another device, so the page leaves out what only
+// makes sense here: project folders and CLI commands.
+type view struct {
+	Suffix string
+	Port   string
+}
+
+func viewFor(host, port string) view {
+	suffix := "localhost"
+	if i := strings.LastIndex(host, "."); i >= 0 && net.ParseIP(host) == nil {
+		suffix = host[i+1:]
+	}
+	return view{Suffix: suffix, Port: port}
+}
+
+func (v view) Remote() bool { return v.Suffix != "localhost" }
+
+// Home is the hub's own page under this view's suffix.
+func (v view) Home() string {
+	if v.Remote() {
+		return "localghost." + v.Suffix
+	}
+	return "localhost"
+}
+
+// name turns a registry hostname, always under .localhost, into this view's.
+func (v view) name(hostname string) string {
+	return strings.TrimSuffix(hostname, ".localhost") + "." + v.Suffix
+}
+
+// local turns a requested hostname back into its registry hostname.
+func (v view) local(host string) string {
+	return strings.TrimSuffix(host, "."+v.Suffix) + ".localhost"
+}
+
+type trust struct {
+	Command     string
+	Fingerprint string
+}
+
+// trust pins this hub's tailnet root for a reader under its suffix, read
+// fresh like the registry so a regenerated root shows at once.
+func (f *Fallback) trust(v view) *trust {
+	if f.tailnetRoot == "" || v.Suffix != f.tailnetSuffix {
+		return nil
+	}
+	value, err := os.ReadFile(f.tailnetRoot)
+	if err != nil {
+		return nil
+	}
+	block, _ := pem.Decode(value)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return nil
+	}
+	digest := sha256.Sum256(block.Bytes)
+	fingerprint := "SHA256:" + strings.ToUpper(hex.EncodeToString(digest[:]))
+	return &trust{
+		Command:     fmt.Sprintf("uvx localghost tailscale trust %s --fingerprint %s", v.Suffix, fingerprint),
+		Fingerprint: fingerprint,
+	}
 }
 
 // requestHostPort splits the request's Host header into the hostname used
@@ -242,7 +321,7 @@ const pageTemplate = `<!doctype html>
   .running::before { content: "●"; margin-right: .3em; }
   .empty { color: var(--quiet); border-top: 1px solid var(--line); padding-top: .8rem; }
 
-  .cmd { font-family: var(--mono); background: var(--tint); border: 1px solid var(--accent);
+  .cmd { font-family: var(--mono); max-width: 100%; overflow-wrap: anywhere; text-align: left; background: var(--tint); border: 1px solid var(--accent);
          border-radius: .4rem; padding: .4rem .8rem; cursor: pointer; color: var(--link-deep);
          font-size: .95rem; transition: background-color .15s; }
   .cmd:hover { background: var(--tint-strong); }
@@ -274,9 +353,20 @@ const pageTemplate = `<!doctype html>
 {{if .Welcome}}
   <img class="logo" src="{{.Logo}}" alt="Localghost">
   <h1>local<span class="accent">ghost</span> <span class="quiet">is running</span></h1>
+  {{if .Remote}}
+  <p>Every project on this hub answers at its own <code>.{{.Suffix}}</code> hostname.</p>
+  {{else}}
   <p>Nothing lives at <code>{{.Host}}</code> itself — every project gets its
      own <code>.localhost</code> hostname.</p>
+  {{end}}
+  {{with .Trust}}
+  <h2>Trust this hub's HTTPS</h2>
+  <p><button class="cmd" data-cmd="{{.Command}}">{{.Command}}</button></p>
+  <p class="muted">Or install the <a href="http://{{$.Home}}/.well-known/localghost/root.pem">root
+     certificate</a> by hand. Its fingerprint must be <code>{{.Fingerprint}}</code>.</p>
+  {{end}}
   {{if .Known}}
+  {{if .Trust}}<h2>Projects</h2>{{end}}
   {{template "projects" .}}
   {{else}}
   <p class="empty">Nothing yet. A project appears here once <code>localghost run</code>
@@ -284,12 +374,17 @@ const pageTemplate = `<!doctype html>
   {{end}}
 {{else if .Ghost}}
   <h1><img class="ghost-inline" src="{{.Icon}}" alt="">{{.Ghost.Name}} <span class="quiet">is offline</span></h1>
+  {{if .Remote}}
+  <p>A {{.Ghost.Type}} project last started {{.Ghost.Relative}}. Only the
+     machine hosting it can bring it back.</p>
+  {{else}}
   <p>A {{.Ghost.Type}} project last started {{.Ghost.Relative}} from
      <code>{{.Ghost.Directory}}</code>.</p>
   <p>Bring it back:</p>
   <p><button class="cmd" data-cmd="uvx localghost restart {{.Ghost.Name}}">uvx localghost restart {{.Ghost.Name}}</button></p>
   <p class="muted">Or lay it to rest:
      <button class="cmd cmd-quiet" data-cmd="uvx localghost sessions forget {{.Ghost.Name}}">uvx localghost sessions forget {{.Ghost.Name}}</button></p>
+  {{end}}
 {{else}}
   <h1><img class="ghost-inline" src="{{.Icon}}" alt="">Nothing haunts <span class="quiet">{{.Host}}</span></h1>
   <p>No running application and no remembered project answers to this name.</p>
@@ -299,9 +394,9 @@ const pageTemplate = `<!doctype html>
   {{end}}
 {{end}}
 <footer>
-  {{if .Welcome}}<span class="wordmark">local<span class="accent">ghost</span></span>{{else}}<a class="wordmark" href="//localhost{{if .Port}}:{{.Port}}{{end}}">local<span class="accent">ghost</span></a>{{end}}
+  {{if .Welcome}}<span class="wordmark">local<span class="accent">ghost</span></span>{{else}}<a class="wordmark" href="//{{.Home}}{{if .Port}}:{{.Port}}{{end}}">local<span class="accent">ghost</span></a>{{end}}
   <nav>
-    <a href="//traefik.localhost{{if .Port}}:{{.Port}}{{end}}">Traefik dashboard</a>
+    <a href="//traefik.{{.Suffix}}{{if .Port}}:{{.Port}}{{end}}">Traefik dashboard</a>
     <a href="https://smileychris.github.io/localghost/">Documentation</a>
   </nav>
 </footer>
@@ -327,7 +422,7 @@ for (const chip of document.querySelectorAll(".cmd")) {
     <li class="project{{if not .Running}} idle{{end}}">
       <a class="project-name" href="//{{.Hostname}}{{if $.Port}}:{{$.Port}}{{end}}">{{.Hostname}}</a>
       <span class="project-type">{{.Type}}</span>
-      <span class="project-dir">{{.Directory}}</span>
+      {{if .Directory}}<span class="project-dir">{{.Directory}}</span>{{end}}
       {{if .Running}}<span class="project-when running">Running {{.Mode}}</span>
       {{else}}<span class="project-when">Last started {{.Relative}}</span>{{end}}
     </li>
@@ -345,11 +440,18 @@ type pageEntry struct {
 	Mode      string // "in the foreground" or "detached"
 }
 
+// The view's values are copied in rather than embedded: Yaegi, which
+// interprets this plugin, is unreliable with promoted methods under
+// reflection.
 type pageData struct {
+	Suffix  string
+	Port    string
+	Home    string
+	Remote  bool
 	Title   string
 	Host    string
-	Port    string
 	Welcome bool
+	Trust   *trust
 	Logo    template.URL
 	Icon    template.URL
 	Ghost   *pageEntry
@@ -367,7 +469,7 @@ var (
 
 // pageEntries lists running projects first, by name (entries arrive sorted by
 // name), then the rest by when they last started, most recent first.
-func pageEntries(entries []entry, online map[string]bool) []pageEntry {
+func pageEntries(entries []entry, online map[string]bool, v view) []pageEntry {
 	entries = append([]entry(nil), entries...)
 	sort.SliceStable(entries, func(i, j int) bool {
 		a, b := online[entries[i].Hostname], online[entries[j].Hostname]
@@ -378,10 +480,14 @@ func pageEntries(entries []entry, online map[string]bool) []pageEntry {
 	})
 	known := make([]pageEntry, 0, len(entries))
 	for _, e := range entries {
+		directory := e.Directory
+		if v.Remote() {
+			directory = ""
+		}
 		known = append(known, pageEntry{
-			Hostname:  e.Hostname,
+			Hostname:  v.name(e.Hostname),
 			Name:      e.Name,
-			Directory: e.Directory,
+			Directory: directory,
 			Type:      e.Type,
 			Relative:  relativeTime(e.LastStarted),
 			Running:   online[e.Hostname],
@@ -403,7 +509,7 @@ func mode(detached bool) string {
 	return "in the foreground"
 }
 
-func (f *Fallback) respondWelcome(rw http.ResponseWriter, port string, entries []entry, wantsHTML bool) {
+func (f *Fallback) respondWelcome(rw http.ResponseWriter, v view, entries []entry, wantsHTML bool) {
 	if !wantsHTML {
 		rw.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		rw.WriteHeader(http.StatusOK)
@@ -413,21 +519,29 @@ func (f *Fallback) respondWelcome(rw http.ResponseWriter, port string, entries [
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 	rw.WriteHeader(http.StatusOK)
 	_ = page.Execute(rw, pageData{
+		Suffix:  v.Suffix,
+		Port:    v.Port,
+		Home:    v.Home(),
+		Remote:  v.Remote(),
 		Title:   "localghost",
 		Host:    "localhost",
-		Port:    port,
 		Welcome: true,
+		Trust:   f.trust(v),
 		Logo:    logoURL,
 		Icon:    ghostURL,
-		Known:   pageEntries(entries, f.onlineHosts()),
+		Known:   pageEntries(entries, f.onlineHosts(), v),
 	})
 }
 
-func (f *Fallback) respondGhost(rw http.ResponseWriter, e entry, wantsHTML bool) {
+func (f *Fallback) respondGhost(rw http.ResponseWriter, v view, e entry, wantsHTML bool) {
 	relative := relativeTime(e.LastStarted)
 	if !wantsHTML {
 		rw.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		rw.WriteHeader(http.StatusServiceUnavailable)
+		if v.Remote() {
+			fmt.Fprintf(rw, "%s is offline. Last started %s.\n", e.Name, relative)
+			return
+		}
 		fmt.Fprintf(rw, "%s is offline. Last started %s from %s.\nRun: uvx localghost restart %s\n",
 			e.Name, relative, e.Directory, e.Name)
 		return
@@ -435,8 +549,12 @@ func (f *Fallback) respondGhost(rw http.ResponseWriter, e entry, wantsHTML bool)
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 	rw.WriteHeader(http.StatusServiceUnavailable)
 	_ = page.Execute(rw, pageData{
-		Title: e.Name + " is offline",
-		Icon:  ghostURL,
+		Suffix: v.Suffix,
+		Port:   v.Port,
+		Home:   v.Home(),
+		Remote: v.Remote(),
+		Title:  e.Name + " is offline",
+		Icon:   ghostURL,
 		Ghost: &pageEntry{
 			Hostname:  e.Hostname,
 			Name:      e.Name,
@@ -447,7 +565,7 @@ func (f *Fallback) respondGhost(rw http.ResponseWriter, e entry, wantsHTML bool)
 	})
 }
 
-func (f *Fallback) respondUnknown(rw http.ResponseWriter, host, port string, entries []entry, wantsHTML bool) {
+func (f *Fallback) respondUnknown(rw http.ResponseWriter, v view, host string, entries []entry, wantsHTML bool) {
 	if !wantsHTML {
 		rw.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		rw.WriteHeader(http.StatusNotFound)
@@ -457,10 +575,13 @@ func (f *Fallback) respondUnknown(rw http.ResponseWriter, host, port string, ent
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 	rw.WriteHeader(http.StatusNotFound)
 	_ = page.Execute(rw, pageData{
-		Title: "Nothing running here",
-		Host:  host,
-		Port:  port,
-		Icon:  ghostURL,
-		Known: pageEntries(entries, f.onlineHosts()),
+		Suffix: v.Suffix,
+		Port:   v.Port,
+		Home:   v.Home(),
+		Remote: v.Remote(),
+		Title:  "Nothing running here",
+		Host:   host,
+		Icon:   ghostURL,
+		Known:  pageEntries(entries, f.onlineHosts(), v),
 	})
 }
