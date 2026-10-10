@@ -2311,24 +2311,26 @@ def test_a_project_remembered_under_its_generic_name_keeps_it(monkeypatch, tmp_p
     assert runner.resolve_name(project) == "web"
 
 
-def test_isolated_plan_keeps_the_app_port_and_walks_the_host_side(
+def test_isolated_plan_keeps_the_app_port_and_routes_an_ephemeral_one(
     monkeypatch, tmp_path
 ):
     monkeypatch.setattr(runner, "isolation_available", lambda: True)
     monkeypatch.setattr(ports, "port_available", lambda port: port != 8000)
+    monkeypatch.setattr(ports, "ephemeral_port", lambda: 41873)
 
     plan = runner.build_plan(
         tmp_path, "demo", None, 8000, ("just", "dev", "{port}"), isolate=True
     )
 
     # The application has the namespace to itself, so it keeps 8000 even
-    # though the host's 8000 is taken; only the route moves.
-    assert plan.port == 8001
+    # though the host's 8000 is taken; the route goes to an ephemeral port
+    # that no dev server elsewhere will want.
+    assert plan.port == 41873
     assert plan.app_port == 8000
     assert plan.command == ("just", "dev", "8000")
     launch = plan.launch
     assert launch[0] == "pasta"
-    assert "127.0.0.1/8001:8000" in launch
+    assert "127.0.0.1/41873:8000" in launch
     assert "--host-lo-to-ns-lo" in launch
     assert launch[-3:] == ("just", "dev", "8000")
 

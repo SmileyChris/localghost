@@ -263,13 +263,11 @@ def build_plan(
         wanted_port = port
         # A command that takes {port} runs wherever it is told, so a busy
         # port can be walked past; one that names its own port cannot move.
-        # Isolated, the application keeps its port inside the namespace and
-        # only the host side has to find a free one.
-        flexible = isolated or any("{port}" in part for part in command)
-        selected_port = ports.select_port(port, strict=not flexible)
-        if selected_port != port and not isolated:
-            _report_skipped_port(port, selected_port)
-        app_port = port if isolated else selected_port
+        # Isolated, the namespace is its own, so the port is always free.
+        flexible = any("{port}" in part for part in command)
+        app_port = port if isolated else ports.select_port(port, strict=not flexible)
+        if app_port != port:
+            _report_skipped_port(port, app_port)
         selected_command = tuple(
             part.replace("{port}", str(app_port)) for part in command
         )
@@ -300,15 +298,20 @@ def build_plan(
         else:  # Click validates the public option; retain this for direct callers.
             raise click.ClickException(type_choices("--type"))
         wanted_port = port or default_port
-        selected_port = ports.select_port(
-            wanted_port, strict=port is not None and not isolated
+        app_port = (
+            wanted_port
+            if isolated
+            else ports.select_port(wanted_port, strict=port is not None)
         )
-        if selected_port != wanted_port and not isolated:
-            _report_skipped_port(wanted_port, selected_port)
-        app_port = wanted_port if isolated else selected_port
+        if app_port != wanted_port:
+            _report_skipped_port(wanted_port, app_port)
         selected_command = tuple(
             part.format(port=app_port) for part in selected_command
         )
+    # Isolated, the host side is only ever reached through the hub, so it
+    # takes a port from the ephemeral range rather than one a dev server
+    # elsewhere might want.
+    selected_port = ports.ephemeral_port() if isolated else app_port
     public_name = name or resolve_name(project_root)
     validate_name(public_name)
     project = _session_project(project_root)

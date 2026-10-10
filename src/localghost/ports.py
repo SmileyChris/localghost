@@ -63,6 +63,22 @@ def select_port(port: int, strict: bool) -> int:
     )
 
 
+def ephemeral_port() -> int:
+    """A port free in both families, from the kernel's ephemeral range.
+
+    The kernel picks it for a bind to port 0, which keeps clear of the ports
+    dev servers default to. It is released before the caller binds it.
+    """
+    # ponytail: check-then-bind race, harmless in the ephemeral range; pass
+    # the bound socket on if a collision is ever seen.
+    while True:
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        if port_available(port):
+            return port
+
+
 def in_use_message(port: int) -> str:
     """Say a port is taken, naming its holder whenever the host will tell us.
 

@@ -10,7 +10,7 @@ uses [Semantic Versioning](https://semver.org/).
 - `[run] isolate = true` runs a host application in its own network namespace
   through [pasta](https://passt.top/), so it keeps its usual port, and its
   helper servers theirs, whatever the host or another run already holds. The
-  route points at a free host port instead. Without Linux and pasta the run
+  route points at a host port from the kernel's ephemeral range instead. Without Linux and pasta the run
   warns and goes ahead unisolated.
 
 ### Changed

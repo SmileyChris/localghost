@@ -219,3 +219,9 @@ def test_listeners_without_proc_is_empty_when_lsof_is_missing(
     monkeypatch.setattr(ports.subprocess, "run", explode)
 
     assert ports.listeners(1) == []
+
+
+def test_ephemeral_port_is_free_and_outside_the_dev_server_defaults():
+    port = ports.ephemeral_port()
+
+    assert port >= 1024 and ports.port_available(port)

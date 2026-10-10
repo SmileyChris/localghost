@@ -469,8 +469,11 @@ isolate = true
 
 Everything the command starts shares the namespace's own `127.0.0.1`, so each
 server keeps its usual port and they find each other as they always do. Only
-`port` comes out, on a free host port that the route points at; the run lists
-it as the host port, beside the isolated one. The application still reaches the
+`port` comes out, on host loopback at a port the kernel picks from its
+ephemeral range (32768–60999 on Linux by default), so an isolated run never
+takes a port such as 8000 or 5173 that another application might want. The
+route points there, and the run lists it as the host port beside the isolated
+one; it changes from run to run, so use the public URL rather than the number. The application still reaches the
 internet; services on the host's loopback, such as a local database, are
 reached over the namespace's gateway address rather than `127.0.0.1`.
 
