@@ -1409,7 +1409,7 @@ def tailscale_trust(suffix: str | None, fingerprint: str | None) -> None:
 def _share_command(suffix: str, certificate: PublicCertificate) -> str:
     """The pinned trust command another tailnet machine can paste."""
     return (
-        f"localghost tailscale trust {suffix} "
+        f"uvx localghost tailscale trust {suffix} "
         f"--fingerprint {certificate.fingerprint}"
     )
 

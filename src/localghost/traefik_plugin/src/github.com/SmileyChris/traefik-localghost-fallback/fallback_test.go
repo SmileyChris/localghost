@@ -295,9 +295,25 @@ func TestProjectsListRunningByNameThenMostRecentlyStarted(t *testing.T) {
 	}
 }
 
+// routersServing stands in for Traefik's router API with the given hosts
+// enabled.
+func routersServing(t *testing.T, hosts ...string) string {
+	t.Helper()
+	var routers []string
+	for _, host := range hosts {
+		routers = append(routers, `{"rule": "Host(`+"`"+host+"`"+`)", "status": "enabled"}`)
+	}
+	api := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		_, _ = rw.Write([]byte("[" + strings.Join(routers, ",") + "]"))
+	}))
+	t.Cleanup(api.Close)
+	return api.URL
+}
+
 func TestTailnetIndexLinksUnderItsSuffixAndPinsTheRoot(t *testing.T) {
 	dir := t.TempDir()
 	writeEntry(t, dir, "blog", "blog.localhost")
+	writeEntry(t, dir, "shop", "shop.localhost")
 	der := []byte("not really DER, but the digest only needs bytes")
 	root := filepath.Join(t.TempDir(), "rootCA.pem")
 	if err := os.WriteFile(root, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
@@ -305,7 +321,7 @@ func TestTailnetIndexLinksUnderItsSuffixAndPinsTheRoot(t *testing.T) {
 	}
 	config := CreateConfig()
 	config.RegistryPath = dir
-	config.RoutersURL = ""
+	config.RoutersURL = routersServing(t, "blog.localhost")
 	config.TailnetSuffix = "tail1234"
 	config.TailnetRoot = root
 	h, err := New(context.Background(), nil, config, "localghost-fallback")
@@ -325,7 +341,8 @@ func TestTailnetIndexLinksUnderItsSuffixAndPinsTheRoot(t *testing.T) {
 			t.Fatalf("tailnet index missing %q:\n%s", want, body)
 		}
 	}
-	for _, unwanted := range []string{"blog.localhost", "/home/dev/blog"} {
+	// shop is remembered but not running: this machine's business only.
+	for _, unwanted := range []string{"blog.localhost", "/home/dev/blog", "shop"} {
 		if strings.Contains(body, unwanted) {
 			t.Fatalf("tailnet index leaks %q", unwanted)
 		}
@@ -337,20 +354,21 @@ func TestTailnetIndexLinksUnderItsSuffixAndPinsTheRoot(t *testing.T) {
 	}
 }
 
-func TestTailnetGhostPageLeavesOutLocalDetails(t *testing.T) {
+func TestTailnetReaderGetsNoGhostPageForAStoppedProject(t *testing.T) {
 	dir := t.TempDir()
 	writeEntry(t, dir, "blog", "blog.localhost")
-	rec := get(handler(t, dir), "blog.tail1234", "text/html")
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503", rec.Code)
+	writeEntry(t, dir, "shop", "shop.localhost")
+	h := handlerWithRouters(t, dir, routersServing(t, "blog.localhost"))
+
+	rec := get(h, "shop.tail1234", "text/html")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, unwanted := range []string{"/home/dev/blog", "localghost restart"} {
-		if strings.Contains(body, unwanted) {
-			t.Fatalf("tailnet ghost page leaks %q", unwanted)
-		}
+	if strings.Contains(body, "shop is offline") || strings.Contains(body, "/home/dev") {
+		t.Fatalf("tailnet reader learns about a stopped project:\n%s", body)
 	}
-	if !strings.Contains(body, `href="//localghost.tail1234"`) {
-		t.Fatalf("wordmark should link to the tailnet index:\n%s", body)
+	if !strings.Contains(body, "//blog.tail1234") || !strings.Contains(body, `href="//localghost.tail1234"`) {
+		t.Fatalf("not-found page should link running projects and the index:\n%s", body)
 	}
 }

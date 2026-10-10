@@ -146,14 +146,15 @@ tailscale status` afterwards — prints a ready-to-paste command for other
 machines, and the download is installed only if it matches:
 
 ```sh
-localghost tailscale trust tail1234 --fingerprint SHA256:1A2B…
+uvx localghost tailscale trust tail1234 --fingerprint SHA256:1A2B…
 ```
 
 Devices without the localghost CLI (a phone, a colleague's untooled laptop)
 can open `http://localghost.tail1234` in a browser instead: the hub's page
 shows the pinned command, the expected fingerprint, and a direct link to the
-root certificate for manual installation. Read from another device, it links
-each project under the suffix and leaves out local folders and CLI commands.
+root certificate for manual installation. Read over the tailnet, it lists only
+running projects, linked under the suffix and without their local folders;
+stopped projects stay this machine's business.
 The older `http://trust.tail1234` is deprecated: it still serves the root to
 earlier CLIs and redirects browsers to the hub's page.
 

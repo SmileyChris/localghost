@@ -89,8 +89,8 @@ func (f *Fallback) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	}
 	local := v.local(host)
 	for _, e := range entries {
-		if e.Hostname == local {
-			f.respondGhost(rw, v, e, wantsHTML)
+		if e.Hostname == local && !v.Remote() {
+			f.respondGhost(rw, e, wantsHTML)
 			return
 		}
 	}
@@ -100,7 +100,8 @@ func (f *Fallback) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 // view is where a page is read from: this machine's .localhost names, or a
 // tailnet suffix, under which every route answers by the same first labels.
 // A tailnet reader is on another device, so the page leaves out what only
-// makes sense here: project folders and CLI commands.
+// makes sense here: project folders, and projects that are not running,
+// which are this machine's to restart and nobody else's business.
 type view struct {
 	Suffix string
 	Port   string
@@ -369,27 +370,26 @@ const pageTemplate = `<!doctype html>
   {{if .Trust}}<h2>Projects</h2>{{end}}
   {{template "projects" .}}
   {{else}}
+  {{if .Remote}}
+  <p class="empty">Nothing is running on this hub right now.</p>
+  {{else}}
   <p class="empty">Nothing yet. A project appears here once <code>localghost run</code>
      starts it or <code>localghost save</code> remembers it.</p>
   {{end}}
+  {{end}}
 {{else if .Ghost}}
   <h1><img class="ghost-inline" src="{{.Icon}}" alt="">{{.Ghost.Name}} <span class="quiet">is offline</span></h1>
-  {{if .Remote}}
-  <p>A {{.Ghost.Type}} project last started {{.Ghost.Relative}}. Only the
-     machine hosting it can bring it back.</p>
-  {{else}}
   <p>A {{.Ghost.Type}} project last started {{.Ghost.Relative}} from
      <code>{{.Ghost.Directory}}</code>.</p>
   <p>Bring it back:</p>
   <p><button class="cmd" data-cmd="uvx localghost restart {{.Ghost.Name}}">uvx localghost restart {{.Ghost.Name}}</button></p>
   <p class="muted">Or lay it to rest:
      <button class="cmd cmd-quiet" data-cmd="uvx localghost sessions forget {{.Ghost.Name}}">uvx localghost sessions forget {{.Ghost.Name}}</button></p>
-  {{end}}
 {{else}}
   <h1><img class="ghost-inline" src="{{.Icon}}" alt="">Nothing haunts <span class="quiet">{{.Host}}</span></h1>
   <p>No running application and no remembered project answers to this name.</p>
   {{if .Known}}
-  <h2>Localghost does remember</h2>
+  <h2>{{if .Remote}}Running on this hub{{else}}Localghost does remember{{end}}</h2>
   {{template "projects" .}}
   {{end}}
 {{end}}
@@ -468,7 +468,8 @@ var (
 )
 
 // pageEntries lists running projects first, by name (entries arrive sorted by
-// name), then the rest by when they last started, most recent first.
+// name), then the rest by when they last started, most recent first. A
+// remote view lists only the running ones.
 func pageEntries(entries []entry, online map[string]bool, v view) []pageEntry {
 	entries = append([]entry(nil), entries...)
 	sort.SliceStable(entries, func(i, j int) bool {
@@ -482,6 +483,9 @@ func pageEntries(entries []entry, online map[string]bool, v view) []pageEntry {
 	for _, e := range entries {
 		directory := e.Directory
 		if v.Remote() {
+			if !online[e.Hostname] {
+				continue
+			}
 			directory = ""
 		}
 		known = append(known, pageEntry{
@@ -533,15 +537,11 @@ func (f *Fallback) respondWelcome(rw http.ResponseWriter, v view, entries []entr
 	})
 }
 
-func (f *Fallback) respondGhost(rw http.ResponseWriter, v view, e entry, wantsHTML bool) {
+func (f *Fallback) respondGhost(rw http.ResponseWriter, e entry, wantsHTML bool) {
 	relative := relativeTime(e.LastStarted)
 	if !wantsHTML {
 		rw.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		rw.WriteHeader(http.StatusServiceUnavailable)
-		if v.Remote() {
-			fmt.Fprintf(rw, "%s is offline. Last started %s.\n", e.Name, relative)
-			return
-		}
 		fmt.Fprintf(rw, "%s is offline. Last started %s from %s.\nRun: uvx localghost restart %s\n",
 			e.Name, relative, e.Directory, e.Name)
 		return
@@ -549,10 +549,8 @@ func (f *Fallback) respondGhost(rw http.ResponseWriter, v view, e entry, wantsHT
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 	rw.WriteHeader(http.StatusServiceUnavailable)
 	_ = page.Execute(rw, pageData{
-		Suffix: v.Suffix,
-		Port:   v.Port,
-		Home:   v.Home(),
-		Remote: v.Remote(),
+		Suffix: "localhost",
+		Home:   "localhost",
 		Title:  e.Name + " is offline",
 		Icon:   ghostURL,
 		Ghost: &pageEntry{

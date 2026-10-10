@@ -9,8 +9,9 @@ uses [Semantic Versioning](https://semver.org/).
 
 - With tailnet hosting enabled, `http://localghost.<suffix>` is the hub's page
   on the tailnet: its projects linked under the suffix, and for a private
-  suffix the pinned trust command, fingerprint, and root download. Read from
-  another device, the hub's pages leave out local folders and CLI commands.
+  suffix the pinned trust command, fingerprint, and root download. Read over
+  the tailnet, the hub's pages list only running projects, without their
+  local folders.
   `tailscale status` shows its address.
 
 ### Changed
@@ -22,9 +23,9 @@ uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- Ghost and not-found pages read over the tailnet link projects under the
-  tailnet suffix instead of `.localhost`, and a ghost page answers at a
-  project's tailnet name.
+- Not-found pages read over the tailnet link projects under the tailnet
+  suffix instead of `.localhost`. The pinned trust command `tailscale status`
+  prints now starts with `uvx`, so it runs on a machine without localghost.
 
 ## [4.1.0] - 2026-10-09
 
