@@ -21,7 +21,7 @@ from pathlib import Path
 
 import click
 
-from . import picker, registry, statusbar
+from . import forwarder, picker, registry, statusbar
 from .compose import resolve_compose, routing_problem
 from .config import (
     CONFIG_NAME,
@@ -1870,21 +1870,22 @@ def _detach_host(plan: RunPlan, cwd: Path) -> None:
     child: subprocess.Popen[bytes] | None = None
     try:
         log.parent.mkdir(parents=True, exist_ok=True)
+        # Where the hub's bridge cannot reach loopback but a relay can, a
+        # leader stays behind to relay a loopback-bound application, which a
+        # foreground run would otherwise do itself. Elsewhere the command
+        # runs on its own, as nothing would be left for a leader to do.
+        command = list(plan.launch)
+        if forwarder.available():
+            mode = "shared" if plan.app_port is None else "isolated"
+            command = [
+                sys.executable, "-I", "-m", "localghost.detached",
+                str(plan.port), mode, *command,
+            ]  # fmt: skip
         with log.open("ab") as handle:
             # `start_new_session` makes the child a process-group leader, which
             # is what lets `sessions.stop` signal the group by its recorded pid.
-            # The leader stays behind to relay a loopback-bound application,
-            # which a foreground run would otherwise do itself.
             child = subprocess.Popen(
-                [
-                    sys.executable,
-                    "-I",
-                    "-m",
-                    "localghost.detached",
-                    str(plan.port),
-                    "shared" if plan.app_port is None else "isolated",
-                    *plan.launch,
-                ],
+                command,
                 cwd=plan.working_directory or cwd,
                 stdout=handle,
                 stderr=subprocess.STDOUT,

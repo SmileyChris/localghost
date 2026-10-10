@@ -2,8 +2,9 @@
 
 A foreground run relays a loopback-bound application from the Docker gateway
 for as long as it lasts. A detached run leaves no localghost process behind to
-do that, so the hub could never reach such an application. This stays behind
-in the application's process group instead: it starts the command, raises the
+do that, so the hub could never reach such an application. Where a relay is
+possible, and so needed, this stays behind in the application's process group
+instead: it starts the command, raises the
 same relay once the application binds loopback, and exits with the command's
 status. `sessions stop` signals the whole group, which reaches the application
 directly.
@@ -38,8 +39,7 @@ def main(argv: list[str]) -> int:
     # long enough to report its status.
     for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(signum, lambda *_: None)
-    # Asked once: it consults Docker, and the answer does not change.
-    settled = forwarder.hub_reaches_loopback()
+    settled = False
     with contextlib.ExitStack() as relays:
         while True:
             try:

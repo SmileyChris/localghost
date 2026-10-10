@@ -238,7 +238,6 @@ def test_detached_leader_relays_a_loopback_application(monkeypatch):
         relayed.append((target, bind, port))
         yield
 
-    monkeypatch.setattr(detached.forwarder, "hub_reaches_loopback", lambda: False)
     monkeypatch.setattr(detached.forwarder, "gateway", lambda: "172.17.0.1")
     monkeypatch.setattr(detached.forwarder, "forwarding", forwarding)
     monkeypatch.setattr(detached, "_POLL", 0.05)

@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 from subprocess import CompletedProcess
+from types import SimpleNamespace
 
 import click
 import pytest
@@ -2208,6 +2209,7 @@ def test_detached_host_runs_in_the_planned_working_directory(
     recorded: dict[str, object] = {}
     monkeypatch.setattr(cli_module, "_run_proxy", lambda *args, **kwargs: None)
     monkeypatch.setattr(cli_module, "start_bridge", lambda selected: None)
+    monkeypatch.setattr(cli_module.forwarder, "available", lambda: False)
     monkeypatch.setattr(
         cli_module, "_session_log_path", lambda name: tmp_path / f"{name}.log"
     )
@@ -2232,6 +2234,33 @@ def test_detached_host_runs_in_the_planned_working_directory(
     assert recorded["session_cwd"] == root
 
 
+@pytest.mark.parametrize("relay", [True, False])
+def test_detached_run_keeps_a_leader_only_where_a_relay_can_help(
+    monkeypatch, tmp_path, cli_module, relay
+):
+    plan = RunPlan("demo", "custom", ("serve",), 3000, "session", "services: {}\n")
+    commands = []
+    monkeypatch.setattr(cli_module, "_run_proxy", lambda *args, **kwargs: None)
+    monkeypatch.setattr(cli_module, "start_bridge", lambda selected: None)
+    monkeypatch.setattr(
+        cli_module, "_session_log_path", lambda name: tmp_path / f"{name}.log"
+    )
+    monkeypatch.setattr(cli_module.forwarder, "available", lambda: relay)
+    monkeypatch.setattr(
+        cli_module.subprocess,
+        "Popen",
+        lambda command, **kwargs: commands.append(command) or SimpleNamespace(pid=1),
+    )
+    monkeypatch.setattr(cli_module, "create_session", lambda **kwargs: None)
+
+    cli_module._detach_host(plan, tmp_path)
+
+    if relay:
+        assert commands[0][2:6] == ["-m", "localghost.detached", "3000", "shared"]
+    else:
+        assert commands == [["serve"]]
+
+
 def test_detached_start_failure_removes_bridge(monkeypatch, tmp_path, cli_module):
     plan = RunPlan("demo", "custom", ("missing",), 3000, "session", "services: {}\n")
     calls = []
@@ -2242,6 +2271,7 @@ def test_detached_start_failure_removes_bridge(monkeypatch, tmp_path, cli_module
     monkeypatch.setattr(
         cli_module, "stop_bridge", lambda selected: calls.append(("stop", selected))
     )
+    monkeypatch.setattr(cli_module.forwarder, "available", lambda: False)
     monkeypatch.setattr(
         cli_module, "_session_log_path", lambda name: tmp_path / f"{name}.log"
     )
