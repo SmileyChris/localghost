@@ -75,7 +75,8 @@ See [Security and trust](security.md) for certificate handling and
 
 ## Optional tailnet hosting
 
-To make the same routes available inside a Tailscale tailnet, enable the
-opt-in tagged gateway and split DNS with `uvx localghost tailscale enable`.
+To make the same routes available inside a Tailscale tailnet, share the hub
+through an opt-in tagged gateway and split DNS with
+`uvx localghost tailscale share`.
 The ordinary `.localhost` routes stay local. See
 [Host on a tailnet](tailscale.md) for setup, trust, and scope.

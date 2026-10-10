@@ -24,6 +24,12 @@ uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `tailscale enable` and `tailscale disable` are now `tailscale share` and
+  `tailscale unshare`: one machine shares its hub, the others trust it. The
+  old names remain as deprecated aliases.
+- `tailscale unshare` keeps the OAuth credential in the system keyring, so
+  sharing again needs no setup, and says how to remove it:
+  `unshare --forget-credential`, which also works once the hub is unshared.
 - `localghost`, `trust`, and `traefik` are reserved project names: the hub
   answers at those names itself, so a project there was never reachable.
 - `http://trust.<suffix>` is deprecated in favor of `localghost.<suffix>`. It

@@ -1300,9 +1300,8 @@ def _resolve_tailscale_credential(
 ) -> tuple[str, str]:
     """Find the OAuth credential: options, then keyring, then a guided prompt.
 
-    With a tag, the prompt follows enable's full admin-console setup; without
-    one it only names the scope disable uses, since disable deletes the
-    credential afterwards anyway.
+    With a tag, the prompt follows share's full admin-console setup; without
+    one it only names the scope unshare uses.
     """
     if not client_id and not client_secret:
         stored = load_tailscale_credential()
@@ -1323,7 +1322,10 @@ def _resolve_tailscale_credential(
                         f"auth_keys (with {tag} allowed) and dns:write",
                     ),
                 ],
-                title="One-time Tailscale admin-console setup",
+                title=(
+                    "Tailscale admin-console setup (already done? enter that "
+                    "client's id and secret)"
+                ),
             )
         else:
             details(
@@ -1344,13 +1346,28 @@ def _resolve_tailscale_credential(
     "--client-secret",
     envvar="TAILSCALE_CLIENT_SECRET",
 )
-def tailscale_unshare(client_id: str | None, client_secret: str | None) -> None:
-    """Stop sharing the hub: restore prior tailnet DNS and stop the gateway."""
+@click.option(
+    "forget_credential",
+    "--forget-credential",
+    is_flag=True,
+    help="Also remove the stored OAuth credential; works once unshared too.",
+)
+def tailscale_unshare(
+    client_id: str | None, client_secret: str | None, forget_credential: bool
+) -> None:
+    """Stop sharing the hub: restore prior tailnet DNS and stop the gateway.
+
+    The OAuth credential stays in the system keyring, so sharing again needs
+    no setup; --forget-credential removes it.
+    """
     try:
         state = load_tailscale_state()
     except TailscaleError as exc:
         raise click.ClickException(str(exc)) from exc
     if state is None:
+        if forget_credential:
+            _forget_tailscale_credential()
+            return
         raise click.ClickException("the hub is not shared on the tailnet")
     client_id, client_secret = _resolve_tailscale_credential(client_id, client_secret)
     try:
@@ -1358,7 +1375,6 @@ def tailscale_unshare(client_id: str | None, client_secret: str | None) -> None:
         previous = state.previous_split_dns.get(state.suffix)
         api.update_split_dns(state.tailnet, {state.suffix: previous})
         remove_tailscale_state()
-        forgot_credential = delete_tailscale_credential()
         if proxy_is_running():
             _run_proxy(
                 "up",
@@ -1369,8 +1385,14 @@ def tailscale_unshare(client_id: str | None, client_secret: str | None) -> None:
     except TailscaleError as exc:
         raise click.ClickException(str(exc)) from exc
     success("Tailnet DNS was restored and the local gateway was removed.")
-    if forgot_credential:
-        info("The OAuth credential was removed from the system keyring.")
+    if forget_credential:
+        _forget_tailscale_credential()
+    elif load_tailscale_credential() is not None:
+        info(
+            "The OAuth credential stays in the system keyring for the next "
+            "share; run `localghost tailscale unshare --forget-credential` to "
+            "remove it."
+        )
     info(
         f"Machines that trusted the .{state.suffix} root still trust it; run "
         "`localghost trust remove` on each to revoke."
@@ -1379,6 +1401,13 @@ def tailscale_unshare(client_id: str | None, client_secret: str | None) -> None:
         f"Remove the offline tagged localghost-{state.node_label} device in the "
         "Tailscale admin console."
     )
+
+
+def _forget_tailscale_credential() -> None:
+    if delete_tailscale_credential():
+        info("The OAuth credential was removed from the system keyring.")
+    else:
+        info("No OAuth credential was stored in the system keyring.")
 
 
 tailscale.add_command(

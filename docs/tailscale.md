@@ -41,20 +41,20 @@ Four pieces cooperate, and each has exactly one job:
   versa.
 - **Split DNS** is the only piece outside your machine: a per-suffix entry in
   the tailnet's DNS configuration that sends `*.<suffix>` lookups to the
-  gateway. Enable adds it, disable restores exactly what was there before.
+  gateway. Share adds it, unshare restores exactly what was there before.
 
 A request from another device therefore flows: tailnet DNS → gateway →
 Traefik (certificate chosen by SNI from the suffix authority) → the same
 container or host bridge that serves the `.localhost` route.
 
-## Enable it
+## Share it
 
 ```sh
-localghost tailscale enable
+localghost tailscale share
 ```
 
-Without a credential, enable walks through the one-time admin-console setup
-before prompting: allow the device tag (default `tag:localghost`) in the
+Without a stored credential, share walks through the one-time admin-console
+setup before prompting: allow the device tag (default `tag:localghost`) in the
 tailnet [policy file](https://login.tailscale.com/admin/acls/file), for
 example
 
@@ -70,11 +70,12 @@ client id and secret at the prompts, or provide them with
 `--client-id`/`--client-secret`. When a step was missed, the API errors are
 translated into the exact console fix instead of raw HTTP responses.
 
-After a successful enable, the credential is saved in the system keyring
-(service `localghost-tailscale`), so `disable` and a later re-enable need no
-re-entry; `disable` removes it again. Without a usable keyring, localghost
-warns and stores nothing, and `disable` prompts for a client with the
-`dns:write` scope instead.
+After a successful share, the credential is saved in the system keyring
+(service `localghost-tailscale`), so `unshare` and a later share need no
+re-entry. It stays there until `localghost tailscale unshare
+--forget-credential` removes it, which also works once the hub is unshared.
+Without a usable keyring, localghost warns and stores nothing, and `unshare`
+prompts for a client with the `dns:write` scope instead.
 
 The OAuth client's own tailnet is the default. Localghost asks the installed
 `tailscale` CLI for a suffix: an explicit one-label search domain wins, then
@@ -84,11 +85,11 @@ when the short name is a public word. The short name keeps resolving to the
 machine itself alongside the suffix. Pass `--tailnet` or `--suffix`
 explicitly when those defaults are not the desired values.
 
-A suffix's split-DNS entry applies to the whole tailnet, so enable refuses to
+A suffix's split-DNS entry applies to the whole tailnet, so share refuses to
 replace an existing one — most likely another machine already hosting that
 suffix. Machine short names keep hosting machines apart by default; pass a
 distinct `--suffix`, or `--takeover` to replace the mapping deliberately. When a
-later enable step fails, the split-DNS entry and saved state are rolled back
+later share step fails, the split-DNS entry and saved state are rolled back
 so the command can simply be run again.
 
 A suffix that names a public TLD or reserved zone (`dev`, `com`, `work`, any
@@ -98,12 +99,12 @@ impersonate real websites on every machine that trusts it, so no tailnet
 authority is minted for such a suffix. Requests are still encrypted by the
 tailnet's WireGuard tunnel; what is lost is the browser's secure context
 (service workers, `crypto.subtle`, camera access) and the trust details on
-the `localghost.<suffix>` page. `enable`, `hub up`, and `localghost tailscale status` say so, the
+the `localghost.<suffix>` page. `share`, `hub up`, and `localghost tailscale status` say so, the
 last in place of the trust command a private suffix shows. Detection never picks a public label; one has to
 be passed as `--suffix` deliberately. Choose a private label such as
 `tail1234` for trusted HTTPS.
 
-Enable performs four bounded operations:
+Share performs four bounded operations:
 
 1. bootstraps the localhost and tailnet HTTPS authorities and builds the
    gateway image;
@@ -118,7 +119,7 @@ Enable performs four bounded operations:
 The OAuth access token and auth key are never saved, and the client secret is
 kept only in the system keyring. Localghost stores the tailnet name, suffix,
 gateway addresses, device tag, and previous split-DNS map in its state
-directory so it can remove its split-DNS entry on disable without discarding
+directory so it can remove its split-DNS entry on unshare without discarding
 unrelated changes made later.
 
 Every client must trust this hub's development roots once:
@@ -127,7 +128,7 @@ Every client must trust this hub's development roots once:
 localghost trust install
 ```
 
-When tailnet hosting is enabled, the standard trust command installs both the
+When the hub is shared, the standard trust command installs both the
 `.localhost` root and the active tailnet root. It downloads the latter from
 `http://localghost.tail1234` over the tailnet. Private CA keys never leave Docker volumes.
 
@@ -154,7 +155,7 @@ of its gateway device, or the admin rights to replace it.
 
 Without the tailscale CLI there is no network map to ask, so the command
 falls back to downloading from `http://localghost.tail1234` by DNS and warns
-that it did. Pin the fingerprint there: a successful enable — and
+that it did. Pin the fingerprint there: a successful share — and
 `localghost tailscale status` afterwards — prints it beneath the trust
 command, and the download is installed only if it matches:
 
@@ -188,7 +189,7 @@ teammate without a sign-in of its own. See
 [Tailnet identity](integrating-applications.md#tailnet-identity) for the
 values, tagged devices, and what to trust.
 
-## Operate and disable it
+## Operate and unshare it
 
 Normal commands continue to own the hub:
 
@@ -205,7 +206,7 @@ visible for other devices while the application runs.
 The gateway carries a Docker healthcheck that reports healthy only once its
 tailnet node is enrolled and every listener is up. `localghost tailscale
 status` includes that observed state as `Gateway health`, so a gateway that
-died after enable shows up there rather than as a timeout on another device.
+died after share shows up there rather than as a timeout on another device.
 Routers that cannot be mirrored (custom labels without explicit service and
 entrypoints) appear there as `Localhost-only routers`.
 
@@ -213,39 +214,41 @@ An unreachable tailnet never blocks local work: when the hub starts but only
 the gateway fails its healthcheck, `localghost` warns and carries on with the
 `.localhost` routes while the gateway keeps retrying in the background.
 
-To restore the DNS configuration that existed at enable time and remove the
+To restore the DNS configuration that existed at share time and remove the
 gateway from the running hub:
 
 ```sh
-localghost tailscale disable
+localghost tailscale unshare
 ```
 
-Disable also deletes the OAuth credential from the system keyring, and says
-so, so the next enable asks for it again. Switching suffix (below) keeps it.
+The OAuth credential stays in the system keyring, so sharing again needs no
+setup; unshare says so and how to remove it with `--forget-credential`.
+(`enable` and `disable` still work as deprecated names for `share` and
+`unshare`.)
 
-Disabling deliberately does not delete the offline machine record. Remove the
+Unsharing deliberately does not delete the offline machine record. Remove the
 tagged `localghost-<machine>` device from the Tailscale admin console after
 you have confirmed it is the expected node. Trust installed on other clients
 is also left in place; run `localghost trust remove` on each to revoke it.
 
 ### Switch to another suffix
 
-Run enable again with the new suffix while tailnet hosting is enabled:
+Run share again with the new suffix while the hub is shared:
 
 ```sh
-localghost tailscale enable --suffix wrk
+localghost tailscale share --suffix wrk
 ```
 
-Without `--suffix`, enable detects the suffix again, so after renaming this
-machine in the admin console a plain `localghost tailscale enable` moves the
+Without `--suffix`, share detects the suffix again, so after renaming this
+machine in the admin console a plain `localghost tailscale share` moves the
 routes to the new short name. That applies to a suffix chosen with
-`--suffix` too; when detection gives the current suffix, enable just reports
-that hosting is already enabled.
+`--suffix` too; when detection gives the current suffix, share just reports
+that the hub is already shared.
 
 The gateway keeps its device, addresses, tailnet, and tag, so no auth key is
 created and nothing new appears in the admin console. The new suffix's split
 DNS entry points at the gateway, and in the same change the old suffix gets
-back whatever it resolved to before enable. The hub is recreated to answer
+back whatever it resolved to before sharing. The hub is recreated to answer
 for the new names. The same `--takeover` rule applies to the new suffix, and
 if the hub fails to start the switch is rolled back to the old suffix. The
 stored credential is used and kept.
@@ -255,14 +258,14 @@ its suffix. Other machines therefore run the printed `localghost tailscale
 trust` command for the new suffix, and `localghost trust remove` if they
 should stop trusting the old one.
 
-A hub enabled before gateways were named after the machine keeps its
-`localghost-<suffix>` device across switches; disable and enable again to
+A hub shared before gateways were named after the machine keeps its
+`localghost-<suffix>` device across switches; unshare and share again to
 enroll one named after the machine.
 
-While tailnet hosting is enabled, `localghost trust remove` on the hosting
+While the hub is shared, `localghost trust remove` on the hosting
 machine removes local trust but the hub keeps serving HTTPS — tailnet TLS
 terminates on Traefik — so a full downgrade needs `localghost tailscale
-disable` first.
+unshare` first.
 
 ## Scope and limitations
 

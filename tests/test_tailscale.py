@@ -905,7 +905,10 @@ def test_status_prints_the_share_command(monkeypatch, tmp_path) -> None:
     assert f"--fingerprint {fingerprint}" in result.output
 
 
-def test_disable_uses_the_stored_credential_and_deletes_it(monkeypatch) -> None:
+@pytest.mark.parametrize("forget", [False, True])
+def test_unshare_uses_the_stored_credential_and_keeps_it_unless_told(
+    monkeypatch, forget
+) -> None:
     events: list = []
     state = TailscaleState(
         "example.com", "tail1234", ("100.64.0.1",), {"corp": ["100.1.1.1"]}
@@ -939,11 +942,29 @@ def test_disable_uses_the_stored_credential_and_deletes_it(monkeypatch) -> None:
 
     monkeypatch.setattr(cli_module, "delete_tailscale_credential", delete_credential)
 
-    result = CliRunner().invoke(cli, ["tailscale", "unshare"])
+    flags = ["--forget-credential"] if forget else []
+    result = CliRunner().invoke(cli, ["tailscale", "unshare", *flags])
     assert result.exit_code == 0, result.output
     assert events[0] == ("kid", "ksecret")
-    assert "deleted" in events
-    assert events.index("deleted") > events.index("removed")
+    if forget:
+        assert events.index("deleted") > events.index("removed")
+        assert "removed from the system keyring" in result.output
+    else:
+        assert "deleted" not in events
+        assert "unshare --forget-credential" in result.output
+
+
+def test_unshare_can_forget_the_credential_once_unshared(monkeypatch) -> None:
+    deleted = []
+    monkeypatch.setattr(cli_module, "load_tailscale_state", lambda: None)
+    monkeypatch.setattr(
+        cli_module, "delete_tailscale_credential", lambda: deleted.append(1) or True
+    )
+
+    result = CliRunner().invoke(cli, ["tailscale", "unshare", "--forget-credential"])
+
+    assert result.exit_code == 0, result.output
+    assert deleted == [1]
     assert "removed from the system keyring" in result.output
 
 
