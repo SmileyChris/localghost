@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- The remaining messages and docs say OAuth credential rather than OAuth
+  client, as the Trust credentials page does.
+
 ## [4.2.1] - 2026-10-12
 
 ### Changed

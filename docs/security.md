@@ -156,7 +156,7 @@ does not publish a LAN or public host port. It does not use Tailscale Funnel or
 Serve. Tailnet policy must restrict access to the gateway's device tag when the
 whole tailnet should not reach development applications.
 
-The share command exchanges a scoped OAuth client credential for a temporary
+The share command exchanges a scoped OAuth credential for a temporary
 access token, creates a single-use short-lived device auth key, and updates
 split DNS. The access token and auth key are held only in process memory. The
 Client ID and secret are saved in the operating system keyring — never in

@@ -1424,7 +1424,7 @@ def _forget_tailscale_credential() -> None:
     if delete_tailscale_credential():
         info("The OAuth credential was removed from the system keyring.")
         info(
-            "The OAuth client itself still exists; revoke it on the Trust "
+            "The OAuth credential still exists in Tailscale; revoke it on the Trust "
             f"credentials page ({OAUTH_CONSOLE_URL}) if no other machine uses it."
         )
     else:

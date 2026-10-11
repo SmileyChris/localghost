@@ -330,7 +330,7 @@ class API:
                 ) from exc
             if exc.code == 403:
                 raise TailscaleError(
-                    f"the OAuth client may not create auth keys: it needs the "
+                    f"the OAuth credential may not create auth keys: it needs the "
                     f"Auth Keys: Write scope with {tag} selected (Trust "
                     f"credentials page, {OAUTH_CONSOLE_URL})"
                 ) from exc
@@ -344,7 +344,7 @@ class API:
     def _dns_scope_guidance(exc: APIError) -> TailscaleError:
         if exc.code == 403:
             return TailscaleError(
-                "the OAuth client lacks the DNS: Write scope; recreate it on the "
+                "the OAuth credential lacks the DNS: Write scope; recreate it on the "
                 f"Trust credentials page ({OAUTH_CONSOLE_URL})"
             )
         return exc

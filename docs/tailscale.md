@@ -63,7 +63,7 @@ example
 ```
 
 (skipped when a device in the network map already carries the tag) and create a scoped
-[OAuth client](https://tailscale.com/docs/features/oauth-clients) on the
+[OAuth credential](https://tailscale.com/docs/features/oauth-clients) on the
 [Trust credentials](https://console.tailscale.com/admin/settings/trust-credentials)
 page with the scopes **DNS: Write** and **Auth Keys: Write** (with that tag
 selected). Paste the
@@ -76,12 +76,12 @@ After a successful share, the credential is saved in the system keyring
 (service `localghost-tailscale`), so `unshare` and a later share need no
 re-entry. It stays there until `localghost tailscale unshare
 --forget-credential` removes it, which also works once the hub is unshared.
-That only forgets this machine's copy: revoke the OAuth client in the admin
+That only forgets this machine's copy: revoke the OAuth credential in the admin
 console's Trust credentials page once no other machine uses it.
 Without a usable keyring, localghost warns and stores nothing, and `unshare`
 prompts for a client with the DNS: Write scope instead.
 
-The OAuth client's own tailnet is the default. Localghost asks the installed
+The OAuth credential's own tailnet is the default. Localghost asks the installed
 `tailscale` CLI for a suffix: an explicit one-label search domain wins, then
 this machine's own tailnet short name (`wrk.taildc3ac3.ts.net` becomes `wrk`,
 serving `shop.wrk`), and finally the tailnet's MagicDNS label (`taildc3ac3`)
@@ -120,7 +120,7 @@ Share performs four bounded operations:
    `tail1234`, preserving the previous suffix mapping; and
 4. starts the gateway and suffix-specific HTTPS provider with the hub.
 
-The OAuth access token and auth key are never saved, and the client secret is
+The OAuth access token and auth key are never saved, and the Client secret is
 kept only in the system keyring. Localghost stores the tailnet name, suffix,
 gateway addresses, device tag, and previous split-DNS map in its state
 directory so it can remove its split-DNS entry on unshare without discarding
