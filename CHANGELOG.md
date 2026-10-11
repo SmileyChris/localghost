@@ -17,9 +17,33 @@ uses [Semantic Versioning](https://semver.org/).
 - `sessions list` tags a running isolated session `isolated`, beside
   `detached` or `foreground`, and the hub's welcome page says "Running
   detached, isolated". `sessions list --json` gains `isolated` on the session.
+- With tailnet hosting enabled, `http://localghost.<suffix>` is the hub's page
+  on the tailnet: its projects linked under the suffix, and for a private
+  suffix the pinned trust command, fingerprint, and root download. Read over
+  the tailnet, the hub's pages list only running projects, without their
+  local folders.
+  `tailscale status` shows its address.
+- `tailscale trust` no longer needs a fingerprint. It finds the hub in the
+  local Tailscale client's network map, by suffix, machine, or gateway
+  device, and asks the gateway at its tailnet address for its suffix and
+  root, so the tailnet vouches for what is installed and split DNS cannot
+  redirect it. Two hubs claiming one suffix must be told apart by device.
+  Without the tailscale CLI it falls back to the DNS download and warns;
+  `--fingerprint` still pins it. Enable and `tailscale status` now offer the
+  plain command, with the fingerprint as a note for clients without the CLI.
 
 ### Changed
 
+- `tailscale enable` and `tailscale disable` are now `tailscale share` and
+  `tailscale unshare`: one machine shares its hub, the others trust it. The
+  old names remain as deprecated aliases.
+- `tailscale unshare` keeps the OAuth credential in the system keyring, so
+  sharing again needs no setup, and says how to remove it:
+  `unshare --forget-credential`, which also works once the hub is unshared.
+- `localghost`, `trust`, and `traefik` are reserved project names: the hub
+  answers at those names itself, so a project there was never reachable.
+- `http://trust.<suffix>` is deprecated in favor of `localghost.<suffix>`. It
+  still serves the root certificate to earlier CLIs and redirects browsers.
 - A custom command that takes `{port}` walks past a busy port to the next free
   one, as the built-in types do with their defaults, instead of refusing to
   start. A command that names its own port stays strict. `save` keeps the port
@@ -27,6 +51,9 @@ uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Not-found pages read over the tailnet link projects under the tailnet
+  suffix instead of `.localhost`. The trust commands `tailscale status`
+  prints now start with `uvx`, so they run on a machine without localghost.
 - A detached run now relays a loopback-bound application from the Docker
   gateway, as a foreground run does. Before, the hub answered 502 for such an
   application -- a Vite or Astro dev server, or Django's default `runserver`

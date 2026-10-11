@@ -26,7 +26,9 @@ from .generator import (
     DNS_SAFE_PROJECT,
     HOST_BRIDGE_IMAGE,
     PROXY_NETWORK,
+    RESERVED_NAMES,
     render_override,
+    reserved_name_error,
 )
 
 
@@ -186,6 +188,8 @@ def validate_name(name: str) -> None:
             f"'{name}' is not a DNS-safe project name; use --name with lowercase "
             "letters, numbers, and hyphens"
         )
+    if name in RESERVED_NAMES:
+        raise reserved_name_error(name)
 
 
 def resolve_pinned_type(

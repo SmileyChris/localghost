@@ -1,7 +1,7 @@
 # Applied on top of the HTTPS and tailscale overlays for a private suffix: it
 # mints a tailnet root name-constrained to the suffix, has Traefik terminate
 # TLS for *.${suffix}, and lets the gateway publish the root on
-# trust.${suffix}. Public suffixes never get this overlay, because a root
+# localghost.${suffix}. Public suffixes never get this overlay, because a root
 # scoped to a real TLD could impersonate real websites.
 services:
   bootstrap:
@@ -12,6 +12,10 @@ services:
   traefik:
     volumes:
       - localghost-tailnet-ca-signer:/var/lib/localghost-tailnet-ca
+    labels:
+      # The index at localghost.${suffix} shows the pinned trust command.
+      - traefik.http.middlewares.localghost-fallback.plugin.localghostFallback.tailnetSuffix=${LOCALGHOST_TAILSCALE_SUFFIX:?LOCALGHOST_TAILSCALE_SUFFIX is required}
+      - traefik.http.middlewares.localghost-fallback.plugin.localghostFallback.tailnetRoot=/var/lib/localghost-tailnet-ca/rootCA.pem
 
   tailscale-gateway:
     command:

@@ -142,8 +142,9 @@ checkout                  primary URL
 
 Compose project names also isolate container and default-network names. Stopping
 one checkout leaves the other checkout and the hub running. Override a
-name only if two checkout directories have the same basename or a basename is
-not DNS-safe.
+name only if two checkout directories have the same basename, a basename is
+not DNS-safe, or it is one the hub keeps for itself: `localghost`, `trust`, or
+`traefik`.
 
 ## Framework configuration
 

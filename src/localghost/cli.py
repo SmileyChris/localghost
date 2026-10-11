@@ -92,14 +92,19 @@ from .tailscale import (
 from .tailscale import (
     OAUTH_CONSOLE_URL,
     POLICY_CONSOLE_URL,
+    TailnetHub,
     TailscaleError,
     TailscaleState,
+    tailnet_hubs,
 )
 from .tailscale import (
     default_node as default_tailscale_node,
 )
 from .tailscale import (
     delete_credential as delete_tailscale_credential,
+)
+from .tailscale import (
+    describe_hub as describe_tailnet_hub,
 )
 from .tailscale import (
     detect_suffix as detect_tailscale_suffix,
@@ -868,7 +873,7 @@ def _remove_trust() -> None:
     if tailnet_active:
         info(
             "Tailnet hosting keeps the hub serving HTTPS; run "
-            "`localghost tailscale disable` to turn the mirror off."
+            "`localghost tailscale unshare` to turn the mirror off."
         )
 
 
@@ -935,13 +940,14 @@ def _tailscale_status() -> None:
     except TailscaleError as exc:
         raise click.ClickException(str(exc)) from exc
     if state is None:
-        details([("Tailnet hosting", "disabled")], title="Tailscale status")
+        details([("Tailnet sharing", "off")], title="Tailscale status")
         return
     details(
-        [("Tailnet hosting", "enabled")]
+        [("Tailnet sharing", "on")]
         + _explicit_tailnet_row(state.tailnet)
         + [
             ("Route suffix", f".{state.suffix}"),
+            ("Hub page", f"http://localghost.{state.suffix}"),
             ("Gateway", ", ".join(state.gateway_ips)),
             ("Gateway health", _tailscale_gateway_health()),
             ("Device tag", state.tag),
@@ -960,10 +966,7 @@ def _tailscale_status() -> None:
     if root_path.is_file():
         with suppress(TrustError):
             certificate = PublicCertificate.parse(root_path.read_bytes())
-            action(
-                f"Trust https://*.{state.suffix} on other machines",
-                _share_command(state.suffix, certificate),
-            )
+            _share_trust(state.suffix, certificate)
 
 
 def _tailscale_gateway_health() -> str:
@@ -1051,7 +1054,7 @@ def _unmirrored_router_names() -> list[str]:
     return names
 
 
-@tailscale.command("enable")
+@tailscale.command("share")
 @click.option(
     "tailnet",
     "--tailnet",
@@ -1073,7 +1076,7 @@ def _unmirrored_router_names() -> list[str]:
     "--client-secret",
     envvar="TAILSCALE_CLIENT_SECRET",
 )
-def tailscale_enable(
+def tailscale_share(
     tailnet: str,
     suffix: str | None,
     tag: str,
@@ -1081,9 +1084,10 @@ def tailscale_enable(
     client_id: str | None,
     client_secret: str | None,
 ) -> None:
-    """Enroll a tagged gateway and add split DNS for the chosen suffix.
+    """Share this machine's hub on the tailnet under a route suffix.
 
-    When tailnet hosting is already enabled, a different suffix, given or
+    Enrolls a tagged gateway device and points split DNS for the suffix at
+    it. When the hub is already shared, a different suffix, given or
     detected, moves the routes to it, keeping the same gateway device.
     """
     title()
@@ -1150,7 +1154,7 @@ def tailscale_enable(
     except (TailscaleError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     _remember_tailscale_credential(client_id, client_secret)
-    success(f"Tailnet routes are enabled at {_tailnet_url(state, '<project>')}.")
+    success(f"Shared on the tailnet at {_tailnet_url(state, '<project>')}.")
     _offer_tailnet_trust(chosen_suffix, certificate, localhost_trusted)
 
 
@@ -1179,7 +1183,7 @@ def _switch_tailnet_suffix(
         chosen_suffix = current.suffix
     if chosen_suffix == current.suffix:
         raise click.ClickException(
-            f"tailnet hosting is already enabled at .{current.suffix}; pass "
+            f"the hub is already shared at .{current.suffix}; pass "
             "--suffix to move it to another suffix"
         )
     old_suffix = current.suffix
@@ -1269,7 +1273,7 @@ def _remember_tailscale_credential(client_id: str, client_secret: str) -> None:
     if not store_tailscale_credential(client_id, client_secret):
         warning(
             "The OAuth credential was not stored",
-            ["no usable system keyring; disable will ask for the credential again"],
+            ["no usable system keyring; unshare will ask for the credential again"],
         )
 
 
@@ -1278,10 +1282,7 @@ def _offer_tailnet_trust(
 ) -> None:
     if certificate is None:
         return
-    action(
-        f"Trust https://*.{suffix} on other machines",
-        _share_command(suffix, certificate),
-    )
+    _share_trust(suffix, certificate)
     if localhost_trusted:
         info("Installing the tailnet HTTPS root (sudo may be requested)…")
         try:
@@ -1300,9 +1301,8 @@ def _resolve_tailscale_credential(
 ) -> tuple[str, str]:
     """Find the OAuth credential: options, then keyring, then a guided prompt.
 
-    With a tag, the prompt follows enable's full admin-console setup; without
-    one it only names the scope disable uses, since disable deletes the
-    credential afterwards anyway.
+    With a tag, the prompt follows share's full admin-console setup; without
+    one it only names the scope unshare uses.
     """
     if not client_id and not client_secret:
         stored = load_tailscale_credential()
@@ -1323,7 +1323,10 @@ def _resolve_tailscale_credential(
                         f"auth_keys (with {tag} allowed) and dns:write",
                     ),
                 ],
-                title="One-time Tailscale admin-console setup",
+                title=(
+                    "Tailscale admin-console setup (already done? enter that "
+                    "client's id and secret)"
+                ),
             )
         else:
             details(
@@ -1337,28 +1340,42 @@ def _resolve_tailscale_credential(
     return client_id, client_secret
 
 
-@tailscale.command("disable")
+@tailscale.command("unshare")
 @click.option("client_id", "--client-id", envvar="TAILSCALE_CLIENT_ID")
 @click.option(
     "client_secret",
     "--client-secret",
     envvar="TAILSCALE_CLIENT_SECRET",
 )
-def tailscale_disable(client_id: str | None, client_secret: str | None) -> None:
-    """Restore the prior tailnet DNS configuration and stop the gateway."""
+@click.option(
+    "forget_credential",
+    "--forget-credential",
+    is_flag=True,
+    help="Also remove the stored OAuth credential; works once unshared too.",
+)
+def tailscale_unshare(
+    client_id: str | None, client_secret: str | None, forget_credential: bool
+) -> None:
+    """Stop sharing the hub: restore prior tailnet DNS and stop the gateway.
+
+    The OAuth credential stays in the system keyring, so sharing again needs
+    no setup; --forget-credential removes it.
+    """
     try:
         state = load_tailscale_state()
     except TailscaleError as exc:
         raise click.ClickException(str(exc)) from exc
     if state is None:
-        raise click.ClickException("tailnet hosting is not enabled")
+        if forget_credential:
+            _forget_tailscale_credential()
+            return
+        raise click.ClickException("the hub is not shared on the tailnet")
     client_id, client_secret = _resolve_tailscale_credential(client_id, client_secret)
     try:
         api = TailscaleAPI.authenticate(client_id, client_secret)
         previous = state.previous_split_dns.get(state.suffix)
         api.update_split_dns(state.tailnet, {state.suffix: previous})
         remove_tailscale_state()
-        forgot_credential = delete_tailscale_credential()
         if proxy_is_running():
             _run_proxy(
                 "up",
@@ -1369,8 +1386,14 @@ def tailscale_disable(client_id: str | None, client_secret: str | None) -> None:
     except TailscaleError as exc:
         raise click.ClickException(str(exc)) from exc
     success("Tailnet DNS was restored and the local gateway was removed.")
-    if forgot_credential:
-        info("The OAuth credential was removed from the system keyring.")
+    if forget_credential:
+        _forget_tailscale_credential()
+    elif load_tailscale_credential() is not None:
+        info(
+            "The OAuth credential stays in the system keyring for the next "
+            "share; run `localghost tailscale unshare --forget-credential` to "
+            "remove it."
+        )
     info(
         f"Machines that trusted the .{state.suffix} root still trust it; run "
         "`localghost trust remove` on each to revoke."
@@ -1381,36 +1404,125 @@ def tailscale_disable(client_id: str | None, client_secret: str | None) -> None:
     )
 
 
+def _forget_tailscale_credential() -> None:
+    if delete_tailscale_credential():
+        info("The OAuth credential was removed from the system keyring.")
+    else:
+        info("No OAuth credential was stored in the system keyring.")
+
+
+tailscale.add_command(
+    click.Command(
+        "enable",
+        callback=tailscale_share.callback,
+        params=tailscale_share.params,
+        help=tailscale_share.help,
+        hidden=True,
+        deprecated="Use 'localghost tailscale share' instead.",
+    )
+)
+tailscale.add_command(
+    click.Command(
+        "disable",
+        callback=tailscale_unshare.callback,
+        params=tailscale_unshare.params,
+        help=tailscale_unshare.help,
+        hidden=True,
+        deprecated="Use 'localghost tailscale unshare' instead.",
+    )
+)
+
+
 @tailscale.command("trust")
-@click.argument("suffix", required=False)
+@click.argument("target", required=False)
 @click.option(
     "fingerprint",
     "--fingerprint",
     help=(
         "Install the root only when it has this SHA-256 fingerprint, as shown "
-        "by `localghost trust status` on the hosting machine."
+        "by `localghost tailscale status` on the hosting machine. TARGET is "
+        "then the suffix, and no tailscale CLI is needed."
     ),
 )
-def tailscale_trust(suffix: str | None, fingerprint: str | None) -> None:
-    """Compatibility alias for trusting the active tailnet root."""
-    if suffix is None:
-        state = load_tailscale_state()
-        if state is None:
-            raise click.ClickException("tailnet hosting is not enabled")
+def tailscale_trust(target: str | None, fingerprint: str | None) -> None:
+    """Trust a tailnet hub's HTTPS root on this client.
+
+    TARGET names the hub by suffix, machine, or gateway device. Without
+    --fingerprint the hub is found in this client's Tailscale network map, so
+    the tailnet itself vouches for the root. With no TARGET, the one hub on the
+    tailnet is trusted, or on a hosting machine its own.
+    """
+    state = load_tailscale_state()
+    if state is not None and target in (None, state.suffix):
         if not state.https:
             raise click.ClickException(
                 f"tailnet routes for .{state.suffix} are HTTP only, so there "
                 "is no root to trust"
             )
-        suffix = state.suffix
-    _install_tailnet_trust(suffix, expected_fingerprint=fingerprint)
+        _install_tailnet_trust(state.suffix, expected_fingerprint=fingerprint)
+    elif fingerprint is not None:
+        if target is None:
+            raise click.UsageError("name the suffix to trust with --fingerprint")
+        _install_tailnet_trust(target, expected_fingerprint=fingerprint)
+    else:
+        _trust_tailnet_hub(target)
 
 
-def _share_command(suffix: str, certificate: PublicCertificate) -> str:
-    """The pinned trust command another tailnet machine can paste."""
-    return (
-        f"localghost tailscale trust {suffix} "
-        f"--fingerprint {certificate.fingerprint}"
+def _trust_tailnet_hub(target: str | None) -> None:
+    """Find a hub in the network map and trust the root it serves."""
+    hubs = tailnet_hubs()
+    if hubs is None:
+        if target is None:
+            raise click.ClickException(
+                "the tailscale CLI is unavailable to find a hub; name the suffix "
+                "and pass --fingerprint"
+            )
+        warning(
+            f"The .{target} root is not verified by the tailnet",
+            [
+                "the tailscale CLI is unavailable, so the download trusts DNS",
+                "pass --fingerprint to pin it",
+            ],
+        )
+        _install_tailnet_trust(target)
+        return
+    described: list[TailnetHub] = []
+    unreachable: list[str] = []
+    for hub in hubs:
+        try:
+            described.append(describe_tailnet_hub(hub))
+        except TailscaleError as exc:
+            unreachable.append(str(exc))
+    matches = [hub for hub in described if target is None or hub.answers_to(target)]
+    if len(matches) == 1:
+        hub = matches[0]
+        try:
+            certificate = PublicCertificate.parse(hub.root)
+        except TrustError as exc:
+            raise click.ClickException(str(exc)) from exc
+        _install_tailnet_trust(hub.suffix, certificate=certificate, verified_by=hub)
+        return
+    if matches:
+        message = "more than one hub matches; name one as TARGET"
+    elif target:
+        message = f"no online localghost hub answers to {target}"
+    else:
+        message = "no online localghost hub was found in this tailnet"
+    found = [f"{hub.label} (.{hub.suffix})" for hub in described] + unreachable
+    raise click.ClickException("\n  ".join([message, *found]))
+
+
+def _share_trust(suffix: str, certificate: PublicCertificate) -> None:
+    """Show another tailnet machine how to trust this hub's root."""
+    action(
+        f"Trust https://*.{suffix} on other machines",
+        f"uvx localghost tailscale trust {suffix}",
+    )
+    # The fingerprint is for clients that cannot ask Tailscale for the hub;
+    # the plain command above is the way forward for everyone else.
+    info(
+        "Without the tailscale CLI, add --fingerprint "
+        f"{certificate.fingerprint} to pin the root."
     )
 
 
@@ -1420,7 +1532,7 @@ def _rollback_enable(
     """Return to the pre-enable state after a late enable failure.
 
     The suffix's split-DNS entry goes back to its previous value and the
-    saved state is removed so `enable` can simply be run again. The enrolled
+    saved state is removed so `share` can simply be run again. The enrolled
     gateway device stays: retrying reuses its persisted node state, and
     giving up only needs the admin console.
     """
@@ -1430,8 +1542,8 @@ def _rollback_enable(
         warning("Tailnet DNS was not restored", [str(exc)])
     remove_tailscale_state()
     warning(
-        "Enable failed and was rolled back",
-        [f"run `localghost tailscale enable` again to retry .{suffix}"],
+        "Sharing failed and was rolled back",
+        [f"run `localghost tailscale share` again to retry .{suffix}"],
     )
 
 
@@ -1476,16 +1588,23 @@ def _install_tailnet_trust(
     *,
     show_details: bool = True,
     expected_fingerprint: str | None = None,
+    certificate: PublicCertificate | None = None,
+    verified_by: TailnetHub | None = None,
 ) -> None:
+    """Install a tailnet root: `certificate` when a caller already has it,
+    otherwise downloaded by suffix."""
     expected = _normalize_fingerprint(expected_fingerprint)
     try:
         require_mkcert()
         suffix = validate_tailscale_suffix(suffix)
-        state = load_tailscale_state()
-        gateway_ips = state.gateway_ips if state and state.suffix == suffix else ()
-        certificate = PublicCertificate.parse(
-            fetch_tailscale_root(suffix, gateway_ips)
-        )
+        if certificate is None:
+            state = load_tailscale_state()
+            gateway_ips = (
+                state.gateway_ips if state and state.suffix == suffix else ()
+            )
+            certificate = PublicCertificate.parse(
+                fetch_tailscale_root(suffix, gateway_ips)
+            )
     except (TailscaleError, TrustError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     if expected is not None and expected != certificate.fingerprint:
@@ -1504,6 +1623,11 @@ def _install_tailnet_trust(
                 ("Authorization", "sudo password may be requested for system trust"),
                 ("Scope", f"development names under .{suffix}"),
                 ("Public-root fingerprint", certificate.fingerprint),
+                *(
+                    [("Verified by", f"tailnet node {verified_by.name}")]
+                    if verified_by
+                    else []
+                ),
                 ("Private keys", "remain on the hosting machine"),
             ],
             title="Tailnet HTTPS setup",
@@ -2287,7 +2411,7 @@ def _repair_authorities(tailscale_state: TailscaleState | None) -> bool:
     """Re-run the idempotent CA bootstraps after a failed HTTPS start.
 
     A pruned or half-created signer volume aborts Traefik's CA plugins, and
-    nothing else recreates the material outside `trust` and `enable`.
+    nothing else recreates the material outside `trust` and `share`.
     Bootstrap validates a healthy authority untouched, so retrying is safe.
     Returns False when repair itself fails so the original failure is the
     one reported.

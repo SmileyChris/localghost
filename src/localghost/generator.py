@@ -21,6 +21,16 @@ from .compose import declared_ports
 PROXY_NETWORK = "localghost"
 
 DNS_SAFE_PROJECT = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+# The hub answers at these names itself: its index, its deprecated trust page,
+# and the Traefik dashboard. A project under one would never be reached.
+RESERVED_NAMES = frozenset({"localghost", "trust", "traefik"})
+
+
+def reserved_name_error(name: str) -> click.ClickException:
+    return click.ClickException(
+        f"'{name}' is reserved for the localghost hub; choose another name with "
+        "--name or COMPOSE_PROJECT_NAME"
+    )
 HTTP_PORT_PREFERENCE = {
     80: 100,
     8000: 95,
@@ -76,6 +86,8 @@ def validate_project_name_value(project_name: str) -> None:
             f"derived project name '{project_name}' is not DNS-safe; set a safe, "
             "unique COMPOSE_PROJECT_NAME in .env first"
         )
+    if project_name in RESERVED_NAMES:
+        raise reserved_name_error(project_name)
 
 
 def rank_services(model: dict[str, Any], project_name: str) -> list[Candidate]:

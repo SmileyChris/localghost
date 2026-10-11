@@ -14,7 +14,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from contextlib import suppress
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -380,10 +380,16 @@ _MAX_ROOT_BYTES = 65536
 
 def fetch_public_root(suffix: str, gateway_ips: tuple[str, ...] = ()) -> bytes:
     suffix = validate_suffix(suffix)
-    host = f"trust.{suffix}"
-    candidates = gateway_ips or (host,)
+    # trust.<suffix> is deprecated, but hubs older than localghost.<suffix>
+    # serve the root only there.
+    hosts = (f"localghost.{suffix}", f"trust.{suffix}")
+    attempts = (
+        [(address, host) for address in gateway_ips for host in hosts]
+        if gateway_ips
+        else [(host, host) for host in hosts]
+    )
     last_error: urllib.error.URLError | None = None
-    for candidate in candidates:
+    for candidate, host in attempts:
         try:
             address = str(ipaddress.ip_address(candidate))
             if ":" in address:
@@ -406,6 +412,93 @@ def fetch_public_root(suffix: str, gateway_ips: tuple[str, ...] = ()) -> bytes:
     raise TailscaleError(
         f"could not download the localghost root from the .{suffix} gateway"
     ) from last_error
+
+
+@dataclass(frozen=True)
+class TailnetHub:
+    """A localghost gateway as this client's own network map names it."""
+
+    name: str
+    addresses: tuple[str, ...]
+    suffix: str = ""
+    root: bytes = b""
+
+    @property
+    def label(self) -> str:
+        return self.name.split(".", 1)[0]
+
+    def answers_to(self, target: str) -> bool:
+        """Whether `target` names this hub: its node, its machine, or suffix."""
+        target = target.lower().removesuffix(".")
+        return target in (
+            self.name, self.label, self.label.removeprefix("localghost-"), self.suffix
+        )  # fmt: skip
+
+
+def tailnet_hubs(tag: str = "tag:localghost") -> list[TailnetHub] | None:
+    """The online localghost gateways in this client's network map.
+
+    The names and addresses come from the coordination server through the
+    local Tailscale client, not from DNS, so split DNS cannot redirect them.
+    None means there is no tailscale CLI to ask.
+    """
+    try:
+        result = subprocess.run(
+            ["tailscale", "status", "--json"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        peers = json.loads(result.stdout).get("Peer") or {}
+    except (json.JSONDecodeError, AttributeError):
+        return None
+    hubs = [
+        TailnetHub(
+            str(peer["DNSName"]).lower().removesuffix("."),
+            tuple(str(address) for address in peer.get("TailscaleIPs") or ()),
+        )
+        for peer in peers.values()
+        if peer.get("Online")
+        and peer.get("DNSName")
+        and tag in (peer.get("Tags") or ())
+    ]
+    return sorted(hubs, key=lambda hub: hub.name)
+
+
+def describe_hub(hub: TailnetHub) -> TailnetHub:
+    """Ask a gateway, at its tailnet address, which suffix and root it serves.
+
+    The connection goes to an address from the network map, so WireGuard
+    vouches for the node that answers; nothing here relies on DNS.
+    """
+    for address in hub.addresses:
+        host = f"[{address}]" if ":" in address else address
+        url = f"http://{host}/.well-known/localghost/hub.json"
+        try:
+            with urllib.request.urlopen(url, timeout=15) as response:
+                raw = response.read(_MAX_ROOT_BYTES + 1)
+        except (urllib.error.URLError, OSError):
+            continue
+        if len(raw) > _MAX_ROOT_BYTES:
+            raise TailscaleError(f"{hub.name} returned an oversized description")
+        try:
+            payload = json.loads(raw)
+            suffix = validate_suffix(str(payload["suffix"]))
+            root = str(payload["root"]).encode()
+        except (ValueError, KeyError, TypeError) as exc:
+            raise TailscaleError(
+                f"{hub.name} returned an unreadable description"
+            ) from exc
+        return replace(hub, suffix=suffix, root=root)
+    raise TailscaleError(
+        f"{hub.name} did not describe itself; its hub may predate this, or route "
+        "an HTTP-only suffix"
+    )
 
 
 def _request(

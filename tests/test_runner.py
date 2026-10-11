@@ -2419,3 +2419,7 @@ def test_a_busy_port_suggests_isolation_only_where_it_works(monkeypatch):
 
     assert "Retry with --isolate to keep 8000." in said[0]
     assert "--isolate" not in said[1]
+@pytest.mark.parametrize("name", ["localghost", "trust", "traefik"])
+def test_hub_names_are_reserved(name) -> None:
+    with pytest.raises(click.ClickException, match="reserved for the localghost hub"):
+        runner.validate_name(name)

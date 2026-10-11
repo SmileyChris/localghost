@@ -2,6 +2,9 @@ package traefik_localghost_fallback
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -285,10 +288,89 @@ func TestProjectsListRunningByNameThenMostRecentlyStarted(t *testing.T) {
 	}
 	online := map[string]bool{"omega.localhost": true, "beta.localhost": true}
 	var names []string
-	for _, e := range pageEntries(entries, online) {
+	for _, e := range pageEntries(entries, online, view{Suffix: "localhost"}) {
 		names = append(names, e.Name)
 	}
 	if got := strings.Join(names, " "); got != "beta omega gamma alpha" {
 		t.Fatalf("order = %q", got)
+	}
+}
+
+// routersServing stands in for Traefik's router API with the given hosts
+// enabled.
+func routersServing(t *testing.T, hosts ...string) string {
+	t.Helper()
+	var routers []string
+	for _, host := range hosts {
+		routers = append(routers, `{"rule": "Host(`+"`"+host+"`"+`)", "status": "enabled"}`)
+	}
+	api := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		_, _ = rw.Write([]byte("[" + strings.Join(routers, ",") + "]"))
+	}))
+	t.Cleanup(api.Close)
+	return api.URL
+}
+
+func TestTailnetIndexLinksUnderItsSuffixAndPinsTheRoot(t *testing.T) {
+	dir := t.TempDir()
+	writeEntry(t, dir, "blog", "blog.localhost")
+	writeEntry(t, dir, "shop", "shop.localhost")
+	der := []byte("not really DER, but the digest only needs bytes")
+	root := filepath.Join(t.TempDir(), "rootCA.pem")
+	if err := os.WriteFile(root, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config := CreateConfig()
+	config.RegistryPath = dir
+	config.RoutersURL = routersServing(t, "blog.localhost")
+	config.TailnetSuffix = "tail1234"
+	config.TailnetRoot = root
+	h, err := New(context.Background(), nil, config, "localghost-fallback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(der)
+	fingerprint := "SHA256:" + strings.ToUpper(hex.EncodeToString(digest[:]))
+	command := "uvx localghost tailscale trust tail1234"
+
+	rec := get(h, "localghost.tail1234", "text/html")
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	for _, want := range []string{command, fingerprint, "//blog.tail1234", "//traefik.tail1234", "http://localghost.tail1234/.well-known/localghost/root.pem"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("tailnet index missing %q:\n%s", want, body)
+		}
+	}
+	// shop is remembered but not running: this machine's business only.
+	for _, unwanted := range []string{"blog.localhost", "/home/dev/blog", "shop"} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("tailnet index leaks %q", unwanted)
+		}
+	}
+
+	// Another suffix is not this root's to vouch for.
+	if body := get(h, "localghost.other", "text/html").Body.String(); strings.Contains(body, "tailscale trust") {
+		t.Fatal("trust command shown under a foreign suffix")
+	}
+}
+
+func TestTailnetReaderGetsNoGhostPageForAStoppedProject(t *testing.T) {
+	dir := t.TempDir()
+	writeEntry(t, dir, "blog", "blog.localhost")
+	writeEntry(t, dir, "shop", "shop.localhost")
+	h := handlerWithRouters(t, dir, routersServing(t, "blog.localhost"))
+
+	rec := get(h, "shop.tail1234", "text/html")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "shop is offline") || strings.Contains(body, "/home/dev") {
+		t.Fatalf("tailnet reader learns about a stopped project:\n%s", body)
+	}
+	if !strings.Contains(body, "//blog.tail1234") || !strings.Contains(body, `href="//localghost.tail1234"`) {
+		t.Fatalf("not-found page should link running projects and the index:\n%s", body)
 	}
 }

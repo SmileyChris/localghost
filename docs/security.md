@@ -156,19 +156,19 @@ does not publish a LAN or public host port. It does not use Tailscale Funnel or
 Serve. Tailnet policy must restrict access to the gateway's device tag when the
 whole tailnet should not reach development applications.
 
-The enable command exchanges a scoped OAuth client credential for a temporary
+The share command exchanges a scoped OAuth client credential for a temporary
 access token, creates a single-use short-lived device auth key, and updates
 split DNS. The access token and auth key are held only in process memory. The
 client id and secret are saved in the operating system keyring — never in
-localghost state files — so disable can restore DNS without re-entry, and
-disable deletes them again. The prior split-DNS map is saved because
-disable can restore the suffix's prior value. The API update is a domain-scoped
+localghost state files — so unshare can restore DNS and a later share can
+enroll again without re-entry, until `unshare --forget-credential` deletes
+them. The prior split-DNS map is saved because unshare can restore the suffix's prior value. The API update is a domain-scoped
 PATCH, so unrelated DNS mappings are untouched. Treat the saved map as
 administrative metadata, even though it contains no secret.
 
 The tailnet suffix has its own CA and signer volumes. Each participating client
-explicitly installs that public root with `localghost trust install` while tailnet
-hosting is enabled.
+explicitly installs that public root with `localghost trust install` while the
+hub is shared.
 This grants the development hub authority for names under that suffix on the
 client, so a suffix naming a public TLD or reserved zone (`dev`, `com`, any
 two-letter country code, `internal`, …) never gets a tailnet authority — a
@@ -184,9 +184,14 @@ operate from an unconstrained root posing as a tailnet authority; only the
 `.localhost` authority accepts its legacy unconstrained roots, and that root
 is installed only on the machine that hosts it.
 
-Clients should pin the download: enable and `localghost tailscale status`
-print a `--fingerprint` trust command that installs the root only when it
-matches, which removes the residual trust in tailnet DNS configuration.
+Clients find the hub through their own Tailscale client rather than DNS:
+`localghost tailscale trust` takes the gateway's tailnet address from the
+network map the coordination server provides and asks the gateway there for
+its root, so WireGuard vouches for which device served it and tailnet DNS
+configuration plays no part. What remains trusted is the tailnet itself:
+control of the gateway device, or admin rights to replace it. A client
+without the tailscale CLI falls back to DNS and should pin the download with
+the `--fingerprint` that share and `localghost tailscale status` print.
 
 Trusting a tailnet root replaces any earlier root for the same suffix: the
 superseded certificate is removed from this client's trust stores before the

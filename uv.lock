@@ -7,8 +7,9 @@ exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for 
 exclude-newer-span = "P3D"
 
 [options.exclude-newer-package]
-localghost = false
 gestate = false
+localghost = false
+django-mjml-templates = false
 
 [[package]]
 name = "backports-tarfile"

@@ -109,7 +109,7 @@ command = ["./server", "--port", "{port}"]
 | Key | Type | Meaning |
 |-----|------|---------|
 | `type` | one of the seven types `run --type` accepts (not `dockerfile`, which is save-only) | Resolves otherwise ambiguous detection, exactly like `--type`. Detected when omitted. |
-| `name` | string | Public name, serving the app at `NAME.localhost`. Defaults to the project root's name, or its repository's for a generic folder name like `web` (see [Usage](#usage)). |
+| `name` | string | Public name, serving the app at `NAME.localhost`. Defaults to the project root's name, or its repository's for a generic folder name like `web` (see [Usage](#usage)). `localghost`, `trust`, and `traefik` are reserved for the hub. |
 | `root` | path, relative to the config file | Treat this directory as the project root instead of searching. See [Project root and configuration discovery](#project-root-and-configuration-discovery). |
 | `port` | integer, 1–65535 | Host HTTP port. The type's default is used when omitted, except alongside `command`, where it is required. |
 | `command` | array of strings | Argv to run instead of the type's own server. `{port}` is replaced with the selected port, and lets the run walk past a busy one (see [Custom command](#custom-command)). |

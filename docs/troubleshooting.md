@@ -236,19 +236,20 @@ or pass `--port` to match where it already listens. See
 
 ## The OAuth credential was not stored
 
-`localghost tailscale enable` warns when it cannot save the credential in the
+`localghost tailscale share` warns when it cannot save the credential in the
 operating system keyring. Everything else still works; the cost is that
-`tailscale disable` (and a later re-enable) will prompt for the client id and
+`tailscale unshare` (and a later share) will prompt for the client id and
 secret again, or read them from `TAILSCALE_CLIENT_ID` and
 `TAILSCALE_CLIENT_SECRET`.
 
 The usual cause is a headless or minimal Linux session with no Secret Service
 provider on D-Bus. Install and unlock one — `gnome-keyring` or KWallet on a
 desktop, or `keyring` alternatives such as `keyrings.alt` where a desktop
-service is not an option — and re-run enable, or simply keep supplying the
+service is not an option — and re-run share, or simply keep supplying the
 environment variables. A stored credential lives under the keyring service
 name `localghost-tailscale` and can be inspected or removed with the system's
-own keyring tools; `localghost tailscale disable` also deletes it.
+own keyring tools; `localghost tailscale unshare --forget-credential` also
+deletes it.
 
 ## The tailnet gateway is not ready
 
@@ -261,7 +262,7 @@ connectivity returns.
 
 ## Split DNS already points at another address
 
-`localghost tailscale enable` refuses to replace an existing split-DNS entry
+`localghost tailscale share` refuses to replace an existing split-DNS entry
 for the chosen suffix, naming the addresses it found. Usually another machine
 is already hosting that suffix: pick a distinct `--suffix`, or pass
 `--takeover` to replace the mapping deliberately — the other machine's routes
