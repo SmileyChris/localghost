@@ -31,6 +31,8 @@ from .config import (
     write_run_config,
 )
 from .feedback import (
+    LIME,
+    MINT,
     action,
     choices,
     compose_dry_run,
@@ -41,6 +43,7 @@ from .feedback import (
     routes,
     run_plan,
     sign_off,
+    styled,
     success,
     title,
     warning,
@@ -90,11 +93,14 @@ from .tailscale import (
     API as TailscaleAPI,
 )
 from .tailscale import (
+    DNS_CONSOLE_URL,
+    MACHINES_CONSOLE_URL,
     OAUTH_CONSOLE_URL,
     POLICY_CONSOLE_URL,
     TailnetHub,
     TailscaleError,
     TailscaleState,
+    tag_in_use,
     tailnet_hubs,
 )
 from .tailscale import (
@@ -1252,7 +1258,7 @@ def _refuse_active_mapping(
             f"split DNS for .{suffix} already points at "
             f"{', '.join(active)} — another machine may be hosting this "
             "suffix. Choose a different --suffix, or pass --takeover to "
-            "replace the mapping."
+            f"replace the mapping. Split DNS is listed at {DNS_CONSOLE_URL}."
         )
 
 
@@ -1310,31 +1316,41 @@ def _resolve_tailscale_credential(
             info("Using the OAuth credential stored in the system keyring.")
             return stored.client_id, stored.client_secret
         if tag is not None:
-            details(
-                [
+            client = "Add OAuth credential"
+            if tag_in_use(tag):
+                # A device already carries the tag, so only the client is left.
+                success(f"The {tag} device tag is already allowed on the tailnet.")
+                steps = [(client, OAUTH_CONSOLE_URL)]
+                indent = ""
+            else:
+                steps = [
                     ("1. Allow the device tag", POLICY_CONSOLE_URL),
                     (
                         "   Add to the policy file",
                         f'"tagOwners": {{"{tag}": ["autogroup:admin"]}}',
                     ),
-                    ("2. Create an OAuth client", OAUTH_CONSOLE_URL),
-                    (
-                        "   Scopes",
-                        f"auth_keys (with {tag} allowed) and dns:write",
-                    ),
-                ],
-                title=(
-                    "Tailscale admin-console setup (already done? enter that "
-                    "client's id and secret)"
-                ),
+                    (f"2. {client}", OAUTH_CONSOLE_URL),
+                ]
+                indent = "   "
+            details(steps)
+            styled(
+                [
+                    (f"{indent}with scopes ", "default"),
+                    ("DNS: Write", MINT),
+                    (", ", "default"),
+                    ("Auth Keys: Write", MINT),
+                    (" (", "default"),
+                    (tag, MINT),
+                    (")", "default"),
+                ]
             )
         else:
             details(
-                [("OAuth client with dns:write", OAUTH_CONSOLE_URL)],
+                [("OAuth credential with DNS: Write", OAUTH_CONSOLE_URL)],
                 title="No OAuth credential is stored in the system keyring",
             )
     if not client_id:
-        client_id = click.prompt("Client id")
+        client_id = click.prompt("Client ID")
     if not client_secret:
         client_secret = click.prompt("Client secret", hide_input=True)
     return client_id, client_secret
@@ -1399,14 +1415,18 @@ def tailscale_unshare(
         "`localghost trust remove` on each to revoke."
     )
     info(
-        f"Remove the offline tagged localghost-{state.node_label} device in the "
-        "Tailscale admin console."
+        f"Remove the offline tagged localghost-{state.node_label} device at "
+        f"{MACHINES_CONSOLE_URL}."
     )
 
 
 def _forget_tailscale_credential() -> None:
     if delete_tailscale_credential():
         info("The OAuth credential was removed from the system keyring.")
+        info(
+            "The OAuth client itself still exists; revoke it on the Trust "
+            f"credentials page ({OAUTH_CONSOLE_URL}) if no other machine uses it."
+        )
     else:
         info("No OAuth credential was stored in the system keyring.")
 
@@ -1515,14 +1535,17 @@ def _trust_tailnet_hub(target: str | None) -> None:
 def _share_trust(suffix: str, certificate: PublicCertificate) -> None:
     """Show another tailnet machine how to trust this hub's root."""
     action(
-        f"Trust https://*.{suffix} on other machines",
+        f"To trust https://*.{suffix} on other machines",
         f"uvx localghost tailscale trust {suffix}",
     )
     # The fingerprint is for clients that cannot ask Tailscale for the hub;
     # the plain command above is the way forward for everyone else.
     info(
-        "Without the tailscale CLI, add --fingerprint "
-        f"{certificate.fingerprint} to pin the root."
+        [
+            ("Without the tailscale CLI, add ", "default"),
+            (f"--fingerprint {certificate.fingerprint}", LIME),
+            (" to pin the root.", "default"),
+        ]
     )
 
 

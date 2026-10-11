@@ -55,17 +55,19 @@ localghost tailscale share
 
 Without a stored credential, share walks through the one-time admin-console
 setup before prompting: allow the device tag (default `tag:localghost`) in the
-tailnet [policy file](https://login.tailscale.com/admin/acls/file), for
+tailnet [policy file](https://console.tailscale.com/admin/acls/file), for
 example
 
 ```json
 "tagOwners": {"tag:localghost": ["autogroup:admin"]}
 ```
 
-and create a scoped
-[OAuth client](https://tailscale.com/docs/features/oauth-clients) with the
-`auth_keys` scope (with that tag allowed) and the `dns:write` scope. Paste the
-client id and secret at the prompts, or provide them with
+(skipped when a device in the network map already carries the tag) and create a scoped
+[OAuth client](https://tailscale.com/docs/features/oauth-clients) on the
+[Trust credentials](https://console.tailscale.com/admin/settings/trust-credentials)
+page with the scopes **DNS: Write** and **Auth Keys: Write** (with that tag
+selected). Paste the
+Client ID and Client secret at the prompts, or provide them with
 `TAILSCALE_CLIENT_ID`/`TAILSCALE_CLIENT_SECRET` or
 `--client-id`/`--client-secret`. When a step was missed, the API errors are
 translated into the exact console fix instead of raw HTTP responses.
@@ -74,8 +76,10 @@ After a successful share, the credential is saved in the system keyring
 (service `localghost-tailscale`), so `unshare` and a later share need no
 re-entry. It stays there until `localghost tailscale unshare
 --forget-credential` removes it, which also works once the hub is unshared.
+That only forgets this machine's copy: revoke the OAuth client in the admin
+console's Trust credentials page once no other machine uses it.
 Without a usable keyring, localghost warns and stores nothing, and `unshare`
-prompts for a client with the `dns:write` scope instead.
+prompts for a client with the DNS: Write scope instead.
 
 The OAuth client's own tailnet is the default. Localghost asks the installed
 `tailscale` CLI for a suffix: an explicit one-label search domain wins, then
@@ -227,7 +231,8 @@ setup; unshare says so and how to remove it with `--forget-credential`.
 `unshare`.)
 
 Unsharing deliberately does not delete the offline machine record. Remove the
-tagged `localghost-<machine>` device from the Tailscale admin console after
+tagged `localghost-<machine>` device from the
+[Machines](https://console.tailscale.com/admin/machines) page after
 you have confirmed it is the expected node. Trust installed on other clients
 is also left in place; run `localghost trust remove` on each to revoke it.
 

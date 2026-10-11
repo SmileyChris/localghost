@@ -25,8 +25,10 @@ from .paths import state_directory
 
 API_ROOT = "https://api.tailscale.com/api/v2"
 TOKEN_URL = f"{API_ROOT}/oauth/token"
-OAUTH_CONSOLE_URL = "https://login.tailscale.com/admin/settings/oauth"
-POLICY_CONSOLE_URL = "https://login.tailscale.com/admin/acls/file"
+OAUTH_CONSOLE_URL = "https://console.tailscale.com/admin/settings/trust-credentials"
+POLICY_CONSOLE_URL = "https://console.tailscale.com/admin/acls/file"
+MACHINES_CONSOLE_URL = "https://console.tailscale.com/admin/machines"
+DNS_CONSOLE_URL = "https://console.tailscale.com/admin/dns"
 KEYRING_SERVICE = "localghost-tailscale"
 _SUFFIX = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
@@ -329,7 +331,8 @@ class API:
             if exc.code == 403:
                 raise TailscaleError(
                     f"the OAuth client may not create auth keys: it needs the "
-                    f"auth_keys scope with {tag} allowed ({OAUTH_CONSOLE_URL})"
+                    f"Auth Keys: Write scope with {tag} selected (Trust "
+                    f"credentials page, {OAUTH_CONSOLE_URL})"
                 ) from exc
             raise
         try:
@@ -341,8 +344,8 @@ class API:
     def _dns_scope_guidance(exc: APIError) -> TailscaleError:
         if exc.code == 403:
             return TailscaleError(
-                "the OAuth client lacks the dns:write scope; recreate it at "
-                f"{OAUTH_CONSOLE_URL}"
+                "the OAuth client lacks the DNS: Write scope; recreate it on the "
+                f"Trust credentials page ({OAUTH_CONSOLE_URL})"
             )
         return exc
 
@@ -435,13 +438,8 @@ class TailnetHub:
         )  # fmt: skip
 
 
-def tailnet_hubs(tag: str = "tag:localghost") -> list[TailnetHub] | None:
-    """The online localghost gateways in this client's network map.
-
-    The names and addresses come from the coordination server through the
-    local Tailscale client, not from DNS, so split DNS cannot redirect them.
-    None means there is no tailscale CLI to ask.
-    """
+def _network_map_peers() -> dict | None:
+    """The peers in this client's network map; None without a tailscale CLI."""
     try:
         result = subprocess.run(
             ["tailscale", "status", "--json"],
@@ -454,8 +452,31 @@ def tailnet_hubs(tag: str = "tag:localghost") -> list[TailnetHub] | None:
     if result.returncode != 0:
         return None
     try:
-        peers = json.loads(result.stdout).get("Peer") or {}
+        return json.loads(result.stdout).get("Peer") or {}
     except (json.JSONDecodeError, AttributeError):
+        return None
+
+
+def tag_in_use(tag: str) -> bool:
+    """Whether a device in this client's network map, online or not, has tag.
+
+    A device can only carry a tag its owner allowed, so this proves the
+    policy file once allowed it. False proves nothing: the policy may hide
+    tagged devices from this client.
+    """
+    peers = _network_map_peers() or {}
+    return any(tag in (peer.get("Tags") or ()) for peer in peers.values())
+
+
+def tailnet_hubs(tag: str = "tag:localghost") -> list[TailnetHub] | None:
+    """The online localghost gateways in this client's network map.
+
+    The names and addresses come from the coordination server through the
+    local Tailscale client, not from DNS, so split DNS cannot redirect them.
+    None means there is no tailscale CLI to ask.
+    """
+    peers = _network_map_peers()
+    if peers is None:
         return None
     hubs = [
         TailnetHub(

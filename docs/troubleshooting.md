@@ -238,7 +238,7 @@ or pass `--port` to match where it already listens. See
 
 `localghost tailscale share` warns when it cannot save the credential in the
 operating system keyring. Everything else still works; the cost is that
-`tailscale unshare` (and a later share) will prompt for the client id and
+`tailscale unshare` (and a later share) will prompt for the Client ID and
 secret again, or read them from `TAILSCALE_CLIENT_ID` and
 `TAILSCALE_CLIENT_SECRET`.
 
@@ -263,7 +263,8 @@ connectivity returns.
 ## Split DNS already points at another address
 
 `localghost tailscale share` refuses to replace an existing split-DNS entry
-for the chosen suffix, naming the addresses it found. Usually another machine
+for the chosen suffix, naming the addresses it found (the
+[DNS](https://console.tailscale.com/admin/dns) page lists them too). Usually another machine
 is already hosting that suffix: pick a distinct `--suffix`, or pass
 `--takeover` to replace the mapping deliberately — the other machine's routes
 for that suffix stop resolving when you do.

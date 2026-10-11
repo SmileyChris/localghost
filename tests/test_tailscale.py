@@ -37,6 +37,7 @@ MAA=
 def no_tailscale_cli(monkeypatch) -> None:
     """Keep hub discovery off the real tailnet; tests opt back in."""
     monkeypatch.setattr(cli_module, "tailnet_hubs", lambda: None)
+    monkeypatch.setattr(cli_module, "tag_in_use", lambda tag: False)
 
 
 def test_state_round_trip_is_private(monkeypatch, tmp_path) -> None:
@@ -308,7 +309,7 @@ def test_auth_key_forbidden_names_the_missing_scope(monkeypatch) -> None:
         "urlopen",
         lambda *args, **kwargs: (_ for _ in ()).throw(error),
     )
-    with pytest.raises(TailscaleError, match="auth_keys"):
+    with pytest.raises(TailscaleError, match="Auth Keys: Write"):
         API("token").create_auth_key("-", "tag:localghost")
 
 
@@ -319,9 +320,9 @@ def test_dns_forbidden_names_the_missing_scope(monkeypatch) -> None:
         "urlopen",
         lambda *args, **kwargs: (_ for _ in ()).throw(error),
     )
-    with pytest.raises(TailscaleError, match="dns:write"):
+    with pytest.raises(TailscaleError, match="DNS: Write"):
         API("token").split_dns("-")
-    with pytest.raises(TailscaleError, match="dns:write"):
+    with pytest.raises(TailscaleError, match="DNS: Write"):
         API("token").update_split_dns("-", {"tail1234": ["100.64.0.1"]})
 
 
@@ -702,9 +703,21 @@ def test_enable_without_credential_guides_setup_then_prompts(
     assert "tagOwners" in result.output
     assert "tag:localghost" in result.output
     assert "admin/acls" in result.output
-    assert "admin/settings/oauth" in result.output
-    assert "auth_keys" in result.output
-    assert "dns:write" in result.output
+    assert "admin/settings/trust-credentials" in result.output
+    assert "Auth Keys: Write (tag:localghost)" in result.output
+    assert "DNS: Write" in result.output
+
+
+def test_enable_setup_skips_the_tag_step_when_a_device_already_has_it(
+    monkeypatch, tmp_path
+) -> None:
+    _patch_enable(monkeypatch, [], [], tmp_path)
+    monkeypatch.setattr(cli_module, "tag_in_use", lambda tag: True)
+
+    result = CliRunner().invoke(cli, ENABLE_ARGS, input="typed-id\ntyped-secret\n")
+    assert result.exit_code == 0, result.output
+    assert "tag:localghost device tag is already allowed" in result.output
+    assert "tagOwners" not in result.output
 
 
 def test_enable_requires_a_tag_prefix(monkeypatch, tmp_path) -> None:
@@ -966,6 +979,7 @@ def test_unshare_can_forget_the_credential_once_unshared(monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     assert deleted == [1]
     assert "removed from the system keyring" in result.output
+    assert "admin/settings/trust-credentials" in result.output
 
 
 def test_disable_notes_that_other_machines_still_trust_the_root(monkeypatch) -> None:
@@ -1890,8 +1904,8 @@ def test_disable_without_a_stored_credential_names_the_scope_it_needs(
     )
     assert result.exit_code == 0, result.output
     assert "No OAuth credential is stored" in result.output
-    assert "dns:write" in result.output
-    assert "auth_keys" not in result.output
+    assert "DNS: Write" in result.output
+    assert "Auth Keys" not in result.output
     assert "removed from the system keyring" not in result.output
 
 
@@ -2145,6 +2159,8 @@ def test_tailnet_hubs_reads_online_tagged_peers_from_the_network_map(
     assert tailscale_module.tailnet_hubs() == [
         TailnetHub("localghost-wrk.tail.ts.net", ("100.64.0.10",))
     ]
+    assert tailscale_module.tag_in_use("tag:localghost")
+    assert not tailscale_module.tag_in_use("tag:other")
 
 
 def test_describe_hub_asks_the_gateway_at_its_tailnet_address(monkeypatch) -> None:

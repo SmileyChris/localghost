@@ -159,7 +159,7 @@ whole tailnet should not reach development applications.
 The share command exchanges a scoped OAuth client credential for a temporary
 access token, creates a single-use short-lived device auth key, and updates
 split DNS. The access token and auth key are held only in process memory. The
-client id and secret are saved in the operating system keyring — never in
+Client ID and secret are saved in the operating system keyring — never in
 localghost state files — so unshare can restore DNS and a later share can
 enroll again without re-entry, until `unshare --forget-credential` deletes
 them. The prior split-DNS map is saved because unshare can restore the suffix's prior value. The API update is a domain-scoped

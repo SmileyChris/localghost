@@ -106,7 +106,7 @@ def details(
             console.print(Text(title, style="bold"))
         table = Table.grid(padding=(0, 1))
         table.add_column(style="bold")
-        table.add_column(style=MINT)
+        table.add_column(style=MINT, overflow="fold")
         for label, value in entries:
             table.add_row(label, value)
         console.print(table)
@@ -115,6 +115,16 @@ def details(
         f"{label}: {value}" for label, value in entries
     ]
     console.print("\n".join(lines), soft_wrap=True)
+
+
+def styled(parts: Iterable[tuple[str, str]], *, err: bool = False) -> None:
+    """Show one line of (text, style) parts; plain text off a terminal."""
+    entries = list(parts)
+    console = _console(err)
+    if _rich_terminal(err):
+        console.print(Text.assemble(*entries))
+        return
+    console.print("".join(text for text, _ in entries), soft_wrap=True)
 
 
 def choices(title: str, items: Iterable[tuple[str, str, bool]]) -> None:
@@ -141,7 +151,7 @@ def choices(title: str, items: Iterable[tuple[str, str, bool]]) -> None:
     console.print("\n".join(lines), soft_wrap=True)
 
 
-def info(message: str, *, err: bool = False) -> None:
+def info(message: str | list[tuple[str, str]], *, err: bool = False) -> None:
     _message(message, MINT, err=err)
 
 
@@ -171,7 +181,7 @@ def _labeled_block(rows: list[tuple[str, str]], *, heading: str, err: bool) -> N
         console = _console(err)
         console.print(Text.assemble(("▌ ", MINT), (heading, "bold")))
         table = Table.grid(padding=(0, 1))
-        table.add_column(style=MINT)
+        table.add_column(style=MINT, overflow="fold")
         table.add_column(style="bold")
         table.add_column()
         for label, value in rows:
@@ -269,12 +279,17 @@ def interrupt_break() -> None:
         _console(False).print()
 
 
-def _message(message: str, color: str, *, err: bool, symbol: str = "•") -> None:
+def _message(
+    message: str | list[tuple[str, str]], color: str, *, err: bool, symbol: str = "•"
+) -> None:
+    """Show a message; one given as (text, style) parts can highlight a command."""
+    parts = [message] if isinstance(message, str) else message
     console = _console(err)
     if _rich_terminal(err):
-        console.print(Text.assemble((f"{symbol} ", color), message))
+        console.print(Text.assemble((f"{symbol} ", color), *parts))
     else:
-        console.print(message, soft_wrap=True)
+        plain = "".join(part if isinstance(part, str) else part[0] for part in parts)
+        console.print(plain, soft_wrap=True)
 
 
 def _console(err: bool) -> Console:

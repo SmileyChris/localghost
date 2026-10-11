@@ -3,6 +3,21 @@
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- `tailscale unshare --forget-credential` points at the admin console to
+  revoke the OAuth client too, since removing it from this machine's keyring
+  leaves the client itself in place.
+- Admin-console links use `console.tailscale.com`, with OAuth clients on the
+  renamed Trust credentials page, and unshare and a split-DNS conflict now
+  link the Machines and DNS pages.
+- Share's setup skips the policy-file step when a tailnet device already
+  carries the tag, such as this hub's own earlier gateway.
+- Share's setup and errors use the console's own names: an OAuth credential
+  with the DNS: Write and Auth Keys: Write scopes, and its Client ID.
+
 ## [4.2.0] - 2026-10-12
 
 ### Added
