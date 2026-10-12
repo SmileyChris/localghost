@@ -83,7 +83,9 @@ def test_changed_paths_are_url_paths_of_added_removed_and_modified_files(tmp_pat
     after = {at("kept.css"): 1, at("edited.css"): 2, at("new page.html"): 1}
 
     assert html_server.changed_paths(tmp_path, before, after) == [
-        "/edited.css", "/gone.html", "/new%20page.html"
+        "/edited.css",
+        "/gone.html",
+        "/new%20page.html",
     ]
 
 

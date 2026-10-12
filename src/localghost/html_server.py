@@ -81,7 +81,8 @@ def changed_paths(
 ) -> list[str]:
     """URL paths of every file added, removed or modified between snapshots."""
     changed = {
-        path for path in before.keys() | after.keys()
+        path
+        for path in before.keys() | after.keys()
         if before.get(path) != after.get(path)
     }
     return sorted(
