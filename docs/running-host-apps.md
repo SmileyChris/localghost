@@ -18,15 +18,35 @@ directory; `--type` resolves ambiguity or skips detection entirely.
 | **cakephp** | `bin/cake` with a `cakephp/cakephp` Composer dependency, or a legacy `app/Config/core.php` + `app/webroot/index.php` root | 8765 |
 | **laravel** | `artisan` with a `laravel/framework` Composer dependency | 8000 |
 | **php** | `composer.json`, or `index.php` in `public/`, `web/`, `htdocs/`, `www/`, or the project root | 8080 |
+| **html** | `index.html` in the project directory | 8080 |
 
-`dockerfile` is an eighth type, but it is save-only — see
+`dockerfile` is a ninth type, but it is save-only — see
 [Saving project setup](saving-setup.md). Running a Dockerfile
 project first needs `localghost save --type dockerfile` to produce a
 Compose file; after that the project is `compose`.
 
 Within PHP, `cakephp` and `laravel` are specializations of `php` rather than
 peers: the most specific match wins, and generic `php` only fires when neither
-framework matches. Every other type resolves to the nearest match along the
+framework matches. `html` is the weakest match of all: it defers to any
+other type in the same directory or further up, so a Vite project's
+`index.html` or a docs build inside a Django checkout never claims the run.
+Pass `--type html` to serve such a folder anyway, or `--project-root .` to
+stop the search at the current directory. `/inner/` serves
+`inner/index.html`, `/inner` redirects there, and directories without an
+index are listed. Dotfiles and anything inside a dot-directory, such as
+`.env` or `.git/`, are never served.
+
+Open pages update when a file they use changes: an edited stylesheet the page
+links is swapped in place, keeping scroll position, form input and script
+state, and any other change the page loaded reloads it. Changes to files the
+page never loaded, such as another page, are ignored. Each page loads
+`/__localghost/reload.js`, which holds a connection open; the folder is only
+checked while one is, skipping dot-directories and `node_modules`. A
+Content-Security-Policy that allows `'self'` scripts lets it run, but a
+nonce-only policy blocks it, and the page simply does not reload. Over plain
+HTTP each open page holds one of the browser's six connections to the site,
+so many tabs of one site can stall; trusted HTTPS removes that limit. Every
+other type resolves to the nearest match along the
 upward search.
 
 If more than one type is detected at the same directory (for example, a
@@ -108,7 +128,7 @@ command = ["./server", "--port", "{port}"]
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `type` | one of the seven types `run --type` accepts (not `dockerfile`, which is save-only) | Resolves otherwise ambiguous detection, exactly like `--type`. Detected when omitted. |
+| `type` | one of the eight types `run --type` accepts (not `dockerfile`, which is save-only) | Resolves otherwise ambiguous detection, exactly like `--type`. Detected when omitted. |
 | `name` | string | Public name, serving the app at `NAME.localhost`. Defaults to the project root's name, or its repository's for a generic folder name like `web` (see [Usage](#usage)). `localghost`, `trust`, and `traefik` are reserved for the hub. |
 | `root` | path, relative to the config file | Treat this directory as the project root instead of searching. See [Project root and configuration discovery](#project-root-and-configuration-discovery). |
 | `port` | integer, 1–65535 | Host HTTP port. The type's default is used when omitted, except alongside `command`, where it is required. |

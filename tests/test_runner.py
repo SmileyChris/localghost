@@ -2,6 +2,7 @@ import contextlib
 import json
 import signal
 import socket
+import sys
 from pathlib import Path
 from subprocess import CompletedProcess
 
@@ -2423,3 +2424,48 @@ def test_a_busy_port_suggests_isolation_only_where_it_works(monkeypatch):
 def test_hub_names_are_reserved(name) -> None:
     with pytest.raises(click.ClickException, match="reserved for the localghost hub"):
         runner.validate_name(name)
+
+
+def test_html_is_detected_from_index_html(tmp_path):
+    (tmp_path / "index.html").touch()
+
+    assert runner._types_at(tmp_path) == ["html"]
+    assert runner.discover_type(tmp_path) == ("html", tmp_path)
+
+
+def test_html_defers_to_another_type_at_the_same_directory(tmp_path):
+    """Vite projects keep an index.html at their root too."""
+    (tmp_path / "index.html").touch()
+    (tmp_path / "manage.py").touch()
+
+    assert runner.discover_type(tmp_path) == ("django", tmp_path)
+
+
+def test_html_defers_to_a_project_further_up(tmp_path):
+    root = tmp_path / "site"
+    docs = root / "docs"
+    docs.mkdir(parents=True)
+    (root / ".git").mkdir()
+    (root / "manage.py").touch()
+    (docs / "index.html").touch()
+
+    assert runner.discover_type(docs) == ("django", root)
+    assert runner.discover_type(docs, "html") == ("html", docs)
+
+
+def test_html_command_serves_with_this_python_in_isolated_mode(monkeypatch):
+    monkeypatch.setattr(runner.forwarder, "available", lambda: True)
+
+    port, command = runner.html_command(None)
+
+    assert port == 8080
+    assert command == (
+        sys.executable, "-I", "-m", "localghost.html_server", "{port}", "127.0.0.1"
+    )
+
+
+def test_html_command_binds_wide_only_without_a_relay(monkeypatch):
+    monkeypatch.setattr(runner.forwarder, "available", lambda: False)
+
+    assert runner.html_command(9001)[1][-1] == "0.0.0.0"
+    assert runner.html_command(9001)[0] == 9001

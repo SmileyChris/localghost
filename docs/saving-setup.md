@@ -21,7 +21,7 @@ use `.localghost.toml`; Docker Compose applications use
 
 ## Save host run defaults
 
-For a detected Django, Vite, Astro, CakePHP, Laravel, or plain PHP application:
+For a detected Django, Vite, Astro, CakePHP, Laravel, plain PHP, or static HTML application:
 
 ```sh
 uvx localghost save

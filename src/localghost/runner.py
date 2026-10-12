@@ -68,6 +68,7 @@ SUPPORTED_TYPES = (
     "cakephp",
     "laravel",
     "php",
+    "html",
 )
 RUN_TYPES = tuple(item for item in SUPPORTED_TYPES if item != "dockerfile")
 # Types the non-Compose save path can persist. Compose is handled separately
@@ -93,6 +94,7 @@ DEFAULT_PORTS = {
     "cakephp": 8765,
     "laravel": 8000,
     "php": 8080,
+    "html": 8080,
 }
 
 COMPOSE_FILENAMES = (
@@ -299,6 +301,8 @@ def build_plan(
             default_port, selected_command, working_directory = php_command(
                 project_root, port
             )
+        elif selected_type == "html":
+            default_port, selected_command = html_command(port)
         else:  # Click validates the public option; retain this for direct callers.
             raise click.ClickException(type_choices("--type"))
         wanted_port = port or default_port
@@ -383,7 +387,9 @@ def discover_type(
 
     Ambiguity is computed after filtering to `allowed`, so a type another
     command handles never blocks this one. Generic `php` defers to anything
-    stronger found further up; see `_php_project_strength`.
+    stronger found further up; see `_php_project_strength`. `html` defers
+    to any other type at the same directory, and to any but a weak `php`
+    further up: the nearer of two fallbacks wins.
     """
     if requested is not None and requested not in SUPPORTED_TYPES:
         raise click.ClickException(type_choices("--type"))
@@ -400,6 +406,10 @@ def discover_type(
     fallback: tuple[str, Path] | None = None
     for candidate in _search_path(start):
         detected = [item for item in _types_at(candidate) if item in allowed]
+        if requested is None and "html" in detected:
+            detected.remove("html")
+            if not detected and fallback is None:
+                fallback = ("html", candidate)
         if requested is not None:
             if requested in detected:
                 if requested == "php" and _php_project_strength(candidate) != "strong":
@@ -531,6 +541,8 @@ def _types_at(cwd: Path) -> list[str]:
     php = _php_type(cwd, _composer_manifest(cwd))
     if php is not None:
         detected.append(php)
+    if (cwd / "index.html").is_file():
+        detected.append("html")
     return detected
 
 
@@ -639,6 +651,18 @@ def php_command(
         requested_port or DEFAULT_PORTS["php"],
         ("php", "-S", "0.0.0.0:{port}"),
         docroot,
+    )
+
+
+def html_command(requested_port: int | None) -> tuple[int, tuple[str, ...]]:
+    """Serve the directory, reloading open pages on change; see `html_server`.
+
+    -I keeps a stray module in the served directory from being imported.
+    """
+    bind = "127.0.0.1" if forwarder.available() else "0.0.0.0"
+    return (
+        requested_port or DEFAULT_PORTS["html"],
+        (sys.executable, "-I", "-m", "localghost.html_server", "{port}", bind),
     )
 
 

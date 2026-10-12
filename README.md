@@ -44,9 +44,10 @@ port 80 available. From an application directory, run:
 uvx localghost run
 ```
 
-Localghost detects Django, Vite, Astro, CakePHP, Laravel, plain PHP, and Docker
-Compose projects, starts the shared hub when needed, and keeps the local URL
-visible while the application runs. Press Ctrl+C to stop the application.
+Localghost detects Django, Vite, Astro, CakePHP, Laravel, plain PHP, static
+HTML, and Docker Compose projects, starts the shared hub when needed, and
+keeps the local URL visible while the application runs. Press Ctrl+C to stop
+the application.
 
 An unconfigured Compose project asks you to save its routing setup first:
 
