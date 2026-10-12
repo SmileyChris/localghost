@@ -3,15 +3,15 @@
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [4.3.0] - 2026-10-13
 
 ### Added
 
 - An `html` project type serves a folder with an `index.html`, so `/inner/`
   serves `inner/index.html`, and updates open pages when a file they use
   changes: stylesheets are swapped in place, anything else reloads the page.
-  Dotfiles and dot-directories are not served. It only applies when no other project type is detected; pass `--type html` to
-  force it.
+  Dotfiles and dot-directories are not served. It only applies when no other
+  project type is detected; pass `--type html` to force it.
 
 ### Changed
 
