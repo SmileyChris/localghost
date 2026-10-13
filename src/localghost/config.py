@@ -25,9 +25,14 @@ class RunConfig:
     isolate: bool = False
 
 
-def load_config(path: Path) -> RunConfig:
+def local_config_path(path: Path) -> Path:
+    """The uncommitted overlay beside a config file: `.localghost.local.toml`."""
+    return path.with_name(f"{path.stem}.local{path.suffix}")
+
+
+def _read_run_table(path: Path) -> dict:
     if not path.exists():
-        return RunConfig()
+        return {}
     try:
         with path.open("rb") as stream:
             document = tomllib.load(stream)
@@ -36,6 +41,15 @@ def load_config(path: Path) -> RunConfig:
     values = document.get("run", {})
     if not isinstance(values, dict):
         raise click.ClickException(f"'{path}' [run] must be a table")
+    return values
+
+
+def load_config(path: Path, *, local: bool = True) -> RunConfig:
+    # The local file's [run] keys replace the shared file's, key by key.
+    values = {
+        **_read_run_table(path),
+        **(_read_run_table(local_config_path(path)) if local else {}),
+    }
     # Removed keys are checked before the unknown-key scan would otherwise
     # reject them, so the migration message wins; keep them out of the
     # known-key set.
@@ -123,7 +137,12 @@ def render_run_config(config: RunConfig, existing: str = "") -> str:
 
 
 def write_run_config(
-    path: Path, config: RunConfig, *, extend: bool = False, interactive: bool = False
+    path: Path,
+    config: RunConfig,
+    *,
+    extend: bool = False,
+    interactive: bool = False,
+    keep_backup: bool = True,
 ) -> Path | None:
     existing = path.read_text(encoding="utf-8") if path.exists() else ""
     if (
@@ -139,8 +158,9 @@ def write_run_config(
         raise click.ClickException(
             f"refusing to overwrite existing '{path}'; use --extend"
         )
-    backup = None
-    if path.exists():
+    if not keep_backup or not path.exists():
+        backup = None
+    else:
         backup = path.with_name(path.name + ".bak")
         counter = 1
         while backup.exists():

@@ -55,6 +55,25 @@ detection, command validation, and port selection in the same order. If no
 runnable type can be detected, `save` reports the same error as `run` instead
 of guessing a framework.
 
+## Personal settings
+
+`.localghost.local.toml` overrides `.localghost.toml` key by key, for settings
+that are yours rather than the project's — say a different port, because
+another project already holds the shared one:
+
+```sh
+uvx localghost save --local --port 8401
+```
+
+A local save writes only what differs from `.localghost.toml`, so later
+changes to the shared file still reach you, and keeps what the local file
+already overrides. It updates the file without `--extend` or a `.bak` copy,
+since nobody else reads it. When git would otherwise commit the file, it is
+added to the `.gitignore` beside it.
+
+A plain `save` reads `.localghost.toml` without the local file, so your own
+settings never leak into the shared one.
+
 ## Save Docker Compose integration
 
 An unconfigured Compose project cannot be routed safely, so a plain

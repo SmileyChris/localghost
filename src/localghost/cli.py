@@ -27,6 +27,7 @@ from .config import (
     CONFIG_NAME,
     RunConfig,
     load_config,
+    local_config_path,
     render_run_config,
     write_run_config,
 )
@@ -1925,6 +1926,7 @@ def _resolve_application(
     config: Path | None,
     command: tuple[str, ...],
     isolate: bool = False,
+    local_config: bool = True,
 ) -> ResolvedApplication:
     """Resolve the effective application once for running and persistence."""
     cwd = working_directory or Path.cwd()
@@ -1936,7 +1938,9 @@ def _resolve_application(
         else None
     )
     config_file = config or discover_config(flagged_root or cwd)
-    settings = load_config(config_file) if config_file else RunConfig()
+    settings = (
+        load_config(config_file, local=local_config) if config_file else RunConfig()
+    )
     config_dir = config_file.parent if config_file else None
     explicit_run_settings = (
         bool(command)
@@ -2851,6 +2855,7 @@ _SAVE_FLAG_KINDS: dict[str, tuple[str, ...]] = {
     "--service": ("compose", "dockerfile"),
     "--output": ("compose", "dockerfile"),
     "--extend": ("compose", "host"),
+    "--local": ("host",),
     "--name": ("host",),
     "--config": ("host",),
     "a trailing command": ("host",),
@@ -2942,6 +2947,12 @@ def _save_kind(selected_type: str) -> str:
     help="Safely update an existing saved setup without prompting.",
 )
 @click.option(
+    "--local",
+    is_flag=True,
+    help="Save to .localghost.local.toml, only where it differs from the shared "
+    "file.",
+)
+@click.option(
     "--dry-run", is_flag=True, help="Print the configuration without writing it."
 )
 @click.option(
@@ -2970,6 +2981,7 @@ def save(
     service_name: str | None,
     output: Path | None,
     extend: bool,
+    local: bool,
     dry_run: bool,
     no_input: bool,
     run_after: bool,
@@ -2978,7 +2990,8 @@ def save(
 ) -> None:
     """Save Localghost setup for the current application.
 
-    Host applications and custom commands are saved to .localghost.toml,
+    Host applications and custom commands are saved to .localghost.toml
+    (or, with --local, the uncommitted .localghost.local.toml),
     Compose projects to compose.override.yaml, and a Dockerfile without
     Compose to a new compose.yaml. An explicit --type is remembered so
     later runs need no flag.
@@ -3004,7 +3017,7 @@ def save(
         # even with no compose.yaml on disk for `discover_type` to find.
         resolved_type = "compose"
     else:
-        resolved_type = _detect_save_type(start, root=root, config=config)
+        resolved_type = _detect_save_type(start, root=root, config=config, local=local)
     kind = _save_kind(resolved_type)
     _reject_foreign_save_flags(
         kind,
@@ -3014,6 +3027,7 @@ def save(
             "--service": service_name is not None,
             "--output": output is not None,
             "--extend": extend,
+            "--local": local,
             "--name": name is not None,
             "--config": config is not None,
             "a trailing command": bool(command),
@@ -3107,10 +3121,17 @@ def save(
         config=config,
         command=command,
         isolate=isolate,
+        # The shared file never inherits personal settings; a local save
+        # keeps the ones already there.
+        local_config=local,
     )
     assert resolved.selected_type != "compose"
     _persist_resolved_application(
-        resolved, extend=extend, dry_run=dry_run, interactive=interactive
+        resolved,
+        extend=extend,
+        local=local,
+        dry_run=dry_run,
+        interactive=interactive,
     )
     if not dry_run:
         _record_registry(resolved)
@@ -3126,7 +3147,7 @@ def save(
 
 
 def _detect_save_type(
-    start: Path, *, root: Path | None, config: Path | None
+    start: Path, *, root: Path | None, config: Path | None, local: bool = False
 ) -> str:
     """Detect the type a `save` without `--type` should persist.
 
@@ -3145,7 +3166,7 @@ def _detect_save_type(
         else None
     )
     config_file = config or discover_config(flagged_root or start)
-    settings = load_config(config_file) if config_file else RunConfig()
+    settings = load_config(config_file, local=local) if config_file else RunConfig()
     if settings.type:
         return settings.type
     if settings.command:
@@ -3358,10 +3379,14 @@ def _persist_resolved_application(
     resolved: ResolvedApplication,
     *,
     extend: bool,
+    local: bool = False,
     dry_run: bool,
     interactive: bool,
 ) -> None:
     """Persist a host resolution to .localghost.toml.
+
+    A local save writes .localghost.local.toml instead, keeping only what
+    differs from the shared file so later shared changes still apply.
 
     Compose projects never reach here: `save` routes them to
     `_save_compose_project` before resolving a host plan.
@@ -3377,16 +3402,57 @@ def _persist_resolved_application(
         explicit_name=resolved.name or (plan.name if generic else None),
         source_command=resolved.command,
     )
+    target = resolved.config_file or resolved.root / CONFIG_NAME
+    if local:
+        shared = load_config(target, local=False)
+        blank = RunConfig()
+        saved_config = RunConfig(
+            **{
+                key: getattr(blank, key)
+                if getattr(saved_config, key) == getattr(shared, key)
+                else getattr(saved_config, key)
+                for key in RunConfig.__dataclass_fields__
+            }
+        )
+        target = local_config_path(target)
     if dry_run:
-        _preview(resolved.root / CONFIG_NAME, render_run_config(saved_config))
+        _preview(target, render_run_config(saved_config))
         return
     _save_run_config(
         resolved.root,
         saved_config,
-        extend=extend,
+        # The local file is personal: updating it needs no confirmation, and
+        # a backup beside it would be one more uncommitted file to ignore.
+        extend=extend or local,
         interactive=interactive,
-        target=resolved.config_file,
+        target=target,
+        keep_backup=not local,
     )
+    if local:
+        _ensure_ignored(target)
+
+
+def _ensure_ignored(path: Path) -> None:
+    """Add `path` to its folder's .gitignore when git would commit it."""
+    try:
+        status = subprocess.run(
+            ["git", "-C", str(path.parent), "check-ignore", "-q", path.name],
+            capture_output=True,
+        ).returncode
+    except OSError:
+        return
+    if status != 1:  # 0: already ignored; 128: not a git checkout
+        return
+    gitignore = path.parent / ".gitignore"
+    existing = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
+    separator = "\n" if existing and not existing.endswith("\n") else ""
+    gitignore.write_text(f"{existing}{separator}{path.name}\n", encoding="utf-8")
+    shown = (
+        Path(gitignore.name)
+        if gitignore.parent.resolve() == Path.cwd().resolve()
+        else gitignore
+    )
+    info(f"Added {path.name} to {shown}.")
 
 
 def _save_dockerfile_project(
@@ -3474,14 +3540,15 @@ def _save_run_config(
     extend: bool,
     interactive: bool,
     target: Path | None = None,
+    keep_backup: bool = True,
 ) -> None:
     target = target or root / CONFIG_NAME
     existed = target.exists()
     backup = write_run_config(
-        target, config, extend=extend, interactive=interactive
+        target, config, extend=extend, interactive=interactive, keep_backup=keep_backup
     )
     shown = (
-        Path(CONFIG_NAME)
+        Path(target.name)
         if target.parent.resolve() == Path.cwd().resolve()
         else target
     )

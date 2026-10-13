@@ -304,3 +304,12 @@ def test_isolate_round_trips_and_must_be_a_boolean(tmp_path):
     path.write_text('[run]\nisolate = "yes"\n')
     with pytest.raises(click.ClickException, match="isolate"):
         load_config(path)
+
+
+def test_local_config_overrides_shared_keys(tmp_path: Path):
+    (tmp_path / ".localghost.toml").write_text('[run]\nname = "app"\nport = 8080\n')
+    (tmp_path / ".localghost.local.toml").write_text("[run]\nport = 9090\n")
+    config = load_config(tmp_path / ".localghost.toml")
+    assert (config.name, config.port) == ("app", 9090)
+    (tmp_path / ".localghost.toml").unlink()
+    assert load_config(tmp_path / ".localghost.toml").port == 9090

@@ -18,6 +18,8 @@ def test_config_is_discovered_from_a_subdirectory(tmp_path, monkeypatch):
     nested.mkdir(parents=True)
 
     assert roots.discover_config(nested) == project / ".localghost.toml"
+    (project / ".localghost.toml").rename(project / ".localghost.local.toml")
+    assert roots.discover_config(nested) == project / ".localghost.toml"
 
 
 def test_config_discovery_does_not_walk_without_a_vcs_marker(tmp_path, monkeypatch):

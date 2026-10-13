@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- A `.localghost.local.toml` beside `.localghost.toml` overrides its `[run]`
+  settings key by key, for personal settings kept out of version control.
+  `save --local` writes the settings that differ from the shared file to it,
+  and adds it to `.gitignore` when git would otherwise commit it. A plain
+  `save` ignores it, so personal settings never reach the shared file.
+
 ## [4.3.0] - 2026-10-13
 
 ### Added

@@ -150,6 +150,13 @@ Settings are layered: a command-line option wins over `.localghost.toml`,
 which wins over automatic detection. Use `--config PATH` to read a different
 file.
 
+A `.localghost.local.toml` beside it adds personal settings without touching
+the shared file: each `[run]` key it sets replaces the shared one, and the rest
+are kept. It works on its own too, with no `.localghost.toml` at all. Under
+`--config PATH`, the overlay is the same name with `.local` before the
+extension. `save --local` writes it (see
+[Personal settings](saving-setup.md#personal-settings)).
+
 `localghost save` writes this file without running, while `save --run` writes
 the same setup and then starts it:
 

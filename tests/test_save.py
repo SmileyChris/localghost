@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import click
@@ -550,3 +551,39 @@ def test_save_isolate_writes_it_to_the_config(monkeypatch, tmp_path) -> None:
     # The application's own port is saved, never the ephemeral host side.
     assert "port = 8000" in saved
     assert "isolate = true" in saved
+
+
+def test_save_keeps_local_settings_out_of_the_shared_file(tmp_path) -> None:
+    runner = CliRunner()
+    env = {
+        "COMPOSE_PROJECT_NAME": "sample-host",
+        # Keep the user's own git ignores from hiding the local file.
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "XDG_CONFIG_HOME": str(tmp_path),
+    }
+
+    with runner.isolated_filesystem():
+        subprocess.run(["git", "init", "-q"], check=True)
+        Path(".gitignore").write_text("node_modules", encoding="utf-8")
+        Path(".localghost.toml").write_text(
+            '[run]\nport = 18431\ncommand = ["./server"]\n', encoding="utf-8"
+        )
+        local = Path(".localghost.local.toml")
+        local.write_text('[run]\nname = "mine"\nport = 18432\n', encoding="utf-8")
+
+        result = runner.invoke(cli, ["save", "--no-input", "--extend"], env=env)
+        assert result.exit_code == 0, result.output
+        shared = Path(".localghost.toml").read_text(encoding="utf-8")
+        assert "18431" in shared and "mine" not in shared
+
+        result = runner.invoke(
+            cli, ["save", "--no-input", "--local", "--port", "18433"], env=env
+        )
+        assert result.exit_code == 0, result.output
+        assert local.read_text(encoding="utf-8") == (
+            '[run]\nname = "mine"\nport = 18433\n'
+        )
+        assert not list(Path().glob(".localghost.local.toml.bak*"))
+        assert Path(".gitignore").read_text(encoding="utf-8") == (
+            "node_modules\n.localghost.local.toml\n"
+        )

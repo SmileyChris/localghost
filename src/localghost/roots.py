@@ -6,7 +6,7 @@ from pathlib import Path
 
 import click
 
-from .config import CONFIG_NAME
+from .config import CONFIG_NAME, local_config_path
 from .runner import VCS_MARKERS, _search_path
 
 
@@ -33,7 +33,7 @@ def discover_config(start: Path) -> Path | None:
         candidates = candidates[:1]
     for candidate in candidates:
         path = candidate / CONFIG_NAME
-        if path.is_file():
+        if path.is_file() or local_config_path(path).is_file():
             return path
     return None
 
