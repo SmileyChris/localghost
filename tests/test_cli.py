@@ -528,7 +528,8 @@ def test_run_no_longer_accepts_service() -> None:
     assert "no such option" in result.output.lower()
 
 
-def test_run_accepts_short_port_flag(tmp_path) -> None:
+def test_run_accepts_short_port_flag(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("localghost.ports.port_available", lambda port: True)
     # COMPOSE_PROJECT_NAME sidesteps deriving the project name from
     # tmp_path's own directory name, which (built from this test's name)
     # contains underscores and isn't DNS-safe -- unrelated to -p itself.

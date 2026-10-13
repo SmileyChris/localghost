@@ -127,7 +127,8 @@ def test_dockerfile_is_scaffolded_without_compose() -> None:
         assert "loadbalancer.server.port=8000" in compose
 
 
-def test_save_host_writes_run_config() -> None:
+def test_save_host_writes_run_config(monkeypatch) -> None:
+    monkeypatch.setattr("localghost.ports.port_available", lambda port: True)
     runner = CliRunner()
 
     with runner.isolated_filesystem():
@@ -147,6 +148,7 @@ def test_save_host_writes_run_config() -> None:
 
 
 def test_save_host_run_starts_the_application(monkeypatch) -> None:
+    monkeypatch.setattr("localghost.ports.port_available", lambda port: True)
     started: list[str] = []
     monkeypatch.setattr(
         "localghost.cli.execute",
@@ -168,6 +170,7 @@ def test_save_host_run_starts_the_application(monkeypatch) -> None:
 
 
 def test_save_host_run_is_a_noop_with_dry_run(monkeypatch) -> None:
+    monkeypatch.setattr("localghost.ports.port_available", lambda port: True)
     started: list[str] = []
     monkeypatch.setattr(
         "localghost.cli.execute",
@@ -231,6 +234,7 @@ def test_save_host_run_forwards_a_custom_configuration_path(
     """Same failure through `--config`: `run` discovers `.localghost.toml`,
     never the custom path just written, so the command and port saved a
     line earlier were invisible to it."""
+    monkeypatch.setattr("localghost.ports.port_available", lambda port: True)
     started: list[str] = []
     monkeypatch.setattr(
         "localghost.cli.execute",
@@ -553,7 +557,10 @@ def test_save_isolate_writes_it_to_the_config(monkeypatch, tmp_path) -> None:
     assert "isolate = true" in saved
 
 
-def test_save_keeps_local_settings_out_of_the_shared_file(tmp_path) -> None:
+def test_save_keeps_local_settings_out_of_the_shared_file(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr("localghost.ports.port_available", lambda port: True)
     runner = CliRunner()
     env = {
         "COMPOSE_PROJECT_NAME": "sample-host",
