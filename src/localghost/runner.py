@@ -21,7 +21,7 @@ import click
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
 from . import forwarder, ports, registry, statusbar
-from .feedback import info, interrupt_break, warning
+from .feedback import COMMAND, info, interrupt_break, warning
 from .generator import (
     DNS_SAFE_PROJECT,
     HOST_BRIDGE_IMAGE,
@@ -396,7 +396,7 @@ def discover_type(
     if requested is not None and requested not in allowed:
         if requested == "dockerfile":
             raise click.ClickException(
-                "'dockerfile' cannot be run directly; run `localghost save "
+                f"'dockerfile' cannot be run directly; run `{COMMAND} save "
                 "--type dockerfile --port <port>` to build a Compose file first"
             )
         raise click.ClickException(
@@ -1085,7 +1085,7 @@ def _unreachable_message(plan: RunPlan, found: ports.Listener) -> str:
         lines.append(
             f"  the dev script appears to drop the --host localghost passes; "
             f'forward "$@" to {plan.type}, or name the command directly: '
-            f"localghost run --port {plan.port} -- <command> --host 0.0.0.0 "
+            f"{COMMAND} run --port {plan.port} -- <command> --host 0.0.0.0 "
             f"--port {plan.port}"
         )
     return "\n".join(lines)
@@ -1124,7 +1124,7 @@ def _misplaced_message(plan: RunPlan, opened: list[ports.Listener]) -> str:
         lines.append(
             "  the dev script appears to drop the --port localghost passes; "
             f'forward "$@" to {plan.type}, or name the command directly: '
-            f"localghost run --port {plan.port} -- <command> --port {plan.port}"
+            f"{COMMAND} run --port {plan.port} -- <command> --port {plan.port}"
         )
     else:
         lines.append(
@@ -1375,7 +1375,7 @@ def _warn_if_flags_cannot_reach(manifest: dict[str, object], tool: str) -> None:
             f"{tool} directly, so --port and --host cannot be enforced through "
             f"it. If {tool} then chooses another port or binds only loopback, "
             "the public URL will not reach it; start the dev server directly "
-            "with `localghost run --port <port> -- <command>` if that happens."
+            f"with `{COMMAND} run --port <port> -- <command>` if that happens."
         ],
     )
 

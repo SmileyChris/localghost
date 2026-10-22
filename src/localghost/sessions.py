@@ -19,7 +19,7 @@ from pathlib import Path
 
 import click
 
-from .feedback import info, warning
+from .feedback import COMMAND, info, warning
 from .paths import state_directory
 
 
@@ -240,9 +240,9 @@ def reap() -> int:
         session.bridge_yaml = ""
         save(session)
     if len(names) == 1:
-        info(f"Its log is kept: localghost sessions logs {names[0]}", err=True)
+        info(f"Its log is kept: {COMMAND} sessions logs {names[0]}", err=True)
     else:
-        info("Their logs are kept: localghost sessions logs NAME", err=True)
+        info(f"Their logs are kept: {COMMAND} sessions logs NAME", err=True)
     return len(stale)
 
 

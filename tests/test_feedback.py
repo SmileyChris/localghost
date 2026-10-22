@@ -72,17 +72,17 @@ def test_next_actions_highlight_each_runnable_command(monkeypatch):
 
     route_hint = console.items[1]
     assert route_hint.plain == (
-        "Save a setup: uvx localghost save, or "
-        "uvx localghost run to run a local app."
+        "Save a setup: localghost save, or "
+        "localghost run to run a local app."
     )
     assert [
         (route_hint.plain[span.start : span.end], span.style)
         for span in route_hint.spans
     ] == [
         ("Save a setup: ", "bold"),
-        ("uvx localghost save", feedback.LIME),
+        ("localghost save", feedback.LIME),
         (", or ", "default"),
-        ("uvx localghost run", feedback.LIME),
+        ("localghost run", feedback.LIME),
         (" to run a local app.", "default"),
     ]
 
@@ -151,10 +151,10 @@ def test_next_actions_use_plain_text_outside_interactive_terminals(monkeypatch):
     feedback.next_actions(https_enabled=False)
 
     assert standard.items == [
-        "Stop the hub: uvx localghost hub down",
-        "Save a setup: uvx localghost save, or "
-        "uvx localghost run to run a local app.",
-        "Enable HTTPS: uvx localghost trust install after installing mkcert.",
+        "Stop the hub: localghost hub down",
+        "Save a setup: localghost save, or "
+        "localghost run to run a local app.",
+        "Enable HTTPS: localghost trust install after installing mkcert.",
     ]
 
 
@@ -282,3 +282,17 @@ def test_run_plan_leaves_the_custom_type_out_of_its_heading(monkeypatch):
     )
 
     assert console.items[0].startswith("Running shop\n")
+
+
+def test_command_prefix_follows_how_localghost_was_run(monkeypatch, tmp_path):
+    # uvx runs from a throwaway environment in uv's cache.
+    monkeypatch.setenv("UV", "/usr/bin/uv")
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "archive-v0" / "abc123"))
+    assert feedback._command() == "uvx localghost"
+
+    # An installed tool or a project venv puts `localghost` on PATH.
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "tools" / "localghost"))
+    assert feedback._command() == "localghost"
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "archive-v0" / "abc123"))
+    monkeypatch.delenv("UV")
+    assert feedback._command() == "localghost"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shlex
 import sys
 from collections.abc import Iterable
@@ -12,6 +13,21 @@ from rich.text import Text
 
 LIME = "#a3e635"
 MINT = "#2dd4bf"
+
+
+def _command() -> str:
+    """How to invoke localghost again, matching how it was run this time.
+
+    uvx runs from a throwaway environment in uv's cache (and sets UV), so
+    plain `localghost` may not be on PATH; an installed tool or venv is.
+    """
+    # ponytail: keys on uv's cache layout (archive-v0); revisit if uv moves it.
+    if os.environ.get("UV") and Path(sys.prefix).parent.name.startswith("archive-v"):
+        return "uvx localghost"
+    return "localghost"
+
+
+COMMAND = _command()
 
 
 _wordmark_shown = False
@@ -57,20 +73,20 @@ def _wordmark() -> Text:
 
 def next_actions(*, https_enabled: bool) -> None:
     """Show useful commands after a successful hub launch."""
-    action("Stop the hub", "uvx localghost hub down")
+    action("Stop the hub", f"{COMMAND} hub down")
     action(
         "Save a setup",
-        "uvx localghost save",
+        f"{COMMAND} save",
         (
             (", or ", "default"),
-            ("uvx localghost run", LIME),
+            (f"{COMMAND} run", LIME),
             (" to run a local app.", "default"),
         ),
     )
     if not https_enabled:
         action(
             "Enable HTTPS",
-            "uvx localghost trust install",
+            f"{COMMAND} trust install",
             " after installing mkcert.",
         )
 

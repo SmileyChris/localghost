@@ -35,6 +35,7 @@ from .config import (
     write_run_config,
 )
 from .feedback import (
+    COMMAND,
     LIME,
     MINT,
     action,
@@ -275,12 +276,12 @@ def _proxy_status(as_json: bool = False) -> None:
             label_style="default",
         )
         if len(recent) > RECENT_PROJECTS or len(recent) < len(remembered):
-            action("All projects", "localghost sessions")
+            action("All projects", f"{COMMAND} sessions")
     click.echo()
     if idle:
         # A stopped hub, or one serving nothing, has one obvious next step.
-        action("Start an application", "localghost run", " in its directory.")
-    action("Trust details", "localghost trust status")
+        action("Start an application", f"{COMMAND} run", " in its directory.")
+    action("Trust details", f"{COMMAND} trust status")
 
 
 @cli.group(invoke_without_command=True)
@@ -437,7 +438,7 @@ def _no_such_project(
     close = difflib.get_close_matches(name, sorted(set(known)), n=3)
     hint = f"; did you mean {' or '.join(close)}?" if close else ""
     raise click.ClickException(
-        f"no {kind} project '{name}'{hint}\n  List them with: localghost sessions"
+        f"no {kind} project '{name}'{hint}\n  List them with: {COMMAND} sessions"
     )
 
 
@@ -465,7 +466,7 @@ def _restart_entry(
     if not directory.is_dir():
         raise click.ClickException(
             f"remembered directory '{directory}' no longer exists; "
-            f"forget it with: localghost sessions forget {entry.name}"
+            f"forget it with: {COMMAND} sessions forget {entry.name}"
         )
     running = None if overrides["dry_run"] else live_session(entry.name)
     if running is not None:
@@ -473,7 +474,7 @@ def _restart_entry(
             message = f"{entry.name} is running in the foreground in another terminal"
             if not _restart_interactive():
                 raise click.ClickException(
-                    f"{message}; stop it with: localghost sessions stop {entry.name}"
+                    f"{message}; stop it with: {COMMAND} sessions stop {entry.name}"
                 )
             click.confirm(f"{message}. Stop it and run it here?", abort=True)
         stop_session(running)
@@ -565,7 +566,7 @@ cli.add_command(
         params=restart.params,
         help=restart.help,
         hidden=True,
-        deprecated="Use 'localghost restart' instead.",
+        deprecated=f"Use '{COMMAND} restart' instead.",
     )
 )
 
@@ -833,7 +834,7 @@ def sessions_forget(name: str | None, forget_everything: bool, missing: bool) ->
     assert name is not None
     if live_session(name) is not None:
         raise click.ClickException(
-            f"{name} is running; stop it first with: localghost sessions stop {name}"
+            f"{name} is running; stop it first with: {COMMAND} sessions stop {name}"
         )
     cleaned = clean_sessions(name)
     if not registry.forget(name) and not cleaned:
@@ -848,7 +849,7 @@ cli.add_command(
         params=sessions_forget.params,
         help=sessions_forget.help,
         hidden=True,
-        deprecated="Use 'localghost sessions forget' instead.",
+        deprecated=f"Use '{COMMAND} sessions forget' instead.",
     )
 )
 
@@ -888,7 +889,7 @@ def trust_install() -> None:
         except click.ClickException as exc:
             warning("Tailnet trust was not installed", [str(exc)])
             action(
-                "Retry once the gateway is reachable", "localghost tailscale trust"
+                "Retry once the gateway is reachable", f"{COMMAND} tailscale trust"
             )
     if was_running and not was_configured:
         _run_proxy("up", already_running=True, https_enabled=True)
@@ -897,7 +898,7 @@ def trust_install() -> None:
         success("The hub was already configured for HTTPS.")
     else:
         success("Trusted HTTPS is configured.")
-        action("Start the hub", "localghost hub up")
+        action("Start the hub", f"{COMMAND} hub up")
 
 
 @trust.command("remove")
@@ -952,7 +953,7 @@ def _remove_trust() -> None:
     if tailnet_active:
         info(
             "Tailnet hosting keeps the hub serving HTTPS; run "
-            "`localghost tailscale unshare` to turn the mirror off."
+            f"`{COMMAND} tailscale unshare` to turn the mirror off."
         )
 
 
@@ -1316,7 +1317,7 @@ def _switch_tailnet_suffix(
     if current.https:
         info(
             f"Machines that trusted the .{old_suffix} root still trust it; run "
-            "`localghost trust remove` on each to revoke."
+            f"`{COMMAND} trust remove` on each to revoke."
         )
     _offer_tailnet_trust(chosen_suffix, certificate, localhost_trusted)
 
@@ -1367,11 +1368,11 @@ def _offer_tailnet_trust(
             _install_tailnet_trust(suffix, show_details=False)
         except click.ClickException as exc:
             warning("Tailnet trust was not installed", [str(exc)])
-            action("Trust this client", "localghost trust")
+            action("Trust this client", f"{COMMAND} trust")
         else:
             success("Tailnet HTTPS is trusted on this client.")
     else:
-        action("Trust localhost and tailnet HTTPS", "localghost trust")
+        action("Trust localhost and tailnet HTTPS", f"{COMMAND} trust")
 
 
 def _resolve_tailscale_credential(
@@ -1480,12 +1481,12 @@ def tailscale_unshare(
     elif load_tailscale_credential() is not None:
         info(
             "The OAuth credential stays in the system keyring for the next "
-            "share; run `localghost tailscale unshare --forget-credential` to "
+            f"share; run `{COMMAND} tailscale unshare --forget-credential` to "
             "remove it."
         )
     info(
         f"Machines that trusted the .{state.suffix} root still trust it; run "
-        "`localghost trust remove` on each to revoke."
+        f"`{COMMAND} trust remove` on each to revoke."
     )
     info(
         f"Remove the offline tagged localghost-{state.node_label} device at "
@@ -1511,7 +1512,7 @@ tailscale.add_command(
         params=tailscale_share.params,
         help=tailscale_share.help,
         hidden=True,
-        deprecated="Use 'localghost tailscale share' instead.",
+        deprecated=f"Use '{COMMAND} tailscale share' instead.",
     )
 )
 tailscale.add_command(
@@ -1521,7 +1522,7 @@ tailscale.add_command(
         params=tailscale_unshare.params,
         help=tailscale_unshare.help,
         hidden=True,
-        deprecated="Use 'localghost tailscale unshare' instead.",
+        deprecated=f"Use '{COMMAND} tailscale unshare' instead.",
     )
 )
 
@@ -1640,7 +1641,7 @@ def _rollback_enable(
     remove_tailscale_state()
     warning(
         "Sharing failed and was rolled back",
-        [f"run `localghost tailscale share` again to retry .{suffix}"],
+        [f"run `{COMMAND} tailscale share` again to retry .{suffix}"],
     )
 
 
@@ -1666,7 +1667,7 @@ def _rollback_switch(
         "The switch failed and was rolled back",
         [
             f"tailnet routes stay on .{current.suffix}",
-            "run `localghost hub up` to restore them on the running hub",
+            f"run `{COMMAND} hub up` to restore them on the running hub",
         ],
     )
 
@@ -1973,7 +1974,7 @@ def _already_serving(name: str, directory: Path, *, refuse: bool) -> bool:
         raise click.ClickException(
             f"{name}.localhost is already served from {session.cwd}; run this "
             "copy under another name with --name, or stop that one with: "
-            f"localghost sessions stop {name}"
+            f"{COMMAND} sessions stop {name}"
         )
     _report_live_session(session, refuse=refuse)
     return True
@@ -1987,9 +1988,9 @@ def _report_live_session(session: Session, *, refuse: bool) -> None:
     """
     name = session.name
     message = (
-        f"{name} is already running; restart it with: localghost restart "
-        f"{name}, view logs with: localghost sessions logs {name}, or stop "
-        f"it with: localghost sessions stop {name}"
+        f"{name} is already running; restart it with: {COMMAND} restart "
+        f"{name}, view logs with: {COMMAND} sessions logs {name}, or stop "
+        f"it with: {COMMAND} sessions stop {name}"
     )
     if refuse:
         raise click.ClickException(message)
@@ -2167,7 +2168,7 @@ def _check_compose_routing(compose_root: Path, project: str) -> None:
     label = compose_file.name if compose_file else "the Compose project"
     raise click.ClickException(
         f"found {label} but {problem}, so nothing would be reachable at "
-        f"{_proxy_origin(project)}; run localghost save --run to save the "
+        f"{_proxy_origin(project)}; run {COMMAND} save --run to save the "
         "routing setup and start it"
     )
 
@@ -2271,7 +2272,7 @@ def _print_run_plan(plan: RunPlan, dry_run: bool, detach: bool = False) -> None:
     elif detach:
         info(
             "Starting the application in the background; inspect and stop it "
-            "with localghost sessions."
+            f"with {COMMAND} sessions."
         )
     else:
         info("Starting the application. Press Ctrl+C to stop it.")
@@ -2489,7 +2490,7 @@ def _run_proxy(
                 [
                     "local .localhost routes are up; the gateway keeps "
                     "retrying in the background",
-                    "check progress with `localghost tailscale status`",
+                    f"check progress with `{COMMAND} tailscale status`",
                 ],
             )
             return
@@ -3450,7 +3451,7 @@ def _save_compose_project(
 
     if not dry_run:
         info(
-            "Run it with localghost run, or start the hub and keep using "
+            f"Run it with {COMMAND} run, or start the hub and keep using "
             "docker compose up."
         )
 
@@ -3578,7 +3579,7 @@ def _save_dockerfile_project(
         return
     write_new(output, document)
     success(f"Created {output} for the Dockerfile application.")
-    info("Run it with localghost run.")
+    info(f"Run it with {COMMAND} run.")
     registry.record(_local_project_name(project_root), project_root, "dockerfile")
 
 
@@ -3715,7 +3716,7 @@ def _select_port(candidate: Candidate, requested: int | None, interactive: bool)
             detail = "no declared container ports"
         raise click.ClickException(
             f"service '{candidate.name}' has {detail}; rerun with "
-            "'localghost save --port PORT'"
+            f"'{COMMAND} save --port PORT'"
         )
 
     default = candidate.ports[0] if candidate.ports else None

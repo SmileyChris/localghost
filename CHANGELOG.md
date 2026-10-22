@@ -33,6 +33,11 @@ uses [Semantic Versioning](https://semver.org/).
   every remembered name, and a pointer to `localghost sessions`. `stop` only
   suggests running projects. A bare `forget` names `--missing` among its
   choices.
+- Every suggested command matches how localghost was run: `uvx localghost …`
+  when it was started with `uvx`, plain `localghost …` when it is installed.
+  The hints after `hub up` no longer always say `uvx`, and the rest no longer
+  assume an install. The tailnet trust command for other machines always uses
+  `uvx`.
 - `tailscale status`, `tailscale trust`, and `tailscale unshare` show the
   wordmark like the rest of their group, and `trust` and `tailscale status`
   drop the headings that repeated the command name.

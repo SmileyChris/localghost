@@ -70,9 +70,9 @@ def test_default_command_starts_the_bundled_proxy(monkeypatch) -> None:
     assert kwargs["text"] is True
     assert kwargs["env"]["LOCALGHOST_IMAGE_TAG"] == f"v{LOCALGHOST_VERSION}"
     assert "Hub is ready at http://traefik.localhost" in result.output
-    assert "Stop the hub: uvx localghost hub down" in result.output
-    assert "Save a setup: uvx localghost save" in result.output
-    assert "uvx localghost run to run a local app." in " ".join(result.output.split())
+    assert "Stop the hub: localghost hub down" in result.output
+    assert "Save a setup: localghost save" in result.output
+    assert "localghost run to run a local app." in " ".join(result.output.split())
 
 
 def test_default_command_reports_existing_proxy_and_routes(monkeypatch) -> None:
@@ -160,7 +160,7 @@ def test_first_launch_skips_https_prompt_without_mkcert(monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     assert "Hub is ready at http://" in result.output
     assert (
-        "Enable HTTPS: uvx localghost trust install after installing mkcert."
+        "Enable HTTPS: localghost trust install after installing mkcert."
         in result.output
     )
 
