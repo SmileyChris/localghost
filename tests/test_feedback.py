@@ -59,8 +59,8 @@ def test_rich_feedback_uses_compact_components(monkeypatch):
     feedback.choices("Pick", [("web", "port 8000", True)])
 
     # Warnings and the run plan print a heading line above their rows, with
-    # no frame.
-    assert len(console.items) == 10
+    # no frame; every row is its own soft-wrapped line.
+    assert len(console.items) == 12
 
 
 def test_next_actions_highlight_each_runnable_command(monkeypatch):

@@ -8,7 +8,6 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from rich.console import Console
-from rich.table import Table
 from rich.text import Text
 
 LIME = "#a3e635"
@@ -189,13 +188,15 @@ def _labeled_block(rows: list[tuple[str, str]], *, heading: str, err: bool) -> N
     if _rich_terminal(err):
         console = _console(err)
         console.print(Text.assemble(("▌ ", MINT), (heading, "bold")))
-        table = Table.grid(padding=(0, 1))
-        table.add_column(style=MINT)
-        table.add_column(style="bold")
-        table.add_column(style=MINT, overflow="ignore")
+        # Soft-wrapped lines, as in `details`, so long paths copy whole.
+        width = max((len(label) for label, _ in rows), default=0)
         for label, value in rows:
-            table.add_row("▌", label, value)
-        console.print(table)
+            console.print(
+                Text.assemble(
+                    ("▌ ", MINT), (label.ljust(width) + " ", "bold"), (value, MINT)
+                ),
+                soft_wrap=True,
+            )
         return
     lines = [heading, *(f"  {label}: {value}" for label, value in rows)]
     _console(err).print("\n".join(lines), soft_wrap=True)
