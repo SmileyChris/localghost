@@ -5,6 +5,8 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [4.5.0] - 2026-10-23
+
 ### Changed
 
 - `tailscale trust` says when the root was already trusted, instead of
