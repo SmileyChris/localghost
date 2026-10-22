@@ -72,8 +72,7 @@ def test_next_actions_highlight_each_runnable_command(monkeypatch):
 
     route_hint = console.items[1]
     assert route_hint.plain == (
-        "Save a setup: localghost save, or "
-        "localghost run to run a local app."
+        "Save a setup: localghost save, or localghost run to run a local app."
     )
     assert [
         (route_hint.plain[span.start : span.end], span.style)
@@ -285,14 +284,24 @@ def test_run_plan_leaves_the_custom_type_out_of_its_heading(monkeypatch):
 
 
 def test_command_prefix_follows_how_localghost_was_run(monkeypatch, tmp_path):
-    # uvx runs from a throwaway environment in uv's cache.
+    tag = "Signature: 8a477f597d28d172789f06886806bc55"
+    cache = tmp_path / "cache"
+    ephemeral = cache / "any-bucket" / "abc123"
+    tool = tmp_path / "tools" / "localghost"
+    for environment in (ephemeral, tool):
+        environment.mkdir(parents=True)
+        # uv tags every environment it creates, tools included.
+        (environment / "CACHEDIR.TAG").write_text(tag)
+    (cache / "CACHEDIR.TAG").write_text(tag)
     monkeypatch.setenv("UV", "/usr/bin/uv")
-    monkeypatch.setattr(sys, "prefix", str(tmp_path / "archive-v0" / "abc123"))
+
+    # uvx runs from a throwaway environment inside uv's tagged cache.
+    monkeypatch.setattr(sys, "prefix", str(ephemeral))
     assert feedback._command() == "uvx localghost"
 
     # An installed tool or a project venv puts `localghost` on PATH.
-    monkeypatch.setattr(sys, "prefix", str(tmp_path / "tools" / "localghost"))
+    monkeypatch.setattr(sys, "prefix", str(tool))
     assert feedback._command() == "localghost"
-    monkeypatch.setattr(sys, "prefix", str(tmp_path / "archive-v0" / "abc123"))
+    monkeypatch.setattr(sys, "prefix", str(ephemeral))
     monkeypatch.delenv("UV")
     assert feedback._command() == "localghost"

@@ -18,11 +18,15 @@ MINT = "#2dd4bf"
 def _command() -> str:
     """How to invoke localghost again, matching how it was run this time.
 
-    uvx runs from a throwaway environment in uv's cache (and sets UV), so
-    plain `localghost` may not be on PATH; an installed tool or venv is.
+    uvx runs from a throwaway environment inside uv's cache (and sets UV), so
+    plain `localghost` may not be on PATH; an installed tool or venv is. The
+    cache root, wherever UV_CACHE_DIR puts it, carries the standard
+    CACHEDIR.TAG; the environment's own tag doesn't count, since `uv tool
+    install` environments have one too.
     """
-    # ponytail: keys on uv's cache layout (archive-v0); revisit if uv moves it.
-    if os.environ.get("UV") and Path(sys.prefix).parent.name.startswith("archive-v"):
+    if os.environ.get("UV") and any(
+        (parent / "CACHEDIR.TAG").is_file() for parent in Path(sys.prefix).parents
+    ):
         return "uvx localghost"
     return "localghost"
 
