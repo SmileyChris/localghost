@@ -248,6 +248,7 @@ def _proxy_status(as_json: bool = False) -> None:
         except click.ClickException as exc:
             warning("Route listing unavailable", [exc.message])
         else:
+            click.echo()
             routes(listed)
             idle = not listed
     # Running projects are already under Active routes, and a project whose
@@ -262,6 +263,7 @@ def _proxy_status(as_json: bool = False) -> None:
         reverse=True,
     )
     if recent:
+        click.echo()
         details(
             [
                 (str(project["hostname"]), str(project["directory"]))
@@ -272,6 +274,7 @@ def _proxy_status(as_json: bool = False) -> None:
         )
         if len(recent) > RECENT_PROJECTS or len(recent) < len(remembered):
             action("All projects", "localghost sessions")
+    click.echo()
     if idle:
         # A stopped hub, or one serving nothing, has one obvious next step.
         action("Start an application", "localghost run", " in its directory.")
@@ -1861,7 +1864,11 @@ def run(
         project = resolved.name or _local_project_name(resolved.root)
         _check_compose_routing(resolved.root, project)
         if dry_run:
-            compose_dry_run(project=project, url=_proxy_origin(project))
+            compose_dry_run(
+                project=project,
+                url=_proxy_origin(project),
+                tailnet_url=_tailnet_origin(project),
+            )
             return
         # Same guard as the host branch below: a second run of a stack that
         # is already running would add a second session record to the same
@@ -2242,10 +2249,10 @@ def _print_run_plan(plan: RunPlan, dry_run: bool, detach: bool = False) -> None:
         dry_run=dry_run,
         project_root=plan.project_root,
         working_directory=plan.working_directory,
+        tailnet_url=_tailnet_origin(plan.name),
     )
-    # In a dry run stdout carries only the bridge YAML.
-    _report_tailnet_origin(plan.name, err=dry_run)
     if dry_run:
+        # stdout carries only the bridge YAML.
         click.echo(plan.bridge_yaml, nl=False)
     elif detach:
         info(

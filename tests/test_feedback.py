@@ -174,7 +174,7 @@ def test_choices_use_plain_text_outside_interactive_terminals(monkeypatch):
     ]
 
 
-def test_routes_are_plain_or_a_table(monkeypatch):
+def test_routes_are_a_titled_list(monkeypatch):
     standard = Console()
     monkeypatch.setattr(feedback, "_rich_terminal", lambda err: False)
     monkeypatch.setattr(feedback, "_console", lambda err: standard)
@@ -182,12 +182,8 @@ def test_routes_are_plain_or_a_table(monkeypatch):
     feedback.routes([("demo.localhost", "/work/demo")])
     assert standard.items == [
         "No application routes are active yet.",
-        "Active routes:\n  demo.localhost: /work/demo",
+        "Active routes\ndemo.localhost: /work/demo",
     ]
-
-    monkeypatch.setattr(feedback, "_rich_terminal", lambda err: True)
-    feedback.routes([("demo.localhost", "/work/demo")])
-    assert len(standard.items) == 5
 
 
 class KwargsConsole:

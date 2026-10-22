@@ -21,6 +21,13 @@ uses [Semantic Versioning](https://semver.org/).
   heading.
 - `sessions forget --missing` forgets every stopped project whose directory
   no longer exists.
+- Active routes render as the same plain list as the rest of the status
+  screen instead of a boxed table, and the screen's sections are separated by
+  blank lines.
+- The `run` plan block colours its labels and values like the other status
+  blocks, and includes the Tailnet URL as a row.
+- Long hints and messages no longer wrap mid-value on a terminal, so
+  fingerprints and paths copy cleanly.
 
 ### Deprecated
 

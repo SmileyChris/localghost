@@ -7,7 +7,6 @@ import sys
 from collections.abc import Iterable
 from pathlib import Path
 
-from rich import box
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
@@ -84,9 +83,8 @@ def action(
     detail_parts = [(detail, "default")] if isinstance(detail, str) else list(detail)
     if _rich_terminal(err):
         console.print(
-            Text.assemble(
-                (f"{label}: ", "bold"), (command, LIME), *detail_parts
-            )
+            Text.assemble((f"{label}: ", "bold"), (command, LIME), *detail_parts),
+            soft_wrap=True,
         )
         return
     console.print(
@@ -185,9 +183,9 @@ def _labeled_block(rows: list[tuple[str, str]], *, heading: str, err: bool) -> N
         console = _console(err)
         console.print(Text.assemble(("▌ ", MINT), (heading, "bold")))
         table = Table.grid(padding=(0, 1))
-        table.add_column(style=MINT, overflow="fold")
+        table.add_column(style=MINT)
         table.add_column(style="bold")
-        table.add_column()
+        table.add_column(style=MINT, overflow="fold")
         for label, value in rows:
             table.add_row("▌", label, value)
         console.print(table)
@@ -207,6 +205,7 @@ def run_plan(
     app_port: int | None = None,
     project_root: Path | None = None,
     working_directory: Path | None = None,
+    tailnet_url: str | None = None,
 ) -> None:
     rows = []
     if project_root:
@@ -222,6 +221,8 @@ def run_plan(
     if app_port is not None:
         rows.append(("Isolated port", str(app_port)))
     rows.append(("Public URL", url))
+    if tailnet_url:
+        rows.append(("Tailnet URL", tailnet_url))
     heading = f"Dry run: {name}" if dry_run else f"Running {name}"
     # A custom command says nothing as a type; the Command row shows it.
     if type != "custom":
@@ -229,15 +230,16 @@ def run_plan(
     _labeled_block(rows, heading=heading, err=dry_run)
 
 
-def compose_dry_run(*, project: str, url: str) -> None:
+def compose_dry_run(*, project: str, url: str, tailnet_url: str | None = None) -> None:
     """The Compose analogue of `run_plan`'s dry-run block.
 
     Compose owns its own port and command, so those rows never apply here;
     only the project name and the public URL are meaningful.
     """
-    _labeled_block(
-        [("Public URL", url)], heading=f"Dry run: {project} (compose)", err=True
-    )
+    rows = [("Public URL", url)]
+    if tailnet_url:
+        rows.append(("Tailnet URL", tailnet_url))
+    _labeled_block(rows, heading=f"Dry run: {project} (compose)", err=True)
 
 
 def routes(items: Iterable[tuple[str, str]]) -> None:
@@ -245,26 +247,7 @@ def routes(items: Iterable[tuple[str, str]]) -> None:
     if not entries:
         info("No application routes are active yet.")
         return
-    if _rich_terminal(False):
-        table = Table(
-            title="Active routes",
-            box=box.HORIZONTALS,
-            pad_edge=False,
-            show_header=True,
-            show_lines=True,
-            header_style=f"bold {LIME}",
-        )
-        table.add_column("Hostname")
-        table.add_column("Location")
-        for hostname, location in entries:
-            table.add_row(hostname, location)
-        console = _console(False)
-        console.print()
-        console.print(table)
-        console.print()
-        return
-    lines = ["Active routes:", *(f"  {host}: {location}" for host, location in entries)]
-    _console(False).print("\n".join(lines), soft_wrap=True)
+    details(entries, title="Active routes", label_style="default")
 
 
 def interrupt_break() -> None:
@@ -290,7 +273,7 @@ def _message(
     parts = [message] if isinstance(message, str) else message
     console = _console(err)
     if _rich_terminal(err):
-        console.print(Text.assemble((f"{symbol} ", color), *parts))
+        console.print(Text.assemble((f"{symbol} ", color), *parts), soft_wrap=True)
     else:
         plain = "".join(part if isinstance(part, str) else part[0] for part in parts)
         console.print(plain, soft_wrap=True)

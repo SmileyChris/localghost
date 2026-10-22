@@ -1229,13 +1229,10 @@ def test_tailnet_origin_report_can_target_stderr(monkeypatch) -> None:
     assert calls == [True]
 
 
-def test_dry_run_plan_reports_the_tailnet_origin_on_stderr(monkeypatch) -> None:
-    reported: list = []
-    monkeypatch.setattr(
-        cli_module,
-        "_report_tailnet_origin",
-        lambda hostname, err=False: reported.append(err),
-    )
+def test_dry_run_plan_reports_the_tailnet_origin_on_stderr(
+    monkeypatch, capsys
+) -> None:
+    monkeypatch.setattr(cli_module, "_tailnet_origin", lambda name: "https://x.wrk")
     monkeypatch.setattr(cli_module, "_proxy_origin", lambda name: "http://x.localhost")
     plan = SimpleNamespace(
         name="x",
@@ -1248,7 +1245,10 @@ def test_dry_run_plan_reports_the_tailnet_origin_on_stderr(monkeypatch) -> None:
         bridge_yaml="services: {}\n",
     )
     cli_module._print_run_plan(plan, dry_run=True)
-    assert reported == [True]
+    captured = capsys.readouterr()
+    # It sits in the plan block beside the public URL, off stdout's YAML.
+    assert "Tailnet URL: https://x.wrk" in captured.err
+    assert captured.out == "services: {}\n"
 
 
 def test_up_tolerates_an_unready_gateway(monkeypatch) -> None:
