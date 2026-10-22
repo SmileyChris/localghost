@@ -177,7 +177,7 @@ def test_status_reports_proxy_state_without_reconciling(monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     assert "Hub: stopped" in result.output
     assert "HTTPS configuration: HTTP only" in result.output
-    assert "localghost trust status" in result.output
+    assert "Check HTTPS trust: localghost trust" in result.output
 
 
 def test_status_lists_remembered_projects(monkeypatch, tmp_path) -> None:
@@ -223,7 +223,7 @@ def test_status_lists_only_recent_restartable_projects(monkeypatch) -> None:
     assert "old1.localhost" not in output
     assert "live.localhost" not in output
     assert "gone.localhost" not in output
-    assert "All projects: localghost sessions" in output
+    assert "List all projects: localghost sessions" in output
 
 
 def test_status_json_is_machine_readable(monkeypatch, tmp_path) -> None:

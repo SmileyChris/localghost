@@ -38,6 +38,9 @@ uses [Semantic Versioning](https://semver.org/).
   The hints after `hub up` no longer always say `uvx`, and the rest no longer
   assume an install. The tailnet trust command for other machines always uses
   `uvx`.
+- Suggested-command labels read as short instructions: "List all
+  projects", "Check HTTPS trust" (now pointing at bare `localghost trust`),
+  "Trust on other machines", and "Retry when the gateway is up".
 - `tailscale status`, `tailscale trust`, and `tailscale unshare` show the
   wordmark like the rest of their group, and `trust` and `tailscale status`
   drop the headings that repeated the command name.

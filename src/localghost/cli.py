@@ -276,12 +276,12 @@ def _proxy_status(as_json: bool = False) -> None:
             label_style="default",
         )
         if len(recent) > RECENT_PROJECTS or len(recent) < len(remembered):
-            action("All projects", f"{COMMAND} sessions")
+            action("List all projects", f"{COMMAND} sessions")
     click.echo()
     if idle:
         # A stopped hub, or one serving nothing, has one obvious next step.
         action("Start an application", f"{COMMAND} run", " in its directory.")
-    action("Trust details", f"{COMMAND} trust status")
+    action("Check HTTPS trust", f"{COMMAND} trust")
 
 
 @cli.group(invoke_without_command=True)
@@ -888,9 +888,7 @@ def trust_install() -> None:
             _install_tailnet_trust(tailnet.suffix, show_details=False)
         except click.ClickException as exc:
             warning("Tailnet trust was not installed", [str(exc)])
-            action(
-                "Retry once the gateway is reachable", f"{COMMAND} tailscale trust"
-            )
+            action("Retry when the gateway is up", f"{COMMAND} tailscale trust")
     if was_running and not was_configured:
         _run_proxy("up", already_running=True, https_enabled=True)
         success("Trusted HTTPS is enabled for the running hub.")
@@ -1610,7 +1608,7 @@ def _trust_tailnet_hub(target: str | None) -> None:
 def _share_trust(suffix: str, certificate: PublicCertificate) -> None:
     """Show another tailnet machine how to trust this hub's root."""
     action(
-        f"To trust https://*.{suffix} on other machines",
+        "Trust on other machines",
         f"uvx localghost tailscale trust {suffix}",
     )
     # The fingerprint is for clients that cannot ask Tailscale for the hub;
