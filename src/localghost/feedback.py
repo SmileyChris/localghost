@@ -96,7 +96,11 @@ def action(
 
 
 def details(
-    rows: Iterable[tuple[str, str]], *, title: str | None = None, err: bool = False
+    rows: Iterable[tuple[str, str]],
+    *,
+    title: str | None = None,
+    label_style: str = "bold",
+    err: bool = False,
 ) -> None:
     """Show concise labelled values in a table on a terminal or text elsewhere."""
     entries = list(rows)
@@ -105,7 +109,7 @@ def details(
         if title:
             console.print(Text(title, style="bold"))
         table = Table.grid(padding=(0, 1))
-        table.add_column(style="bold")
+        table.add_column(style=label_style)
         table.add_column(style=MINT, overflow="fold")
         for label, value in entries:
             table.add_row(label, value)

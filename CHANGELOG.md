@@ -13,6 +13,12 @@ uses [Semantic Versioning](https://semver.org/).
   flags a missing directory in yellow.
 - `sessions list --running` and `--stopped` list only projects in that state,
   without the state column.
+- Bare `localghost` lists the five most recently started stopped projects
+  whose directories still exist, instead of every remembered project, and
+  points to `localghost sessions` for the rest. Running projects already show
+  under Active routes. `--json` still includes every remembered project.
+- Bare `localghost` and `status` drop the redundant "Localghost status"
+  heading.
 
 ### Fixed
 

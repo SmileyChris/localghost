@@ -138,7 +138,14 @@ running, and how:
 synthesis.localhost  running  detached    ~/dev/synthesis
 gulch.localhost      running  foreground  ~/dev/lab/gulch
 oasis.localhost      stopped              ~/dev/oasis
-``` The commands on a ghost page are click-to-copy.
+```
+
+`--running` or `--stopped` lists only projects in that state. Bare
+`uvx localghost` shows just the five most recently started stopped projects
+whose directories still exist, since running ones already appear under its
+active routes.
+
+The commands on a ghost page are click-to-copy.
 
 Entries are JSON files under the state directory's `registry/` folder,
 written on every `run` and `save` and mounted read-only into the hub.

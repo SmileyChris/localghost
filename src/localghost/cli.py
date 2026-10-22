@@ -17,6 +17,7 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, replace
+from datetime import datetime
 from pathlib import Path
 
 import click
@@ -208,6 +209,9 @@ def status(as_json: bool) -> None:
     _proxy_status(as_json)
 
 
+RECENT_PROJECTS = 5
+
+
 def _proxy_status(as_json: bool = False) -> None:
     """Report only observable hub state; never reconcile the hub."""
     running = proxy_is_running()
@@ -236,7 +240,6 @@ def _proxy_status(as_json: bool = False) -> None:
             ("Hub", "running" if running else "stopped"),
             ("HTTPS configuration", https_state),
         ],
-        title="Localghost status",
     )
     idle = not running
     if running:
@@ -247,25 +250,28 @@ def _proxy_status(as_json: bool = False) -> None:
         else:
             routes(listed)
             idle = not listed
-    if remembered:
+    # Running projects are already under Active routes, and a project whose
+    # directory has gone cannot be restarted; the rest is `sessions`' job.
+    recent = sorted(
+        (
+            project
+            for project in remembered
+            if project["state"] == "stopped" and project["directory_exists"]
+        ),
+        key=lambda project: datetime.fromisoformat(str(project["last_started"])),
+        reverse=True,
+    )
+    if recent:
         details(
             [
-                (
-                    str(project["hostname"]),
-                    " · ".join(
-                        part
-                        for part in (
-                            str(project["state"]),
-                            _project_mode(project),
-                            _project_directory(project),
-                        )
-                        if part
-                    ),
-                )
-                for project in remembered
+                (str(project["hostname"]), str(project["directory"]))
+                for project in recent[:RECENT_PROJECTS]
             ],
-            title="Remembered projects",
+            title="Recent projects",
+            label_style="default",
         )
+        if len(recent) > RECENT_PROJECTS or len(recent) < len(remembered):
+            action("All projects", "localghost sessions")
     if idle:
         # A stopped hub, or one serving nothing, has one obvious next step.
         action("Start an application", "localghost run", " in its directory.")

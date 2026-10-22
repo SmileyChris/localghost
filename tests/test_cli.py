@@ -190,6 +190,42 @@ def test_status_lists_remembered_projects(monkeypatch, tmp_path) -> None:
     assert "blog.localhost" in result.output
 
 
+def test_status_lists_only_recent_restartable_projects(monkeypatch) -> None:
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
+
+    def project(name, day, state="stopped", exists=True):
+        return {
+            "hostname": f"{name}.localhost",
+            "directory": f"/src/{name}",
+            "last_started": f"2026-10-{day:02d}T12:00:00+13:00",
+            "state": state,
+            "directory_exists": exists,
+        }
+
+    projects = [project(f"old{day}", day) for day in range(1, 6)] + [
+        project("newest", 20),
+        project("live", 21, state="running"),
+        project("gone", 22, exists=False),
+    ]
+    monkeypatch.setattr("localghost.cli._projects", lambda: projects)
+
+    output = CliRunner().invoke(cli, ["status"]).output
+
+    listed = [line.split(":")[0] for line in output.splitlines()]
+    start = listed.index("Recent projects") + 1
+    assert listed[start : start + 5] == [
+        "newest.localhost",
+        "old5.localhost",
+        "old4.localhost",
+        "old3.localhost",
+        "old2.localhost",
+    ]
+    assert "old1.localhost" not in output
+    assert "live.localhost" not in output
+    assert "gone.localhost" not in output
+    assert "All projects: localghost sessions" in output
+
+
 def test_status_json_is_machine_readable(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
     registry.record("blog", tmp_path, "django")
