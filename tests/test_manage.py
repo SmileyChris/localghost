@@ -646,3 +646,29 @@ def test_sessions_list_marks_an_isolated_session(tmp_path) -> None:
     # Its port is only the host side, so the list says why it is not 8000.
     assert "running  detached isolated" in result.output
     assert json.loads(as_json.output)[0]["session"]["isolated"] is True
+
+
+def test_forget_missing_drops_only_stopped_projects_whose_directory_is_gone(
+    tmp_path,
+) -> None:
+    kept = tmp_path / "kept"
+    kept.mkdir()
+    registry.record("kept", kept, "django")
+    registry.record("gone", tmp_path / "gone", "vite")
+    registry.record("live", tmp_path / "live", "vite")
+    _session(tmp_path / "live", name="live", pid=os.getpid())
+    _session(tmp_path / "gone", name="gone", pid=None)
+
+    result = CliRunner().invoke(cli, ["sessions", "forget", "--missing"])
+
+    assert result.exit_code == 0, result.output
+    assert "Forgot 1 project(s): gone" in result.output
+    assert sorted(entry.name for entry in registry.entries()) == ["kept", "live"]
+    assert [item.name for item in sessions()] == ["live"]
+
+
+def test_forget_missing_refuses_a_name_too() -> None:
+    result = CliRunner().invoke(cli, ["sessions", "forget", "demo", "--missing"])
+
+    assert result.exit_code == 2
+    assert "only one of" in result.output

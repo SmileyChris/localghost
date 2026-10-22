@@ -19,6 +19,8 @@ uses [Semantic Versioning](https://semver.org/).
   under Active routes. `--json` still includes every remembered project.
 - Bare `localghost` and `status` drop the redundant "Localghost status"
   heading.
+- `sessions forget --missing` forgets every stopped project whose directory
+  no longer exists.
 
 ### Fixed
 

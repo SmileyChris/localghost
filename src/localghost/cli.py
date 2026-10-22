@@ -770,14 +770,35 @@ def sessions_stop(target: str | None, stop_all: bool) -> None:
     is_flag=True,
     help="Forget every project that isn't running.",
 )
-def sessions_forget(name: str | None, forget_everything: bool) -> None:
+@click.option(
+    "missing",
+    "--missing",
+    is_flag=True,
+    help="Forget every stopped project whose directory no longer exists.",
+)
+def sessions_forget(name: str | None, forget_everything: bool, missing: bool) -> None:
     """Drop a remembered project, its ghost page, and its stopped sessions.
 
     The project's own files are never touched.
     """
+    if sum([name is not None, forget_everything, missing]) > 1:
+        raise click.UsageError("give only one of NAME, --all, or --missing")
+    if missing:
+        running = {item.name for item in sessions() if session_alive(item)}
+        gone = sorted(
+            entry.name
+            for entry in registry.entries()
+            if entry.name not in running and not Path(entry.directory).is_dir()
+        )
+        for gone_name in gone:
+            registry.forget(gone_name)
+            clean_sessions(gone_name)
+        if gone:
+            success(f"Forgot {len(gone)} project(s): {', '.join(gone)}")
+        else:
+            info("No stopped project has a missing directory.")
+        return
     if forget_everything:
-        if name is not None:
-            raise click.UsageError("NAME and --all cannot both be given")
         running = sorted({item.name for item in sessions() if session_alive(item)})
         removed = sum(
             registry.forget(entry.name)
