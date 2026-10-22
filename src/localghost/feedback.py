@@ -26,6 +26,11 @@ def title(*, welcome: bool = False) -> None:
     of its own. Guarding here, rather than threading a suppression flag
     through every branch of `save`, keeps the mark at the top of the
     output and closes every future double print for free.
+
+    Commands that report to a person or change something show it; commands
+    whose output is the content itself (`sessions`, `hub logs`, `--json`)
+    don't. Block titles below it name a section of the screen, never the
+    command that was typed.
     """
     global _wordmark_shown
     if _wordmark_shown or not _rich_terminal(False):

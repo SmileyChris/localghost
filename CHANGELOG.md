@@ -33,6 +33,9 @@ uses [Semantic Versioning](https://semver.org/).
   every remembered name, and a pointer to `localghost sessions`. `stop` only
   suggests running projects. A bare `forget` names `--missing` among its
   choices.
+- `tailscale status`, `tailscale trust`, and `tailscale unshare` show the
+  wordmark like the rest of their group, and `trust` and `tailscale status`
+  drop the headings that repeated the command name.
 
 ### Deprecated
 

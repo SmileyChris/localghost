@@ -962,7 +962,6 @@ def _trust_status() -> None:
     if not certificate_path.exists():
         details(
             [("HTTPS", "disabled (no local public root has been bootstrapped)")],
-            title="Trust status",
         )
         return
     try:
@@ -991,7 +990,7 @@ def _trust_status() -> None:
                 ) from exc
             tailnet_state = tailnet_certificate.fingerprint
         rows.append((f"Tailnet .{tailnet.suffix}", tailnet_state))
-    details(rows, title="Trust status")
+    details(rows)
 
 
 @cli.group(invoke_without_command=True)
@@ -1014,12 +1013,13 @@ def _explicit_tailnet_row(tailnet: str) -> list[tuple[str, str]]:
 
 
 def _tailscale_status() -> None:
+    title()
     try:
         state = load_tailscale_state()
     except TailscaleError as exc:
         raise click.ClickException(str(exc)) from exc
     if state is None:
-        details([("Tailnet sharing", "off")], title="Tailscale status")
+        details([("Tailnet sharing", "off")])
         return
     details(
         [("Tailnet sharing", "on")]
@@ -1036,7 +1036,6 @@ def _tailscale_status() -> None:
             if (unmirrored := _unmirrored_router_names())
             else []
         ),
-        title="Tailscale status",
     )
     if not state.https:
         _public_suffix_notice(state.suffix)
@@ -1450,6 +1449,7 @@ def tailscale_unshare(
     The OAuth credential stays in the system keyring, so sharing again needs
     no setup; --forget-credential removes it.
     """
+    title()
     try:
         state = load_tailscale_state()
     except TailscaleError as exc:
@@ -1545,6 +1545,7 @@ def tailscale_trust(target: str | None, fingerprint: str | None) -> None:
     the tailnet itself vouches for the root. With no TARGET, the one hub on the
     tailnet is trusted, or on a hosting machine its own.
     """
+    title()
     state = load_tailscale_state()
     if state is not None and target in (None, state.suffix):
         if not state.https:
