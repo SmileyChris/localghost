@@ -393,7 +393,11 @@ func (p *Provider) registryDomains() []string {
 		if ValidateMetadataDomain(e.Hostname) != nil {
 			continue
 		}
-		seen[e.Hostname] = struct{}{}
+		domain := e.Hostname
+		if p.domainSuffix != "localhost" {
+			domain = strings.TrimSuffix(domain, ".localhost") + "." + p.domainSuffix
+		}
+		seen[domain] = struct{}{}
 	}
 	return sortedSetKeys(seen)
 }

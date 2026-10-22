@@ -46,6 +46,7 @@ services:
       - --providers.plugin.localghostTailnetCA.domainsuffix=${LOCALGHOST_TAILSCALE_SUFFIX:?set LOCALGHOST_TAILSCALE_SUFFIX}
       - --providers.plugin.localghostTailnetCA.leaflifetime=24h
       - --providers.plugin.localghostTailnetCA.renewbefore=6h
+      - --providers.plugin.localghostTailnetCA.registrypath=/var/lib/localghost-registry
       - --providers.plugin.localghostTailnetCA.mode=${LOCALGHOST_TAILNET_CA_MODE:-tls}
       - --experimental.abortonpluginfailure=true
       - --experimental.localplugins.localghostCA.modulename=github.com/SmileyChris/traefik-localghost-ca

@@ -10,6 +10,12 @@ uses [Semantic Versioning](https://semver.org/).
 - `tailscale trust` says when the root was already trusted, instead of
   repeating the first-trust message. It still refreshes the trust stores.
 
+### Fixed
+
+- A stopped project's tailnet hostname keeps its localghost certificate, so
+  its ghost page is served over trusted HTTPS instead of with Traefik's
+  default certificate.
+
 ## [4.4.0] - 2026-10-14
 
 ### Added

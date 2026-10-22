@@ -450,6 +450,21 @@ func TestDesiredSpecsIncludeRegistryHostnames(t *testing.T) {
 	}
 }
 
+func TestTailnetRegistryHostnamesUseTheTailnetSuffix(t *testing.T) {
+	p := newTestProvider(t)
+	p.domainSuffix = "wrk"
+	dir := t.TempDir()
+	writeRegistryEntry(t, dir, "blog", "blog.localhost")
+	p.registryPath = dir
+	specs, err := p.desiredSpecs(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(specs) != 1 || specs[0].name != "blog.wrk" {
+		t.Fatalf("unexpected specs: %#v", specs)
+	}
+}
+
 func TestRegistryHostnamesDeduplicateAgainstRunningContainers(t *testing.T) {
 	p := newTestProvider(t)
 	dir := t.TempDir()
