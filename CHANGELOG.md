@@ -9,6 +9,10 @@ uses [Semantic Versioning](https://semver.org/).
 
 - `tailscale trust` says when the root was already trusted, instead of
   repeating the first-trust message. It still refreshes the trust stores.
+- `sessions list` marks running projects in green, dims stopped ones, and
+  flags a missing directory in yellow.
+- `sessions list --running` and `--stopped` list only projects in that state,
+  without the state column.
 
 ### Fixed
 

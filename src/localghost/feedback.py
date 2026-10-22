@@ -122,7 +122,7 @@ def styled(parts: Iterable[tuple[str, str]], *, err: bool = False) -> None:
     entries = list(parts)
     console = _console(err)
     if _rich_terminal(err):
-        console.print(Text.assemble(*entries))
+        console.print(Text.assemble(*entries), soft_wrap=True)
         return
     console.print("".join(text for text, _ in entries), soft_wrap=True)
 

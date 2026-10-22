@@ -606,27 +606,46 @@ def _project_mode(project: dict[str, object]) -> str:
     return f"{mode} isolated" if session.get("isolated") else mode
 
 
-def _sessions_list(as_json: bool) -> None:
-    projects = _projects()
+def _sessions_list(as_json: bool, state: str | None = None) -> None:
+    projects = [
+        project
+        for project in _projects()
+        if state is None or project["state"] == state
+    ]
     if as_json:
         click.echo(json.dumps(projects, indent=2))
         return
     if not projects:
-        click.echo("Nothing remembered yet; run a project to give it a ghost.")
+        if state:
+            click.echo(f"No {state} projects.")
+        else:
+            click.echo("Nothing remembered yet; run a project to give it a ghost.")
         return
-    rows = [
-        (
-            str(project["hostname"]),
-            str(project["state"]),
-            _project_mode(project),
-            _project_directory(project),
-        )
-        for project in projects
+    # A filter makes the state column redundant, and stopped projects have no
+    # mode; dimming only means something next to running projects.
+    rows = []
+    for project in projects:
+        running = project["state"] == "running"
+        quiet = "dim" if state is None and not running else "default"
+        cells = [(str(project["hostname"]), quiet)]
+        if state is None:
+            cells.append((str(project["state"]), LIME if running else quiet))
+        if state != "stopped":
+            cells.append((_project_mode(project), quiet))
+        rows.append((project, quiet, cells))
+    widths = [
+        max(len(cells[column][0]) for _, _, cells in rows)
+        for column in range(len(rows[0][2]))
     ]
-    widths = [max(len(row[column]) for row in rows) for column in range(3)]
-    for row in rows:
-        cells = [cell.ljust(width) for cell, width in zip(row, widths, strict=False)]
-        click.echo("  ".join([*cells, row[3]]))
+    for project, quiet, cells in rows:
+        parts = [
+            (f"{text.ljust(width)}  ", style)
+            for (text, style), width in zip(cells, widths, strict=True)
+        ]
+        parts.append((str(project["directory"]), quiet))
+        if not project["directory_exists"]:
+            parts.append((" (missing)", "yellow"))
+        styled(parts)
 
 
 @sessions_group.command("list")
@@ -636,9 +655,15 @@ def _sessions_list(as_json: bool) -> None:
     is_flag=True,
     help="Print the projects and their session records as JSON.",
 )
-def sessions_list(as_json: bool) -> None:
+@click.option(
+    "state", "--running", flag_value="running", help="Only list running projects."
+)
+@click.option(
+    "state", "--stopped", flag_value="stopped", help="Only list stopped projects."
+)
+def sessions_list(as_json: bool, state: str | None) -> None:
     """List remembered projects and whether each one is running."""
-    _sessions_list(as_json)
+    _sessions_list(as_json, state)
 
 
 def _target_session(target: str) -> Session:

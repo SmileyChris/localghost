@@ -555,6 +555,27 @@ def test_sessions_list_joins_projects_with_their_sessions(tmp_path) -> None:
     assert by_name["api"]["last_started"] is None
 
 
+def test_sessions_list_filters_by_state_and_drops_the_state_column(
+    tmp_path,
+) -> None:
+    registry.record("demo", tmp_path / "demo", "django", detached=True)
+    registry.record("shop", tmp_path / "shop", "vite")
+    _session(tmp_path / "demo", pid=os.getpid())
+
+    running = CliRunner().invoke(cli, ["sessions", "list", "--running"]).output
+    stopped = CliRunner().invoke(cli, ["sessions", "list", "--stopped"]).output
+    payload = json.loads(
+        CliRunner().invoke(cli, ["sessions", "list", "--json", "--stopped"]).output
+    )
+
+    assert running.split()[:2] == ["demo.localhost", "detached"]
+    assert "shop.localhost" not in running
+    assert stopped.split()[0] == "shop.localhost"
+    assert "stopped" not in stopped
+    assert "demo.localhost" not in stopped
+    assert [item["name"] for item in payload] == ["shop"]
+
+
 def test_sessions_list_flags_a_project_whose_directory_is_gone(tmp_path) -> None:
     kept = tmp_path / "kept"
     kept.mkdir()
