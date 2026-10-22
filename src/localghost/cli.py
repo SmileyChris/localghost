@@ -1639,6 +1639,7 @@ def _install_tailnet_trust(
             f"  received: {certificate.fingerprint}"
         )
     path = _tailnet_root_path(suffix)
+    known = path.exists()
     replaced = _remove_superseded_root(path, certificate, scope=suffix)
     _write_public_root(path, certificate.pem)
     if show_details:
@@ -1666,6 +1667,8 @@ def _install_tailnet_trust(
             f"Replaced the previous .{suffix} root; this client now trusts the "
             "current one."
         )
+    elif known:
+        success(f"Already trusted .{suffix}; refreshed this client's trust stores.")
     else:
         success(f"Trusted localghost HTTPS for *.{suffix} on this client.")
 

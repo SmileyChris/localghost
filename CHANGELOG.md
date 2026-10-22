@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file. The project
 uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- `tailscale trust` says when the root was already trusted, instead of
+  repeating the first-trust message. It still refreshes the trust stores.
+
 ## [4.4.0] - 2026-10-14
 
 ### Added

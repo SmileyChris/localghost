@@ -1541,6 +1541,14 @@ def test_tailnet_trust_downloads_and_installs_both_stores(
     assert result.exit_code == 0, result.output
     assert len(installed) == 2
     assert (tmp_path / "tailscale-tail1234-rootCA.pem").read_bytes() == CERTIFICATE_PEM
+    assert "Trusted localghost HTTPS for *.tail1234" in result.output
+
+    # Trusting the same root again still reinstalls, since the stores may have
+    # lost it, but says so rather than repeating the first-trust message.
+    result = CliRunner().invoke(cli, ["tailscale", "trust", "tail1234"])
+    assert result.exit_code == 0, result.output
+    assert len(installed) == 4
+    assert "Already trusted .tail1234" in result.output
 
 
 def test_tailnet_trust_accepts_a_matching_pinned_fingerprint(
