@@ -88,6 +88,7 @@ def test_forget_unknown_name_fails(tmp_path, monkeypatch):
     result = CliRunner().invoke(cli, ["forget", "nothing"])
     assert result.exit_code != 0
     assert "no remembered project 'nothing'" in result.output
+    assert "List them with: localghost sessions" in result.output
 
 
 def test_forget_all_command(tmp_path, monkeypatch):
@@ -99,21 +100,13 @@ def test_forget_all_command(tmp_path, monkeypatch):
     assert registry.entries() == []
 
 
-def test_forget_requires_name_or_all(tmp_path, monkeypatch):
-    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
-    result = CliRunner().invoke(cli, ["forget"])
-    assert result.exit_code != 0
-    assert "nothing is remembered" in result.output
-
-
-def test_bare_forget_lists_the_remembered_names(tmp_path, monkeypatch):
+def test_forget_requires_name_missing_or_all(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
     registry.record("blog", tmp_path, "django")
-    registry.record("shop", tmp_path, "compose")
     result = CliRunner().invoke(cli, ["forget"])
     assert result.exit_code != 0
-    assert "blog, shop" in result.output
-    assert "--all" in result.output
+    assert "give a project name, --missing, or --all" in result.output
+    assert "blog" not in result.output
 
 
 def test_project_name_completion_filters_by_prefix(tmp_path):
@@ -301,10 +294,9 @@ def test_summon_with_nothing_remembered(tmp_path, monkeypatch):
 def test_summon_unknown_name_fails_and_hints(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
     registry.record("blog", tmp_path / "blog", "django")
-    result = CliRunner().invoke(cli, ["summon", "shop"])
+    result = CliRunner().invoke(cli, ["summon", "blgo"])
     assert result.exit_code != 0
-    assert "no remembered project 'shop'" in result.output
-    assert "blog" in result.output
+    assert "no remembered project 'blgo'; did you mean blog?" in result.output
 
 
 def test_summon_missing_directory_fails(tmp_path, monkeypatch):

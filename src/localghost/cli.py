@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import importlib.metadata
 import importlib.resources as resources
 import ipaddress
@@ -14,11 +15,12 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
+from typing import NoReturn
 
 import click
 
@@ -425,9 +427,17 @@ def _restart_target(
             last_started="",
             detached=session.detached,
         )
-    known = ", ".join(entry.name for entry in entries) or "nothing"
+    _no_such_project(target, (entry.name for entry in entries))
+
+
+def _no_such_project(
+    name: str, known: Iterable[str], kind: str = "remembered"
+) -> NoReturn:
+    """One wording for an unmatched name: suggest near misses, don't dump."""
+    close = difflib.get_close_matches(name, sorted(set(known)), n=3)
+    hint = f"; did you mean {' or '.join(close)}?" if close else ""
     raise click.ClickException(
-        f"no remembered project '{target}' (remembered: {known})"
+        f"no {kind} project '{name}'{hint}\n  List them with: localghost sessions"
     )
 
 
@@ -675,10 +685,17 @@ def sessions_list(as_json: bool, state: str | None) -> None:
     _sessions_list(as_json, state)
 
 
-def _target_session(target: str) -> Session:
+def _target_session(target: str, *, running: bool = False) -> Session:
     session = find_session(target)
     if session is None:
-        raise click.ClickException(f"no session for '{target}'")
+        # Suggest only names worth acting on: stopping one that already
+        # exited just clears its record.
+        records = [item for item in sessions() if not running or session_alive(item)]
+        _no_such_project(
+            target,
+            (item.name for item in records),
+            "running" if running else "logged",
+        )
     return session
 
 
@@ -745,8 +762,8 @@ def sessions_stop(target: str | None, stop_all: bool) -> None:
     after a grace period; its bridge is removed either way.
     """
     if bool(target) == stop_all:
-        raise click.UsageError("provide a project name, a session ID, or --all")
-    targets = sessions() if stop_all else [_target_session(target)]
+        raise click.UsageError("give a project name, a session ID, or --all")
+    targets = sessions() if stop_all else [_target_session(target, running=True)]
     if not targets:
         raise click.ClickException("no matching managed session")
     stopped = 0
@@ -784,8 +801,8 @@ def sessions_forget(name: str | None, forget_everything: bool, missing: bool) ->
 
     The project's own files are never touched.
     """
-    if sum([name is not None, forget_everything, missing]) > 1:
-        raise click.UsageError("give only one of NAME, --all, or --missing")
+    if sum([name is not None, forget_everything, missing]) != 1:
+        raise click.UsageError("give a project name, --missing, or --all")
     if missing:
         running = {item.name for item in sessions() if session_alive(item)}
         gone = sorted(
@@ -813,18 +830,14 @@ def sessions_forget(name: str | None, forget_everything: bool, missing: bool) ->
         if running:
             info(f"Kept running project(s): {', '.join(running)}")
         return
-    if name is None:
-        names = ", ".join(sorted(entry.name for entry in registry.entries()))
-        if not names:
-            raise click.UsageError("nothing is remembered; provide NAME or --all")
-        raise click.UsageError(f"provide NAME or --all; remembered: {names}")
+    assert name is not None
     if live_session(name) is not None:
         raise click.ClickException(
             f"{name} is running; stop it first with: localghost sessions stop {name}"
         )
     cleaned = clean_sessions(name)
     if not registry.forget(name) and not cleaned:
-        raise click.ClickException(f"no remembered project '{name}'")
+        _no_such_project(name, (entry.name for entry in registry.entries()))
     success(f"Forgot {name}.")
 
 

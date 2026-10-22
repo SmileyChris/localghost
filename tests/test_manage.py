@@ -75,7 +75,8 @@ def test_sessions_logs_rejects_an_unknown_session() -> None:
     result = CliRunner().invoke(cli, ["sessions", "logs", "nope"])
 
     assert result.exit_code != 0
-    assert "no session for 'nope'" in result.output
+    assert "no logged project 'nope'" in result.output
+    assert "localghost sessions" in result.output
 
 
 def test_sessions_logs_prints_the_log(tmp_path) -> None:
@@ -140,14 +141,25 @@ def test_sessions_stop_requires_exactly_one_target(arguments) -> None:
     result = CliRunner().invoke(cli, ["sessions", "stop", *arguments])
 
     assert result.exit_code != 0
-    assert "provide a project name, a session ID, or --all" in result.output
+    assert "give a project name, a session ID, or --all" in result.output
 
 
 def test_sessions_stop_reports_no_match() -> None:
     result = CliRunner().invoke(cli, ["sessions", "stop", "missing"])
 
     assert result.exit_code != 0
-    assert "no session for 'missing'" in result.output
+    assert "no running project 'missing'" in result.output
+
+
+def test_sessions_stop_suggests_only_running_projects(tmp_path) -> None:
+    _session(tmp_path, name="invoicing", pid=os.getpid())
+    _session(tmp_path, name="invoiced", pid=None)
+
+    result = CliRunner().invoke(cli, ["sessions", "stop", "invocing"])
+
+    assert result.exit_code != 0
+    assert "did you mean invoicing?" in result.output
+    assert "invoiced" not in result.output
 
 
 def test_sessions_stop_removes_the_named_session(tmp_path) -> None:
@@ -671,4 +683,4 @@ def test_forget_missing_refuses_a_name_too() -> None:
     result = CliRunner().invoke(cli, ["sessions", "forget", "demo", "--missing"])
 
     assert result.exit_code == 2
-    assert "only one of" in result.output
+    assert "give a project name, --missing, or --all" in result.output
