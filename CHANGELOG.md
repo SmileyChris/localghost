@@ -15,8 +15,9 @@ uses [Semantic Versioning](https://semver.org/).
   without the state column.
 - Bare `localghost` lists the five most recently started stopped projects
   whose directories still exist, instead of every remembered project, and
-  points to `localghost sessions` for the rest. Running projects already show
-  under Active routes. `--json` still includes every remembered project.
+  points to `localghost sessions` for the rest. Running projects show under
+  Active routes, or under "Running without the hub" when the hub is stopped.
+  `--json` still includes every remembered project.
 - Bare `localghost` and `status` drop the redundant "Localghost status"
   heading.
 - `sessions forget --missing` forgets every stopped project whose directory
@@ -44,6 +45,11 @@ uses [Semantic Versioning](https://semver.org/).
 - `tailscale status`, `tailscale trust`, and `tailscale unshare` show the
   wordmark like the rest of their group, and `trust` and `tailscale status`
   drop the headings that repeated the command name.
+
+Scripts that parse the human-readable `status` text should switch to
+`status --json`: the "Remembered projects" block is now "Recent projects",
+and piped Active routes print as `host: location` rows under an unindented
+heading. The JSON output is unchanged.
 
 ### Deprecated
 

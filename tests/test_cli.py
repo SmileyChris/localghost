@@ -221,8 +221,52 @@ def test_status_lists_only_recent_restartable_projects(monkeypatch) -> None:
         "old2.localhost",
     ]
     assert "old1.localhost" not in output
-    assert "live.localhost" not in output
     assert "gone.localhost" not in output
+    assert "List all projects: localghost sessions" in output
+    # With the hub stopped, nothing routes the running project, so it is
+    # called out rather than left to Active routes.
+    assert "Running without the hub\nlive.localhost: /src/live" in output
+    assert "Start the hub: localghost hub up" in output
+
+
+def test_status_survives_unreadable_start_times(monkeypatch) -> None:
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
+    stamps = [None, "garbage", "2026-10-01T12:00:00", "2026-10-02T12:00:00+13:00"]
+    projects = [
+        {
+            "hostname": f"p{index}.localhost",
+            "directory": f"/src/p{index}",
+            "last_started": stamp,
+            "state": "stopped",
+            "directory_exists": True,
+        }
+        for index, stamp in enumerate(stamps)
+    ]
+    monkeypatch.setattr("localghost.cli._projects", lambda: projects)
+
+    result = CliRunner().invoke(cli, ["status"])
+
+    assert result.exit_code == 0, result.output
+    listed = [line.split(":")[0] for line in result.output.splitlines()]
+    start = listed.index("Recent projects") + 1
+    # Parseable times first, newest first; unreadable ones last.
+    assert listed[start : start + 2] == ["p3.localhost", "p2.localhost"]
+
+
+def test_status_points_at_sessions_when_nothing_recent_is_shown(monkeypatch) -> None:
+    monkeypatch.setattr("localghost.cli.proxy_is_running", lambda: False)
+    gone = {
+        "hostname": "gone.localhost",
+        "directory": "/src/gone",
+        "last_started": "2026-10-01T12:00:00+13:00",
+        "state": "stopped",
+        "directory_exists": False,
+    }
+    monkeypatch.setattr("localghost.cli._projects", lambda: [gone])
+
+    output = CliRunner().invoke(cli, ["status"]).output
+
+    assert "Recent projects" not in output
     assert "List all projects: localghost sessions" in output
 
 

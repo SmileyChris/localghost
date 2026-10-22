@@ -215,6 +215,18 @@ def status(as_json: bool) -> None:
 RECENT_PROJECTS = 5
 
 
+def _started_at(project: dict[str, object]) -> float:
+    """When a project last started, for ordering; unreadable sorts last.
+
+    Registry files are read leniently, so the value may be missing, malformed,
+    or a naive time from an older writer (taken as local time).
+    """
+    try:
+        return datetime.fromisoformat(str(project["last_started"])).timestamp()
+    except (TypeError, ValueError):
+        return float("-inf")
+
+
 def _proxy_status(as_json: bool = False) -> None:
     """Report only observable hub state; never reconcile the hub."""
     running = proxy_is_running()
@@ -254,29 +266,36 @@ def _proxy_status(as_json: bool = False) -> None:
             click.echo()
             routes(listed)
             idle = not listed
-    # Running projects are already under Active routes, and a project whose
-    # directory has gone cannot be restarted; the rest is `sessions`' job.
+    live = [project for project in remembered if project["state"] == "running"]
+    if live and not running:
+        # A detached app outlives a stopped hub, which is no longer routing it.
+        click.echo()
+        details(
+            [(str(p["hostname"]), str(p["directory"])) for p in live],
+            title="Running without the hub",
+            label_style="default",
+        )
+        action("Start the hub", f"{COMMAND} hub up")
+    # Running projects are covered above or under Active routes, and a project
+    # whose directory has gone cannot be restarted; the rest is `sessions`' job.
     recent = sorted(
         (
             project
             for project in remembered
             if project["state"] == "stopped" and project["directory_exists"]
         ),
-        key=lambda project: datetime.fromisoformat(str(project["last_started"])),
+        key=_started_at,
         reverse=True,
-    )
+    )[:RECENT_PROJECTS]
     if recent:
         click.echo()
         details(
-            [
-                (str(project["hostname"]), str(project["directory"]))
-                for project in recent[:RECENT_PROJECTS]
-            ],
+            [(str(p["hostname"]), str(p["directory"])) for p in recent],
             title="Recent projects",
             label_style="default",
         )
-        if len(recent) > RECENT_PROJECTS or len(recent) < len(remembered):
-            action("List all projects", f"{COMMAND} sessions")
+    if len(recent) + (0 if running else len(live)) < len(remembered):
+        action("List all projects", f"{COMMAND} sessions")
     click.echo()
     if idle:
         # A stopped hub, or one serving nothing, has one obvious next step.
@@ -612,12 +631,6 @@ def _projects() -> list[dict[str, object]]:
     return projects
 
 
-def _project_directory(project: dict[str, object]) -> str:
-    """The directory, flagged when it has gone; forgetting stays deliberate."""
-    missing = "" if project["directory_exists"] else " (missing)"
-    return f"{project['directory']}{missing}"
-
-
 def _project_mode(project: dict[str, object]) -> str:
     session = project["session"]
     if project["state"] != "running" or not isinstance(session, dict):
@@ -675,15 +688,13 @@ def _sessions_list(as_json: bool, state: str | None = None) -> None:
     is_flag=True,
     help="Print the projects and their session records as JSON.",
 )
-@click.option(
-    "state", "--running", flag_value="running", help="Only list running projects."
-)
-@click.option(
-    "state", "--stopped", flag_value="stopped", help="Only list stopped projects."
-)
-def sessions_list(as_json: bool, state: str | None) -> None:
+@click.option("running", "--running", is_flag=True, help="Only list running projects.")
+@click.option("stopped", "--stopped", is_flag=True, help="Only list stopped projects.")
+def sessions_list(as_json: bool, running: bool, stopped: bool) -> None:
     """List remembered projects and whether each one is running."""
-    _sessions_list(as_json, state)
+    if running and stopped:
+        raise click.UsageError("give --running or --stopped, not both")
+    _sessions_list(as_json, "running" if running else "stopped" if stopped else None)
 
 
 def _target_session(target: str, *, running: bool = False) -> Session:
@@ -1880,7 +1891,7 @@ def run(
             compose_dry_run(
                 project=project,
                 url=_proxy_origin(project),
-                tailnet_url=_tailnet_origin(project),
+                tailnet_url=_tailnet_origin(project, warn=True),
             )
             return
         # Same guard as the host branch below: a second run of a stack that
@@ -2262,7 +2273,7 @@ def _print_run_plan(plan: RunPlan, dry_run: bool, detach: bool = False) -> None:
         dry_run=dry_run,
         project_root=plan.project_root,
         working_directory=plan.working_directory,
-        tailnet_url=_tailnet_origin(plan.name),
+        tailnet_url=_tailnet_origin(plan.name, warn=True),
     )
     if dry_run:
         # stdout carries only the bridge YAML.
@@ -2348,13 +2359,18 @@ def _report_tailnet_origin(hostname: str, *, err: bool = False) -> None:
         info(f"Tailnet URL: {_tailnet_url(state, hostname)}", err=err)
 
 
-def _tailnet_origin(hostname: str) -> str | None:
-    """The mirrored tailnet URL, or None when hosting is off or unreadable."""
-    with suppress(TailscaleError):
+def _tailnet_origin(hostname: str, *, warn: bool = False) -> str | None:
+    """The mirrored tailnet URL, or None when hosting is off or unreadable.
+
+    A run plan warns about unreadable state; the status bar stays quiet.
+    """
+    try:
         state = load_tailscale_state()
-        if state is not None:
-            return _tailnet_url(state, hostname)
-    return None
+    except TailscaleError as exc:
+        if warn:
+            warning("Tailnet URL unavailable", [str(exc)])
+        return None
+    return _tailnet_url(state, hostname) if state is not None else None
 
 
 def _tailnet_url(state: TailscaleState, hostname: str) -> str:

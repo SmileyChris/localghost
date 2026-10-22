@@ -1232,7 +1232,9 @@ def test_tailnet_origin_report_can_target_stderr(monkeypatch) -> None:
 def test_dry_run_plan_reports_the_tailnet_origin_on_stderr(
     monkeypatch, capsys
 ) -> None:
-    monkeypatch.setattr(cli_module, "_tailnet_origin", lambda name: "https://x.wrk")
+    monkeypatch.setattr(
+        cli_module, "_tailnet_origin", lambda name, warn=False: "https://x.wrk"
+    )
     monkeypatch.setattr(cli_module, "_proxy_origin", lambda name: "http://x.localhost")
     plan = SimpleNamespace(
         name="x",

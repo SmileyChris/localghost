@@ -14,6 +14,8 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
+from .feedback import COMMAND
+
 
 class TrustError(RuntimeError):
     """The public root could not be installed or removed safely."""
@@ -254,7 +256,7 @@ class ZenNssInstaller:
         if executable is None:
             raise TrustError(
                 "Zen profile found but certutil is unavailable; install nss tools, "
-                "then run `localghost trust install` again."
+                f"then run `{COMMAND} trust install` again."
             )
         certificate = PublicCertificate.parse(self.certificate_path.read_bytes())
         nickname = self._nickname(certificate)

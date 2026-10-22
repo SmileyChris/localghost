@@ -588,6 +588,13 @@ def test_sessions_list_filters_by_state_and_drops_the_state_column(
     assert [item["name"] for item in payload] == ["shop"]
 
 
+def test_sessions_list_refuses_both_state_filters() -> None:
+    result = CliRunner().invoke(cli, ["sessions", "list", "--running", "--stopped"])
+
+    assert result.exit_code == 2
+    assert "not both" in result.output
+
+
 def test_sessions_list_flags_a_project_whose_directory_is_gone(tmp_path) -> None:
     kept = tmp_path / "kept"
     kept.mkdir()

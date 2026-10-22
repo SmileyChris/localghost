@@ -155,11 +155,9 @@ Remove one with:
 uvx localghost sessions forget <name>
 ```
 
-`sessions forget --missing` forgets every stopped project whose directory no
-longer exists, and `--all` every project that isn't running.
-
-or clear every project that isn't running with
-`uvx localghost sessions forget --all`. Forgetting drops the entry and the
+Forget every stopped project whose directory no longer exists with
+`uvx localghost sessions forget --missing`, or every project that isn't
+running with `uvx localghost sessions forget --all`. Forgetting drops the entry and the
 project's stopped session records; it never touches the project's files, and
 it refuses a project that is still running. Status codes are
 unchanged from a hub without ghost pages, so scripts and health checks
