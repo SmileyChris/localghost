@@ -297,9 +297,10 @@ its recorded process ID and a Compose session's by `docker compose ps`.
 `sessions stop` asks a host process to exit with `SIGTERM`, then force-quits it
 with `SIGKILL` after a two second grace period (ten for a foreground run, which
 tears down its own application first); it reports an error and keeps
-the record if the process somehow survives. `localghost sessions clean`
-removes records and bridges left by sessions that already exited, leaving
-running ones alone. `localghost hub down` continues to control only the hub.
+the record if the process somehow survives. A session that exits on its own
+loses its bridge the next time localghost runs, and its record (with its log)
+stays until the project runs again or is forgotten. `localghost hub down`
+continues to control only the hub.
 
 The app is available at `https://my-django-project.localhost`. Press Ctrl+C to
 stop it.

@@ -837,7 +837,11 @@ cli.add_command(
 )
 
 
-@sessions_group.command("clean")
+# Kept for scripts: reaping and `run` already clear what this removed, so all
+# it adds is discarding the last stopped run's log early.
+@sessions_group.command(
+    "clean", hidden=True, deprecated="Stopped sessions are cleared automatically."
+)
 def sessions_clean() -> None:
     """Remove records and bridges left behind by sessions that already exited."""
     success(f"Removed {clean_sessions()} stale session(s).")

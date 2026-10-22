@@ -22,6 +22,12 @@ uses [Semantic Versioning](https://semver.org/).
 - `sessions forget --missing` forgets every stopped project whose directory
   no longer exists.
 
+### Deprecated
+
+- `sessions clean` is hidden. Stopped sessions' bridges are already removed
+  automatically and their records are replaced on the next run, so it only
+  discarded logs early. It still works for existing scripts.
+
 ### Fixed
 
 - A stopped project's tailnet hostname keeps its localghost certificate, so
