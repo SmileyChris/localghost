@@ -111,12 +111,14 @@ def details(
     if _rich_terminal(err):
         if title:
             console.print(Text(title, style="bold"))
-        table = Table.grid(padding=(0, 1))
-        table.add_column(style=label_style)
-        table.add_column(style=MINT, overflow="fold")
+        # One line per row, soft-wrapped by the terminal rather than folded by
+        # rich, so fingerprints and paths survive a copy at any width.
+        width = max((len(label) for label, _ in entries), default=0)
         for label, value in entries:
-            table.add_row(label, value)
-        console.print(table)
+            console.print(
+                Text.assemble((label.ljust(width) + " ", label_style), (value, MINT)),
+                soft_wrap=True,
+            )
         return
     lines = ([title] if title else []) + [
         f"{label}: {value}" for label, value in entries
@@ -190,7 +192,7 @@ def _labeled_block(rows: list[tuple[str, str]], *, heading: str, err: bool) -> N
         table = Table.grid(padding=(0, 1))
         table.add_column(style=MINT)
         table.add_column(style="bold")
-        table.add_column(style=MINT, overflow="fold")
+        table.add_column(style=MINT, overflow="ignore")
         for label, value in rows:
             table.add_row("▌", label, value)
         console.print(table)

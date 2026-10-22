@@ -26,8 +26,8 @@ uses [Semantic Versioning](https://semver.org/).
   blank lines.
 - The `run` plan block colours its labels and values like the other status
   blocks, and includes the Tailnet URL as a row.
-- Long hints and messages no longer wrap mid-value on a terminal, so
-  fingerprints and paths copy cleanly.
+- Long hints, messages, and status values no longer wrap mid-value on a
+  terminal, so fingerprints and paths copy cleanly.
 - An unknown project name gets the same error from `restart`, `sessions
   stop`, `sessions logs`, and `sessions forget`: close matches instead of
   every remembered name, and a pointer to `localghost sessions`. `stop` only
