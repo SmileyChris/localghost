@@ -1,8 +1,9 @@
 # Integrating applications with local<span class="brand-accent">ghost</span>
 
-An application joins the hub's external Docker network and describes its
-routes using Traefik labels. The hub and application remain separate Compose
-projects.
+This page is the Compose contract: what `localghost save` writes for a Compose
+project, and what to write yourself when you want full control. An application
+joins the hub's external Docker network and describes its routes with Traefik
+labels; the hub and application remain separate Compose projects.
 
 ## Prerequisites
 

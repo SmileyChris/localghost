@@ -27,56 +27,51 @@ uvx localghost save --run
 
 ## Run, save, or do both
 
-`run` resolves and starts an application; it never writes project files. Use
-`save` to persist the detected setup without starting anything:
-
-```sh
-uvx localghost save
-```
-
-Add `--run` to persist and then start in one step:
-
-```sh
-uvx localghost save --run
-```
-
-The three forms share the same detection and planning:
-
-- `localghost run` resolves and executes;
-- `localghost save` resolves and persists; and
-- `localghost save --run` persists and then executes.
-
-`save` takes the same `--type` as `run`. Detection fills it in when omitted;
-an explicit `--type` is remembered so later runs need no flag.
-
-The project type is auto-detected, searching upward to the nearest project
-root. `--detach` runs the application in the background,
-`localghost sessions` lists projects and follows or stops their sessions, and
-`localghost restart` brings one back. See
-[Running host applications](running-host-apps.md) for the full workflow, custom
-ports, explicit type selection, `.localghost.toml` settings, detached
-sessions, and Django runner resolution.
-
-For the complete Compose contract, project naming, secondary services, and
-saved setup, see [Integrate applications](integrating-applications.md) and
+`run` starts an application without touching project files. `save` persists
+the detected setup (`.localghost.toml` for host apps, a Compose override for
+Compose projects) and `save --run` does both. See
 [Save project setup](saving-setup.md).
 
-## Optional trusted HTTPS
+## Optional extras
 
-HTTP is always available. To install Localghost's local development root and
-enable HTTPS, first install `mkcert`, then run:
+HTTP is always available. For trusted HTTPS, install `mkcert` and run:
 
 ```sh
 uvx localghost trust install
 ```
 
-See [Security and trust](security.md) for certificate handling and
-[Operations](operations.md) for lifecycle, status, ports, and upgrades.
+To reach the same routes from your Tailscale devices, run:
 
-## Optional tailnet hosting
+```sh
+uvx localghost tailscale share
+```
 
-To make the same routes available inside a Tailscale tailnet, share the hub
-through an opt-in tagged gateway and split DNS with
-`uvx localghost tailscale share`.
-The ordinary `.localhost` routes stay local. See
-[Host on a tailnet](tailscale.md) for setup, trust, and scope.
+Both are opt-in; the ordinary `.localhost` routes stay loopback-only.
+
+## Where to go next
+
+**Use localghost**
+
+- [Run host applications](running-host-apps.md): the project types localghost
+  detects, default ports, `--type`, detached sessions, and `.localghost.toml`.
+- [Save project setup](saving-setup.md): what `save` writes, custom commands,
+  and updating a saved setup safely.
+- [Integrate applications](integrating-applications.md): the Compose contract
+  behind it all, for hand-written labels and secondary services.
+- [Host on a tailnet](tailscale.md): the same routes on your Tailscale
+  devices through an opt-in gateway and split DNS.
+
+**Operate localghost**
+
+- [Operations](operations.md): hub lifecycle, status, ports, trusted HTTPS,
+  and upgrades.
+- [Troubleshooting](troubleshooting.md): symptoms and fixes, starting with the
+  hub status and logs.
+- [Security and trust](security.md): what the loopback-only design does and
+  does not protect, and how certificates are handled.
+- [Architecture](architecture.md): how the hub, bridges, and request path fit
+  together.
+
+**Develop localghost**
+
+- [Development](development.md): repository layout, checks, and releases.

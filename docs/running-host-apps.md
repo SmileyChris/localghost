@@ -1,8 +1,10 @@
 # Running host applications with local<span class="brand-accent">ghost</span>
 
-`localghost run` lets you serve an application behind the hub without a
-Dockerfile or Compose file, or hand an existing Compose project to
-`docker compose up` with the hub wired in first.
+`localghost run` serves an application behind the hub straight from its
+checkout: a Django, Vite, PHP, or static site needs no Dockerfile or Compose
+file, and an existing Compose project is handed to `docker compose up` with
+the hub wired in first. This page covers detection, ports, options, and
+background sessions.
 
 ## Project types
 

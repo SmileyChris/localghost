@@ -7,7 +7,8 @@ numbers:
 - `https://admin.storefront.localhost`
 - `https://blog.localhost`
 
-Just a single local hub routing all your development apps by hostname.
+One loopback-only [Traefik](https://traefik.io/traefik/) hub routes every
+development app by hostname, so nothing needs its own port.
 
 ```
           ▒█████████████▒
@@ -29,10 +30,6 @@ Just a single local hub routing all your development apps by hostname.
  ░██▒▒▒▒███████▓▒▒▒▒███████▒▒▒▒▒██    ░▒▒▒
   ▒█████▓     ▒█████▓     ▒██████
 ```
-
-This is local-development infrastructure, not a production proxy. It runs the
-hub — a single, loopback-only [Traefik](https://traefik.io/traefik/) container
-— as the `localghost` Compose project on the `localghost` Docker network.
 
 ## Quick start
 
@@ -69,38 +66,37 @@ uvx localghost save
 
 ## Hub and background runs
 
-Start or reconcile only the shared hub with:
+The hub starts on demand, but you can manage it directly:
 
 ```sh
-uvx localghost hub up
+uvx localghost hub up      # start or reconcile the hub
+uvx localghost status      # inspect hub state and routes
+uvx localghost hub down    # remove it
 ```
 
-Open [http://traefik.localhost](http://traefik.localhost) for its dashboard,
-inspect it with `uvx localghost status`, and remove it with
-`uvx localghost hub down`.
+Its dashboard is at [http://traefik.localhost](http://traefik.localhost).
 
-Run it in the background with `--detach` and manage it afterwards:
-
-```sh
-uvx localghost run --detach
-uvx localghost sessions
-uvx localghost sessions logs NAME -f
-uvx localghost restart NAME
-uvx localghost sessions stop NAME
-```
-
-See [Saving project setup](docs/saving-setup.md) for `.localghost.toml`, Compose
-overrides, custom commands, explicit type selection, and safe updates.
-
-To make the same project and secondary-service hostnames available inside a
-Tailscale tailnet, see [Tailnet hosting](docs/tailscale.md). It uses an opt-in
-tagged gateway and split DNS; the ordinary `.localhost` routes stay local.
+Add `--detach` to `run` to keep an application going in the background, then
+use `sessions`, `sessions logs NAME -f`, `restart NAME`, and
+`sessions stop NAME` to manage it.
 
 ## Documentation
 
-The [localghost documentation](docs/index.md) covers application integration,
-saving setup, host-native servers, HTTPS, operations, troubleshooting, security,
-architecture, and development.
+Start at the [documentation home](docs/index.md), or jump straight in:
 
-For a local documentation preview, install the development dependencies and run
-`uv run zensical serve`.
+- [Run host applications](docs/running-host-apps.md): project types, ports,
+  detached sessions, and `.localghost.toml`.
+- [Save project setup](docs/saving-setup.md): what `save` writes and how to
+  update it safely.
+- [Integrate applications](docs/integrating-applications.md): the Compose
+  contract, labels, and secondary services.
+- [Host on a tailnet](docs/tailscale.md): the same URLs on your Tailscale
+  devices via an opt-in gateway.
+- [Operations](docs/operations.md), [Troubleshooting](docs/troubleshooting.md),
+  [Security and trust](docs/security.md), and
+  [Architecture](docs/architecture.md): running, fixing, and understanding the
+  hub.
+- [Development](docs/development.md): working on localghost itself.
+
+Preview the docs locally with `uv run zensical serve` after installing the
+development dependencies.

@@ -1,5 +1,9 @@
 # Developing local<span class="brand-accent">ghost</span>
 
+This page is for working on localghost itself: the repository layout, the
+checks to run before a change, and how releases are cut. Using localghost
+needs none of it; start at the [home page](index.md) instead.
+
 ## Repository layout
 
 - `compose.yaml` is the stable public interface and must remain self-contained.

@@ -1,7 +1,9 @@
 # Operating local<span class="brand-accent">ghost</span>
 
-Application commands must not include the hub Compose file. The hub and
-applications are intentionally separate lifecycle domains.
+This page covers the hub's own lifecycle: starting and reconciling it, checking
+its state, enabling trusted HTTPS, changing ports, and upgrading. Applications
+have their own lifecycle and must never include the hub Compose file; the two
+are intentionally separate.
 
 ## Start or reconcile
 
