@@ -5,6 +5,8 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [4.5.1] - 2026-10-30
+
 ### Fixed
 
 - `restart` brings a project back with the `--type`, `--project-root`,
