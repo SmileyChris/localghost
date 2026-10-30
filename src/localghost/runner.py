@@ -854,6 +854,7 @@ def execute(
     public_origin: str | None = None,
     secondary_origin: str | None = None,
     status_bar: bool = True,
+    spawn: Callable[..., subprocess.Popen[bytes]] | None = None,
 ) -> int:
     bridge_attempted = False
     child: subprocess.Popen[bytes] | None = None
@@ -998,10 +999,9 @@ def execute(
                     ),
                 )
             try:
-                child = subprocess.Popen(
+                child = (spawn or _spawn_in_own_session)(
                     list(plan.launch),
                     cwd=plan.working_directory or cwd or Path.cwd(),
-                    start_new_session=True,
                 )
             except OSError as exc:
                 raise click.ClickException(
@@ -1065,6 +1065,12 @@ def execute(
         # down, so the diagnosis is the last thing left on screen.
         raise click.ClickException(stopped[0])
     return status
+
+
+def _spawn_in_own_session(
+    launch: list[str], *, cwd: Path
+) -> subprocess.Popen[bytes]:
+    return subprocess.Popen(launch, cwd=cwd, start_new_session=True)
 
 
 def _address(found: ports.Listener) -> str:

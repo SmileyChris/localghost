@@ -18,6 +18,10 @@ import click
 _NO_IPV6 = frozenset({errno.EAFNOSUPPORT, errno.EADDRNOTAVAIL, errno.EPROTONOSUPPORT})
 
 
+class PortInUse(click.ClickException):
+    """A port that has to be used exactly is taken."""
+
+
 def port_available(port: int) -> bool:
     """Is `port` free in both address families?
 
@@ -54,7 +58,7 @@ def select_port(port: int, strict: bool) -> int:
     if port_available(port):
         return port
     if strict:
-        raise click.ClickException(in_use_message(port))
+        raise PortInUse(in_use_message(port))
     for candidate in range(port + 1, min(port + WALK, 65536)):
         if port_available(candidate):
             return candidate

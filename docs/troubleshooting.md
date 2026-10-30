@@ -151,8 +151,9 @@ container and remove a stale bridge explicitly:
 docker rm -f <container>
 ```
 
-The foreground command cleans up its bridge on exit, Ctrl+C, and SIGTERM. A
-hard kill or Docker failure can still leave a stale container.
+The foreground command cleans up its bridge on exit, Ctrl+C, and SIGTERM.
+Detaching or closing the terminal keeps it, along with the application, until
+`sessions stop`. A hard kill or Docker failure can still leave a stale container.
 
 ## Framework rejects an otherwise working route
 

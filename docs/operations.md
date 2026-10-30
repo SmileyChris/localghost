@@ -137,10 +137,11 @@ arrow keys (or `j`/`k`) move, Enter restarts the selected project, Delete
 (or Backspace) forgets it, `u` undoes the last forget, and `q` leaves.
 When output is piped it prints a plain listing instead.
 
-A Compose project running in the foreground also detaches: press Ctrl+Z, or
-close the terminal, and its containers keep running as if it had been started
-with `--detach`. `restart` then brings it back detached. Without a terminal,
-such as in a script, a hangup stops the stack instead.
+A foreground run from a terminal detaches: press Ctrl+Z, or close the terminal,
+and it keeps running as if it had been started with `--detach`. `restart` then
+brings it back detached, and `sessions attach <name>` brings a host application
+back into a terminal. Without a terminal, such as in a script, a run ends with
+its caller instead.
 
 `uvx localghost sessions` lists every remembered project with whether it is
 running, and how:

@@ -44,7 +44,7 @@ uvx localghost run
 Localghost detects Django, Vite, Astro, CakePHP, Laravel, plain PHP, static
 HTML, and Docker Compose projects, starts the shared hub when needed, and
 keeps the local URL visible while the application runs. Press Ctrl+C to stop
-the application; on a Compose project, Ctrl+Z detaches and leaves it running.
+the application, or Ctrl+Z to detach and leave it running.
 
 An unconfigured Compose project asks you to save its routing setup first:
 
@@ -77,7 +77,7 @@ uvx localghost hub down    # remove it
 Its dashboard is at [http://traefik.localhost](http://traefik.localhost).
 
 Add `--detach` to `run` to keep an application going in the background, then
-use `sessions`, `sessions logs NAME -f`, `restart NAME`, and
+use `sessions`, `sessions logs NAME -f`, `sessions attach NAME`, `restart NAME`, and
 `sessions stop NAME` to manage it.
 
 ## Documentation

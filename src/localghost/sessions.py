@@ -1,7 +1,9 @@
 """Filesystem-backed metadata for running Localghost applications.
 
-Detached runs record the application's process group; foreground runs record
-the localghost process itself, so other terminals can see and stop them.
+`run --detach` records the application's process group. A foreground run
+records the process that owns it, localghost or its supervisor, so other
+terminals can see and stop it; `socket` marks a supervised one, which `detached`
+then says whether a terminal is attached to.
 """
 
 from __future__ import annotations
@@ -22,6 +24,8 @@ import click
 from .feedback import COMMAND, info, warning
 from .paths import state_directory
 
+_STOP_GRACE_SECONDS = 10
+
 
 @dataclass
 class Session:
@@ -39,6 +43,8 @@ class Session:
     detached: bool = True
     # Ran in its own network namespace, so `port` is only the host side.
     isolated: bool = False
+    # Where a supervised run's terminal connects; empty for any other.
+    socket: str = ""
 
     def as_dict(self) -> dict[str, object]:
         return self.__dict__.copy()
@@ -90,6 +96,7 @@ def create(
     bridge_yaml: str = "",
     detached: bool = True,
     isolated: bool = False,
+    socket: str = "",
 ) -> Session:
     session = Session(
         uuid.uuid4().hex[:8],
@@ -105,6 +112,7 @@ def create(
         bridge_yaml,
         detached,
         isolated,
+        socket,
     )
     save(session)
     return session
@@ -164,15 +172,71 @@ def discard(session: Session) -> None:
     _path(session.id).unlink(missing_ok=True)
 
 
+def _read(session_id: str) -> Session | None:
+    try:
+        payload = json.loads(_path(session_id).read_text(encoding="utf-8"))
+        return Session(**payload)
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def mark_detached(session_id: str, detached: bool) -> None:
+    """Note whether a terminal is attached; a stopped record stays gone."""
+    session = _read(session_id)
+    if session is not None:
+        session.detached = detached
+        save(session)
+
+
+def mark_ended(session_id: str) -> None:
+    """Keep a finished run's record, with its log, once its route has gone."""
+    session = _read(session_id)
+    if session is not None:
+        session.pid = None
+        session.bridge_project = None
+        session.bridge_yaml = ""
+        session.socket = ""
+        session.detached = True
+        save(session)
+
+
+def _remove(session: Session) -> None:
+    # A supervisor that was killed outright left its socket behind.
+    if session.socket:
+        Path(session.socket).unlink(missing_ok=True)
+    _path(session.id).unlink(missing_ok=True)
+
+
+def discard_by_id(session_id: str) -> None:
+    _path(session_id).unlink(missing_ok=True)
+
+
+def socket_path_for(name: str) -> str:
+    """A path for a supervisor's socket, kept short for the 104-byte limit.
+
+    An explicit state directory wins, so an isolated test never shares a
+    directory with the real sessions.
+    """
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime and not os.environ.get("LOCALGHOST_STATE_DIR"):
+        directory = Path(runtime) / "localghost"
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    else:
+        directory = state_dir()
+        directory.mkdir(parents=True, exist_ok=True)
+    return str(directory / f"{name[:32]}-{uuid.uuid4().hex[:8]}.sock")
+
+
 def stop(session: Session) -> None:
     if session.mode == "host" and session.pid and alive(session):
-        # A detached record holds the application's process group. A
-        # foreground one holds the localghost process, which tears down its
-        # application and bridge on SIGTERM, so it gets longer to do that.
-        kill = os.killpg if session.detached else os.kill
+        # A `run --detach` record holds the application's process group. Any
+        # other holds the process that owns the application, which tears it
+        # and its bridge down on SIGTERM. Only an application that ignores the
+        # signal waits out the grace period; the rest return when it exits.
+        kill = os.killpg if session.detached and not session.socket else os.kill
         with suppress(ProcessLookupError, PermissionError):
             kill(session.pid, signal.SIGTERM)
-        deadline = time.monotonic() + (2 if session.detached else 10)
+        deadline = time.monotonic() + _STOP_GRACE_SECONDS
         while alive(session) and time.monotonic() < deadline:
             time.sleep(0.05)
         if alive(session):
@@ -193,7 +257,7 @@ def stop(session: Session) -> None:
         )
     if session.bridge_project:
         _stop_bridge(session)
-    _path(session.id).unlink(missing_ok=True)
+    _remove(session)
 
 
 def clean(name: str | None = None) -> int:
@@ -203,7 +267,7 @@ def clean(name: str | None = None) -> int:
         if (name is None or session.name == name) and not alive(session):
             if session.bridge_project:
                 _stop_bridge(session)
-            _path(session.id).unlink(missing_ok=True)
+            _remove(session)
             removed += 1
     return removed
 

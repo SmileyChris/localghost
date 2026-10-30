@@ -113,6 +113,10 @@ it. Nothing else on the network can reach that address: the hub can, while the
 LAN and any tailnet address cannot. The relay lives only as long as the
 foreground run.
 
+A foreground run from a terminal keeps a Unix socket, readable only by you, in
+`$XDG_RUNTIME_DIR/localghost` or the state directory. Anything that can connect
+can type into the application, as your terminal does.
+
 This is narrower than the alternative, a wildcard bind, which exposes the
 application port to the LAN. Where a relay is available, the generated Vite and
 Astro commands therefore no longer ask for `--host 0.0.0.0`; they still do

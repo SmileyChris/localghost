@@ -7,18 +7,32 @@ uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- Ctrl+Z detaches a foreground Compose `run`: the containers keep running and
-  it is then managed like `run --detach`. The status bar shows the key.
+- Ctrl+Z detaches a foreground `run`: the application keeps running and is then
+  managed like `run --detach`. The status bar shows the key.
+- `sessions attach NAME` brings a running host application back into a terminal,
+  and plain `run` does the same for a detached one. Typing reaches the
+  application unless it was started with `--detach`, which shows output only.
+- Foreground runs from a terminal are logged, so `sessions logs` works on them.
 
 ### Changed
 
-- Closing the terminal of a foreground Compose `run` now detaches it, leaving a
-  session to stop or follow. Without a terminal, a hangup stops the stack.
+- Closing the terminal of a foreground `run` now detaches it, leaving a session
+  to stop or follow. Without a terminal, a run still ends with its caller.
+- A host run from a terminal puts the application on a pseudo-terminal one row
+  shorter than yours, owned by a background process. It now has a controlling
+  terminal, so prompts through `/dev/tty` work. `LOCALGHOST_LEGACY_RUN=1` goes
+  back to the old way.
+- `sessions stop` gives every host application ten seconds to exit, up from two
+  for `--detach` runs. It still returns as soon as the application exits.
+- Session records gain a field, so an older localghost lists new ones as
+  unreadable.
 - Compose's own shortcut menu is off under `localghost run`, as it drew over
   the status bar.
 
 ### Fixed
 
+- `run` on a project whose fixed port is held by its own running copy says it is
+  already running instead of reporting a port conflict.
 - Ctrl+C on a foreground Compose `run` reports `Stopped` and exits 130 instead
   of aborting, and a repeat after two seconds forces the stop.
 

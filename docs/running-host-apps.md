@@ -215,7 +215,7 @@ terminal, so it stays visible while the application's own output scrolls
 above it:
 
 ```
- localghost  ⠹ starting hub  https://my-django-project.localhost   Ctrl+C to stop
+ localghost  ⠹ starting hub  https://my-django-project.localhost   Ctrl+C to stop  ·  Ctrl+Z to detach
 ```
 
 The bar appears immediately, before the hub is reconciled, and names the step
@@ -270,14 +270,31 @@ localghost sessions list --running
 localghost sessions list --json
 localghost sessions logs NAME
 localghost sessions logs NAME -f
+localghost sessions attach NAME
 localghost restart NAME
 localghost sessions stop NAME
 localghost sessions stop --all
 ```
 
-A foreground run is recorded too, for as long as it runs, so `sessions`
-shows it and `sessions stop` or `restart` from another terminal can end it.
-Its output stays in its own terminal, so `sessions logs` has none to show.
+Press Ctrl+Z in a foreground run to leave the application running and get your
+shell back. Closing the terminal does the same. The application never notices,
+because a run started from a terminal lives in a small background process with
+the application on a pseudo-terminal, and your terminal is only connected to it.
+`localghost sessions attach NAME`, or plain `localghost run` in the project,
+brings it back. A foreground run is recorded and logged like any other, so
+`sessions`, `sessions logs`, `sessions stop`, and `restart` work on it from
+another terminal.
+
+Ctrl+C and Ctrl+Z are not passed to the application, and everything else you
+type is. Attaching to an application started with `--detach` shows its output
+and honours both keys, but it has no terminal to type into; use
+`restart NAME --foreground` when you need one. `restart` brings a project back
+the way you last left it, so a run you detached comes back with `--detach`.
+
+A run with no terminal, such as one in a script or with its output piped, stays
+in its own process and ends with it, so it cannot be left behind by accident.
+Set `LOCALGHOST_LEGACY_RUN=1` to run that way from a terminal too, if an
+application misbehaves on a pseudo-terminal.
 
 Sessions are addressed by project name; a session ID works too, and wins
 when both match. `sessions list` shows every remembered project, running
@@ -297,8 +314,8 @@ its recorded process ID and a Compose session's by `docker compose ps`.
 `docker compose logs`; add `-f` to keep following either kind of session.
 
 `sessions stop` asks a host process to exit with `SIGTERM`, then force-quits it
-with `SIGKILL` after a two second grace period (ten for a foreground run, which
-tears down its own application first); it reports an error and keeps
+with `SIGKILL` after a ten second grace period, returning as soon as it exits;
+it reports an error and keeps
 the record if the process somehow survives. A session that exits on its own
 loses its bridge the next time localghost runs, and its record (with its log)
 stays until the project runs again or is forgotten. `localghost hub down`

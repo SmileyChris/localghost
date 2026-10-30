@@ -25,6 +25,7 @@ from typing import NoReturn
 import click
 
 from . import forwarder, picker, registry, statusbar
+from .attach import Outcome, attach, run_supervised, supervised_run_available
 from .compose import resolve_compose, routing_problem
 from .config import (
     CONFIG_NAME,
@@ -69,6 +70,7 @@ from .generator import (
     write_new,
 )
 from .paths import state_directory
+from .ports import PortInUse
 from .roots import discover_config, resolve_root
 from .routes import active_routes, proxy_is_running
 from .runner import (
@@ -759,7 +761,7 @@ def sessions_logs(target: str, follow: bool) -> None:
         if result.returncode:
             raise click.exceptions.Exit(result.returncode)
         return
-    if not session.detached:
+    if not session.detached and not session.log:
         click.echo(
             f"{session.name} is running in the foreground in another terminal; "
             "its output is there, not in a log."
@@ -769,18 +771,61 @@ def sessions_logs(target: str, follow: bool) -> None:
     if not log.exists():
         click.echo(f"{session.name} has no log yet.")
         return
-    with log.open("r", encoding="utf-8", errors="replace") as handle:
-        click.echo(handle.read(), nl=False)
+    with log.open("r", encoding="utf-8", errors="replace", newline="") as handle:
+        click.echo(_readable_log(handle.read()), nl=False)
         if not follow:
             return
         while True:
             line = handle.readline()
             if line:
-                click.echo(line, nl=False)
+                click.echo(_readable_log(line), nl=False)
                 continue
             if not session_alive(session):
                 return
             time.sleep(0.2)
+
+
+_LOG_CONTROL = re.compile(
+    r"\x1b\[[0-9;?]*[ -/]*[@-ln-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[78=>c]"
+)
+
+
+def _readable_log(text: str) -> str:
+    """Keep a log's colour but not the cursor movement a terminal run records."""
+    return _LOG_CONTROL.sub("", text).replace("\r\n", "\n")
+
+
+@sessions_group.command("attach")
+@click.argument("target", shell_complete=_complete_project_name)
+def sessions_attach(target: str) -> None:
+    """Bring a running host session into this terminal.
+
+    Ctrl+Z leaves it running again and Ctrl+C stops it. An application started
+    with `run --detach` shows its output but cannot be typed into.
+    """
+    session = _target_session(target, running=True)
+    if session.mode == "compose":
+        raise click.ClickException(
+            f"{session.name} is a Compose project; follow it with: "
+            f"{COMMAND} sessions logs {session.name} -f"
+        )
+    if not session_alive(session):
+        raise click.ClickException(
+            f"{session.name} is not running; start it with: "
+            f"{COMMAND} restart {session.name}"
+        )
+    if not session.socket and not session.detached:
+        raise click.ClickException(
+            f"{session.name} is running in another terminal without a "
+            f"background process to attach to; stop it with: "
+            f"{COMMAND} sessions stop {session.name}"
+        )
+    if not supervised_run_available():
+        raise click.ClickException(
+            f"attaching needs a terminal; read its output with: "
+            f"{COMMAND} sessions logs {session.name}"
+        )
+    _attach_session(session)
 
 
 @sessions_group.command("stop")
@@ -1886,6 +1931,53 @@ def run(
     command: tuple[str, ...],
 ) -> None:
     """Run a configured host or Compose application behind the hub."""
+    try:
+        _run(
+            name, working_directory, selected_type, root, port, detach, config,
+            isolate, dry_run, no_status_bar, command,
+        )  # fmt: skip
+    except PortInUse:
+        # A project that names its own port finds it taken by its own running
+        # copy, which is the "already running" case rather than a conflict.
+        running = _live_host_session_in(working_directory or Path.cwd())
+        if running is None:
+            raise
+        _already_serving(
+            running.name,
+            Path(running.cwd),
+            refuse=bool(command) or isolate or any(
+                value is not None for value in (name, selected_type, port, config)
+            ),
+            may_attach=not dry_run,
+        )  # fmt: skip
+
+
+def _live_host_session_in(directory: Path) -> Session | None:
+    return next(
+        (
+            item
+            for item in sessions()
+            if item.mode == "host"
+            and Path(item.cwd).resolve() == directory.resolve()
+            and session_alive(item)
+        ),
+        None,
+    )
+
+
+def _run(
+    name: str | None,
+    working_directory: Path | None,
+    selected_type: str | None,
+    root: Path | None,
+    port: int | None,
+    detach: bool,
+    config: Path | None,
+    isolate: bool,
+    dry_run: bool,
+    no_status_bar: bool,
+    command: tuple[str, ...],
+) -> None:
     flags = registry.RunFlags(
         type=selected_type,
         root=str(root.resolve()) if root else None,
@@ -1944,6 +2036,7 @@ def run(
         plan.name,
         plan.project_root or resolved.cwd,
         refuse=resolved.explicit_run_settings,
+        may_attach=not dry_run,
     ):
         return
     if dry_run:
@@ -1966,6 +2059,20 @@ def run(
     _record_registry(resolved, detached=detach, flags=flags)
     if detach:
         _detach_host(plan, resolved.cwd)
+        return
+    if supervised_run_available():
+        _finish_attached(
+            plan.name,
+            run_supervised(
+                plan,
+                lambda: _run_proxy("up", https_enabled=_https_configured()),
+                cwd=resolved.cwd,
+                log=_session_log_path(plan.name),
+                public_origin=_proxy_origin(plan.name),
+                secondary_origin=_tailnet_origin(plan.name),
+                status_bar=not no_status_bar,
+            ),
+        )
         return
     # The record lets other terminals see this run, and stop or take it over.
     session = create_session(
@@ -1997,7 +2104,20 @@ def run(
         raise click.exceptions.Exit(status)
 
 
-def _already_serving(name: str, directory: Path, *, refuse: bool) -> bool:
+def _finish_attached(name: str, outcome: Outcome) -> None:
+    if outcome.status is None:
+        _report_detached(name, attachable=True)
+        return
+    if outcome.message:
+        raise click.ClickException(outcome.message)
+    _report_application_exit(name, outcome.status)
+    if outcome.status:
+        raise click.exceptions.Exit(outcome.status)
+
+
+def _already_serving(
+    name: str, directory: Path, *, refuse: bool, may_attach: bool = False
+) -> bool:
     """Report a live session already serving `name`; True if one is.
 
     The same name from another directory (a second worktree, say) would
@@ -2012,8 +2132,28 @@ def _already_serving(name: str, directory: Path, *, refuse: bool) -> bool:
             "copy under another name with --name, or stop that one with: "
             f"{COMMAND} sessions stop {name}"
         )
+    if (
+        may_attach
+        and not refuse
+        and session.detached
+        and session.mode == "host"
+        and supervised_run_available()
+    ):
+        _attach_session(session)
+        return True
     _report_live_session(session, refuse=refuse)
     return True
+
+
+def _attach_session(session: Session) -> None:
+    _finish_attached(
+        session.name,
+        attach(
+            session,
+            public_origin=_proxy_origin(session.name),
+            secondary_origin=_tailnet_origin(session.name),
+        ),
+    )
 
 
 def _report_live_session(session: Session, *, refuse: bool) -> None:
@@ -2025,7 +2165,8 @@ def _report_live_session(session: Session, *, refuse: bool) -> None:
     name = session.name
     message = (
         f"{name} is already running; restart it with: {COMMAND} restart "
-        f"{name}, view logs with: {COMMAND} sessions logs {name}, or stop "
+        f"{name}, view logs with: {COMMAND} sessions logs {name}, "
+        f"bring it here with: {COMMAND} sessions attach {name}, or stop "
         f"it with: {COMMAND} sessions stop {name}"
     )
     if refuse:
@@ -2276,7 +2417,7 @@ def _run_compose(
                 bar.status("detaching")
             problem = _settle_detached_compose(cwd, project, command)
     if status is None:
-        _report_detached_compose(project, public_origin, problem)
+        _report_detached(project, problem=problem)
         return
     if status:
         _report_application_exit(project, status)
@@ -2315,14 +2456,18 @@ def _settle_detached_compose(
     return settled.stderr.strip() if settled.returncode else None
 
 
-def _report_detached_compose(
-    project: str, public_origin: str, problem: str | None
+def _report_detached(
+    project: str, *, attachable: bool = False, problem: str | None = None
 ) -> None:
     # A closed terminal is one way to get here, and has nowhere to report to.
     with suppress(OSError):
         sign_off()
-        success(f"Detached from {project}; it keeps running at {public_origin}.")
+        success(
+            f"Detached from {project}; it keeps running at {_proxy_origin(project)}."
+        )
         info(f"Follow its output: {COMMAND} sessions logs {project} -f")
+        if attachable:
+            info(f"Bring it back here: {COMMAND} sessions attach {project}")
         info(f"Stop it: {COMMAND} sessions stop {project}")
         if problem:
             warning("Compose could not finish starting the stack", [problem])
@@ -2361,7 +2506,14 @@ def _print_run_plan(plan: RunPlan, dry_run: bool, detach: bool = False) -> None:
             f"with {COMMAND} sessions."
         )
     else:
-        info("Starting the application. Press Ctrl+C to stop it.")
+        info(
+            "Starting the application. Press Ctrl+C to stop it"
+            + (
+                ", or Ctrl+Z to leave it running."
+                if supervised_run_available()
+                else "."
+            )
+        )
 
 
 def _reclaim_route(container_id: str, name: str) -> None:

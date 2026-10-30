@@ -128,7 +128,6 @@ def test_manage_group_and_attach_command_are_gone() -> None:
     for arguments in (
         ["manage"],
         ["manage", "list"],
-        ["sessions", "attach", "abc123"],
     ):
         result = CliRunner().invoke(cli, arguments)
 
@@ -371,8 +370,9 @@ def test_stop_escalates_to_sigkill_when_sigterm_is_ignored(
     signals = []
     clock = iter(float(tick) for tick in range(0, 1000))
     # Alive through SIGTERM and the grace period, dead once SIGKILL lands.
-    liveness = iter([True, True, True, True, False])
-    monkeypatch.setattr(session_store, "alive", lambda item: next(liveness))
+    monkeypatch.setattr(
+        session_store, "alive", lambda item: len(signals) < 2
+    )
     monkeypatch.setattr(
         session_store.os, "killpg", lambda pid, signum: signals.append(signum)
     )
