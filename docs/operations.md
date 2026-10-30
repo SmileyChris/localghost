@@ -120,9 +120,13 @@ uvx localghost restart <name>
 ```
 
 `restart` stops the project first if it is running, then starts it the way it
-last ran: in the foreground or detached. `--foreground` or `--detach` picks
-the other way, so `restart <name> --foreground` brings a background app into
-this terminal. A project running in the foreground of another terminal is
+last ran: in the foreground or detached, with the same `--type`,
+`--project-root`, `--port`, `--config`, `--isolate`, and command. Flags given
+to `restart` replace the remembered ones and are remembered in turn, and a new
+`--type` also drops the remembered port, isolation, and command. `localghost
+save` clears them, because the config it writes now holds them. `--foreground`
+or `--detach` picks the other way, so `restart <name> --foreground` brings a
+background app into this terminal. A project running in the foreground of another terminal is
 stopped and taken over here after you confirm; without a terminal to confirm
 on, `restart` refuses and prints the `sessions stop` command instead. `<name>`
 can also be a session ID.

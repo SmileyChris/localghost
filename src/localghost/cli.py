@@ -503,7 +503,24 @@ def _restart_entry(
     # The recorded name, not whatever the directory would derive: a project
     # first run with --name must come back under that name.
     overrides["name"] = overrides["name"] or entry.name
-    ctx.invoke(run, working_directory=directory, **overrides)
+    flags = entry.flags
+    if overrides["selected_type"] is not None:
+        # A different type is a different application; what was told to the
+        # old one (a command above all) would only conflict with it.
+        flags = replace(flags, type=None, port=None, isolate=False, command=())
+    overrides["selected_type"] = overrides["selected_type"] or flags.type
+    overrides["port"] = overrides["port"] or flags.port
+    if overrides["root"] is None and flags.root is not None:
+        overrides["root"] = Path(flags.root)
+    if overrides["config"] is None and flags.config is not None:
+        overrides["config"] = Path(flags.config)
+    ctx.invoke(
+        run,
+        working_directory=directory,
+        isolate=flags.isolate,
+        command=flags.command,
+        **overrides,
+    )
 
 
 @cli.command()
@@ -1867,6 +1884,14 @@ def run(
     command: tuple[str, ...],
 ) -> None:
     """Run a configured host or Compose application behind the hub."""
+    flags = registry.RunFlags(
+        type=selected_type,
+        root=str(root.resolve()) if root else None,
+        port=port,
+        config=str(config.resolve()) if config else None,
+        isolate=isolate,
+        command=command,
+    )
     resolved = _resolve_application(
         working_directory=working_directory,
         name=name,
@@ -1903,7 +1928,7 @@ def run(
             return
         reap_sessions()
         clean_sessions(project)
-        _record_registry(resolved, detached=detach)
+        _record_registry(resolved, detached=detach, flags=flags)
         _run_compose(
             resolved.root,
             resolved.name,
@@ -1936,7 +1961,7 @@ def run(
     _print_run_plan(plan, dry_run=False, detach=detach)
     reap_sessions()
     clean_sessions(plan.name)
-    _record_registry(resolved, detached=detach)
+    _record_registry(resolved, detached=detach, flags=flags)
     if detach:
         _detach_host(plan, resolved.cwd)
         return
@@ -2694,11 +2719,15 @@ def _state_directory() -> Path:
 
 
 def _record_registry(
-    resolved: ResolvedApplication, *, detached: bool | None = None
+    resolved: ResolvedApplication,
+    *,
+    detached: bool | None = None,
+    flags: registry.RunFlags | None = None,
 ) -> None:
     """Remember this project so the hub can serve its ghost page later.
 
-    `detached` is how it is being started; a save leaves it as `None`.
+    `detached` is how it is being started and `flags` what `run` was told; a
+    save passes neither.
     """
     if resolved.selected_type == "compose":
         registry.record(
@@ -2707,6 +2736,7 @@ def _record_registry(
             "compose",
             detached=detached,
             isolated=None if detached is None else False,
+            flags=flags,
         )
     elif resolved.plan is not None:
         registry.record(
@@ -2715,6 +2745,7 @@ def _record_registry(
             resolved.plan.type,
             detached=detached,
             isolated=None if detached is None else resolved.plan.app_port is not None,
+            flags=flags,
         )
 
 

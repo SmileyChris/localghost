@@ -5,6 +5,13 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `restart` brings a project back with the `--type`, `--project-root`,
+  `--port`, `--config`, `--isolate`, and command it was last run with, instead
+  of detecting afresh and failing when there was nothing to detect. Projects
+  last run before this release have nothing remembered until their next `run`.
+
 ## [4.5.0] - 2026-10-23
 
 ### Changed
