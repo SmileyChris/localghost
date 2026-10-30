@@ -5,6 +5,23 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Ctrl+Z detaches a foreground Compose `run`: the containers keep running and
+  it is then managed like `run --detach`. The status bar shows the key.
+
+### Changed
+
+- Closing the terminal of a foreground Compose `run` now detaches it, leaving a
+  session to stop or follow. Without a terminal, a hangup stops the stack.
+- Compose's own shortcut menu is off under `localghost run`, as it drew over
+  the status bar.
+
+### Fixed
+
+- Ctrl+C on a foreground Compose `run` reports `Stopped` and exits 130 instead
+  of aborting, and a repeat after two seconds forces the stop.
+
 ## [4.5.1] - 2026-10-30
 
 ### Fixed

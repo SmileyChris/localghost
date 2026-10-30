@@ -1,5 +1,6 @@
 """Shared pytest isolation fixtures."""
 
+import subprocess
 
 import pytest
 
@@ -42,3 +43,14 @@ def mkcert_available(monkeypatch: pytest.MonkeyPatch) -> None:
     pass on a machine with mkcert and fail on one without.
     """
     monkeypatch.setattr("localghost.cli.require_mkcert", lambda: "mkcert")
+
+
+@pytest.fixture(autouse=True)
+def _foreground_compose_through_subprocess_run(monkeypatch):
+    """Send a foreground `compose up` where tests fake it, not to real Docker."""
+    monkeypatch.setattr(
+        "localghost.cli.attached_compose_up",
+        lambda command, *, cwd: subprocess.run(
+            command, cwd=cwd, check=False
+        ).returncode,
+    )

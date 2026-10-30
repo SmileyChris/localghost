@@ -7,13 +7,15 @@ import hashlib
 import json
 import os
 import re
+import select
 import shutil
 import signal
 import subprocess
 import sys
+import termios
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -1240,6 +1242,168 @@ def _install_termination_handlers() -> dict[int, signal.Handlers]:
 def _restore_termination_handlers(old_handlers: dict[int, signal.Handlers]) -> None:
     for signum, handler in old_handlers.items():
         signal.signal(signum, handler)
+
+
+_DETACH_KEY = b"\x1a"  # Ctrl+Z
+_KEY_POLL_SECONDS = 0.1
+_HANGUP_GRACE_SECONDS = 5.0
+
+
+class _Hangup(Exception):
+    """The terminal went away."""
+
+
+def detach_key_available() -> bool:
+    """Can this process read a key from the terminal it is in front of?"""
+    try:
+        return (
+            sys.stdin.isatty()
+            and sys.stdout.isatty()
+            and os.tcgetpgrp(sys.stdin.fileno()) == os.getpgrp()
+        )
+    except (AttributeError, OSError, ValueError):
+        return False
+
+
+@contextlib.contextmanager
+def _claim_detach_key() -> Iterator[int | None]:
+    """Take Ctrl+Z from the terminal, yielding the descriptor to read it on.
+
+    It has to arrive as a byte. As SIGTSTP it would also stop a `uvx` or
+    `uv run` parent, which shares this process group, and leave a stopped job
+    in the shell. ISIG stays on, so Ctrl+C is still a signal, and echo stays on
+    so typing into the log behaves as it did.
+    """
+    if not detach_key_available():
+        yield None
+        return
+    descriptor = sys.stdin.fileno()
+    saved = termios.tcgetattr(descriptor)
+    claimed = termios.tcgetattr(descriptor)
+    claimed[3] &= ~(termios.ICANON | termios.ECHOCTL)
+    claimed[6][termios.VSUSP] = os.fpathconf(descriptor, "PC_VDISABLE")
+    claimed[6][termios.VMIN] = 1
+    claimed[6][termios.VTIME] = 0
+    termios.tcsetattr(descriptor, termios.TCSADRAIN, claimed)
+    try:
+        yield descriptor
+    finally:
+        # The terminal may be the very thing that has gone away.
+        with contextlib.suppress(termios.error, OSError):
+            termios.tcsetattr(descriptor, termios.TCSADRAIN, saved)
+
+
+def _detach_key_pressed(descriptor: int | None) -> tuple[bool, int | None]:
+    """Wait briefly for input; returns (pressed, descriptor still worth reading)."""
+    if descriptor is None:
+        time.sleep(_KEY_POLL_SECONDS)
+        return False, None
+    readable, _, _ = select.select([descriptor], [], [], _KEY_POLL_SECONDS)
+    if not readable:
+        return False, descriptor
+    try:
+        pressed = os.read(descriptor, 1024)
+    except OSError:
+        return False, None
+    if not pressed:
+        return False, None
+    return _DETACH_KEY in pressed, descriptor
+
+
+def _signal_group(pid: int, signum: int) -> None:
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(pid, signum)
+
+
+def attached_compose_up(command: list[str], *, cwd: Path) -> int | None:
+    """Run `docker compose up` attached; its status, or None if detached.
+
+    It gets its own session so its group can be signalled apart from this
+    process: the `docker` parent ignores a signal sent to it alone, as the
+    plugin doing the work is a separate child. Hanging up that group ends the
+    client and leaves the containers running; SIGINT is Compose's graceful
+    stop. Compose's key menu is off because it draws on the bar's row and
+    would read the terminal this process is reading.
+    """
+    terminal = detach_key_available()
+
+    def hang_up(signum: int, frame: object) -> None:
+        del signum, frame
+        # A closing terminal can hang up twice, from the kernel and the shell.
+        # Left to the default, the second would end this process before the
+        # stack has been handed over, so it stays ignored from here on.
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)
+        old_handlers.pop(signal.SIGHUP, None)
+        raise _Hangup
+
+    old_handlers = _install_termination_handlers()
+    old_handlers[signal.SIGHUP] = signal.signal(signal.SIGHUP, hang_up)
+    child = None
+    try:
+        child = subprocess.Popen(
+            command,
+            cwd=cwd,
+            env={**os.environ, "COMPOSE_MENU": "0"},
+            start_new_session=True,
+        )
+        return _wait_for_compose(child, terminal)
+    finally:
+        if child is not None and child.poll() is None:
+            _signal_group(child.pid, signal.SIGKILL)
+        _restore_termination_handlers(old_handlers)
+
+
+def _wait_for_compose(child: subprocess.Popen[bytes], terminal: bool) -> int | None:
+    try:
+        with _claim_detach_key() as key:
+            detach_requested = False
+            while not detach_requested:
+                status = child.poll()
+                if status is not None:
+                    return status
+                detach_requested, key = _detach_key_pressed(key)
+        _hang_up_compose(child)
+        return None
+    except _Hangup:
+        if terminal:
+            _hang_up_compose(child)
+            return None
+        # A script's connection going is not a request to keep running.
+        return _stop_compose(child, signal.SIGINT, signal.SIGHUP)
+    except _TerminationSignal as interrupted:
+        return _stop_compose(child, interrupted.signum, interrupted.signum)
+
+
+def _hang_up_compose(child: subprocess.Popen[bytes]) -> None:
+    _signal_group(child.pid, signal.SIGHUP)
+    try:
+        child.wait(timeout=_HANGUP_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        # The containers survive this too; only the client is lost.
+        _signal_group(child.pid, signal.SIGKILL)
+        child.wait()
+
+
+def _stop_compose(
+    child: subprocess.Popen[bytes], signum: int, reported: int
+) -> int:
+    _signal_group(child.pid, signum)
+    # A repeat Ctrl+C after the grace period asks Compose to force the stop,
+    # as it would in a plain terminal; one more gives up on it altogether.
+    forced = False
+    while True:
+        try:
+            child.wait()
+            return 128 + reported
+        except _ForceQuit:
+            if forced:
+                _signal_group(child.pid, signal.SIGKILL)
+                info("Force quitting.")
+            else:
+                _signal_group(child.pid, signal.SIGINT)
+                forced = True
+        except _Hangup:
+            pass
 
 
 def _terminate_process_tree(child: subprocess.Popen[bytes], signum: int) -> None:

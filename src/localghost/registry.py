@@ -9,7 +9,7 @@ an old date.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -91,6 +91,17 @@ def record(
         _write(entry)
     except OSError as exc:
         warning("Could not record project for ghost pages", [str(exc)])
+
+
+def update(name: str, *, detached: bool) -> None:
+    """Change how a remembered project is running, leaving the rest alone."""
+    entry = next((item for item in entries() if item.name == name), None)
+    if entry is None:
+        return
+    try:
+        _write(replace(entry, detached=detached))
+    except OSError as exc:
+        warning("Could not update project for ghost pages", [str(exc)])
 
 
 def restore(entry: RegistryEntry) -> None:

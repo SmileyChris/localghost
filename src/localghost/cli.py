@@ -76,7 +76,9 @@ from .runner import (
     RUN_TYPES,
     RunPlan,
     _compose_file,
+    attached_compose_up,
     build_plan,
+    detach_key_available,
     discover_type,
     django_settings_warnings,
     execute,
@@ -2219,6 +2221,7 @@ def _run_compose(
     command = ["docker", "compose", "--project-name", project, "up"]
     if detach:
         command.append("--detach")
+    detachable = not detach and detach_key_available()
     # A foreground stack is recorded for as long as `up` holds the terminal.
     foreground = (
         None
@@ -2245,6 +2248,7 @@ def _run_compose(
         # route itself rather than of a port we chose.
         probe=statusbar.http_probe(public_origin),
         message="starting hub",
+        detachable=detachable,
     ) as bar:
         # The hub has to be reconciled before the application comes up,
         # otherwise a foreground `compose up` blocks before anything can
@@ -2252,28 +2256,76 @@ def _run_compose(
         _run_proxy("up", https_enabled=_https_configured())
         info(f"Public URL: {public_origin}")
         _report_tailnet_origin(project)
+        if detachable:
+            info("Press Ctrl+Z to detach and leave it running.")
         bar.status("starting")
+        status: int | None
         try:
-            result = subprocess.run(command, cwd=cwd, check=False)
+            status = (
+                subprocess.run(command, cwd=cwd, check=False).returncode
+                if detach
+                else attached_compose_up(command, cwd=cwd)
+            )
         finally:
             if foreground is not None:
                 discard_session(foreground)
-    if result.returncode:
-        _report_application_exit(project, result.returncode)
-        raise click.exceptions.Exit(result.returncode)
+        if status is None:
+            # Done here, not after the bar: if the terminal is what went away,
+            # releasing the bar can fail, and this must already have happened.
+            with suppress(OSError):
+                bar.status("detaching")
+            problem = _settle_detached_compose(cwd, project, command)
+    if status is None:
+        _report_detached_compose(project, public_origin, problem)
+        return
+    if status:
+        _report_application_exit(project, status)
+        raise click.exceptions.Exit(status)
     if detach:
-        log = _session_log_path(project)
-        create_session(
-            mode="compose",
-            name=project,
-            port=0,
-            cwd=cwd,
-            command=(),
-            log=log,
-            pid=None,
-            project=project,
-        )
+        _record_detached_compose(cwd, project)
         success(f"Started detached Compose session for {project}.")
+
+
+def _record_detached_compose(cwd: Path, project: str) -> None:
+    create_session(
+        mode="compose",
+        name=project,
+        port=0,
+        cwd=cwd,
+        command=(),
+        log=_session_log_path(project),
+        pid=None,
+        project=project,
+    )
+
+
+def _settle_detached_compose(
+    cwd: Path, project: str, command: list[str]
+) -> str | None:
+    """Hand a stack whose client has gone over to the background.
+
+    `up --detach` finishes whatever the client was interrupted in the middle
+    of. The record comes first so the stack stays manageable if that fails.
+    """
+    _record_detached_compose(cwd, project)
+    registry.update(project, detached=True)
+    settled = subprocess.run(
+        [*command, "--detach"], cwd=cwd, check=False, capture_output=True, text=True
+    )
+    return settled.stderr.strip() if settled.returncode else None
+
+
+def _report_detached_compose(
+    project: str, public_origin: str, problem: str | None
+) -> None:
+    # A closed terminal is one way to get here, and has nowhere to report to.
+    with suppress(OSError):
+        sign_off()
+        success(f"Detached from {project}; it keeps running at {public_origin}.")
+        info(f"Follow its output: {COMMAND} sessions logs {project} -f")
+        info(f"Stop it: {COMMAND} sessions stop {project}")
+        if problem:
+            warning("Compose could not finish starting the stack", [problem])
 
 
 def _report_application_exit(name: str, status: int) -> None:

@@ -35,6 +35,7 @@ MINIMUM_WIDTH = 40
 _REPAINT_SECONDS = 1.0
 
 _HINT = "Ctrl+C to stop"
+_DETACH_HINT = "Ctrl+Z to detach"
 _SPINNER_FRAMES = "\u280b\u2819\u2839\u2838\u283c\u2834\u2826\u2827\u2807\u280f"
 # The spinner has to tick faster than the healing repaint to read as motion.
 _SPINNER_SECONDS = 0.1
@@ -71,6 +72,7 @@ def _bar_line(
     secondary: str | None = None,
     spinner: str | None = None,
     message: str = "starting",
+    detachable: bool = False,
 ) -> str:
     """Render the bar, budgeted to stay a cell short of the row's width.
 
@@ -83,8 +85,8 @@ def _bar_line(
     step being waited on, and is shown only while the spinner is.
 
     A `secondary` URL (the mirrored tailnet route) rides beside the primary
-    when the row has room. As the window narrows, the hint goes first, then
-    the secondary, and only then is the primary truncated.
+    when the row has room. As the window narrows, the hints go first, detaching
+    before stopping, then the secondary, and only then is the primary truncated.
     """
     budget = width - 1
     wordmark = " localghost  "
@@ -93,7 +95,17 @@ def _bar_line(
     if secondary is not None and room < len(url) + len(_SEPARATOR) + len(secondary):
         secondary = None
     base = f"{url}{_SEPARATOR}{secondary}" if secondary else url
-    hint = f"  {_HINT} " if room >= len(base) + len(_HINT) + 3 else ""
+    hint = next(
+        (
+            f"  {text} "
+            for text in (
+                (f"{_HINT}{_SEPARATOR}{_DETACH_HINT}",) if detachable else ()
+            )
+            + (_HINT,)
+            if room >= len(base) + len(text) + 3
+        ),
+        "",
+    )
     shown = url[: max(0, room - len(hint))] if len(base) + len(hint) > room else url
     padding = " " * max(0, room - len(shown) - len(hint) - (len(base) - len(url)))
     rendered_status = (
@@ -206,8 +218,10 @@ class _Bar:
         message: str = "starting",
         secondary_url: str | None = None,
         diagnose: Callable[[], object] | None = None,
+        detachable: bool = False,
     ) -> None:
         self._url = url
+        self._detachable = detachable
         self._diagnose = diagnose
         self._secondary_url = secondary_url
         self._stream = stream
@@ -245,6 +259,7 @@ class _Bar:
             secondary=self._secondary_url,
             spinner=spinner,
             message=self._message,
+            detachable=self._detachable,
         )
         self._emit(
             f"{_SAVE_CURSOR}\x1b[{height};1H\x1b[2K{line}{_RESET}{_RESTORE_CURSOR}"
@@ -369,6 +384,7 @@ def pinned(
     probe: Callable[[], bool] | None = None,
     message: str = "starting",
     diagnose: Callable[[], object] | None = None,
+    detachable: bool = False,
 ) -> Iterator[object]:
     """Pin `url` to the last terminal row for the duration of the block.
 
@@ -380,6 +396,8 @@ def pinned(
     worth it; a truthy answer stops the watch. It exists so a caller can end
     a wait that would otherwise never finish, without this module needing to
     know anything about why.
+
+    `detachable` adds the detach key to the hints; the caller handles the key.
     """
     if stream is None:
         import sys
@@ -392,7 +410,7 @@ def pinned(
         finally:
             unwatched.stop()
         return
-    bar = _Bar(url, stream, probe, message, secondary_url, diagnose)
+    bar = _Bar(url, stream, probe, message, secondary_url, diagnose, detachable)
     bar.start()
     try:
         yield bar

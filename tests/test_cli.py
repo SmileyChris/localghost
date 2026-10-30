@@ -2518,6 +2518,7 @@ def test_compose_run_pins_before_the_hub_is_reconciled(monkeypatch, tmp_path) ->
         enabled=True,
         probe=None,
         message="starting",
+        detachable=False,
     ):
         order.append(f"pin:{message}")
 
