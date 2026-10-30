@@ -570,6 +570,23 @@ def _client_of(server) -> tuple[socket.socket, supervisor._Client]:
     return theirs, client
 
 
+def test_losing_the_server_thread_is_logged_and_ends_the_run(
+    server, tmp_path, monkeypatch
+) -> None:
+    def broken() -> None:
+        raise RuntimeError("the server broke")
+
+    killed = []
+    monkeypatch.setattr(server, "_loop", broken)
+    monkeypatch.setattr(supervisor.os, "kill", lambda pid, sig: killed.append(sig))
+
+    server.start()
+    server.join()
+
+    assert killed == [signal.SIGTERM]
+    assert b"the server broke" in (tmp_path / "demo.log").read_bytes()
+
+
 def test_the_log_rotates_at_its_limit(server, tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(supervisor, "_LOG_LIMIT", 4)
 

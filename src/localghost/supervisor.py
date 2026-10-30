@@ -136,7 +136,7 @@ class _Client:
         self.backlog = bytearray()
 
 
-class _Server(threading.Thread):
+class _Server:
     """Moves bytes between the pseudo-terminal, the log, and any clients."""
 
     def __init__(
@@ -147,7 +147,7 @@ class _Server(threading.Thread):
         session_id: str,
         name: str,
     ) -> None:
-        super().__init__(daemon=True)
+        self._thread = threading.Thread(target=self._run, daemon=True)
         self._master = master
         self._listener = listener
         self._log_path = log
@@ -165,7 +165,24 @@ class _Server(threading.Thread):
         self._result = {"status": status, "message": message}
         os.write(self._wake_write, b".")
 
-    def run(self) -> None:
+    def start(self) -> None:
+        self._thread.start()
+
+    def join(self) -> None:
+        self._thread.join()
+
+    def _run(self) -> None:
+        try:
+            self._loop()
+        except Exception:
+            # Nothing else can read the application's output or a client's keys,
+            # so a run that lost this thread would hang with nobody told. Its
+            # stderr is the pseudo-terminal this thread was reading.
+            self._log.write(traceback.format_exc().encode())
+            self._log.flush()
+            os.kill(os.getpid(), signal.SIGTERM)
+
+    def _loop(self) -> None:
         while True:
             readers = [self._master, self._listener, self._wake_read, *self._clients]
             writers = [c for c, item in self._clients.items() if item.backlog]
