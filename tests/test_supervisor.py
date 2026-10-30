@@ -1,13 +1,16 @@
 """The supervisor: a real pseudo-terminal, socket, and application, no Docker."""
 
+import io
 import json
 import os
+import select
 import signal
 import socket
 import sys
 import time
 from pathlib import Path
 
+import coverage
 import pytest
 from click.testing import CliRunner
 
@@ -30,6 +33,31 @@ print("TTY", sys.stdout.isatty(), "SIZE", size[0], size[1], "CTTY ok", flush=Tru
 print("GOT", sys.stdin.readline().strip(), flush=True)
 time.sleep(30)
 """
+
+
+def _save_coverage() -> None:
+    """`os._exit` skips what would save a forked child's coverage."""
+    measuring = coverage.Coverage.current()
+    if measuring is not None:
+        measuring.stop()
+        measuring.save()
+
+
+def _stop_child(pid: int) -> None:
+    """End it the way a run is really stopped, so it gets to save its coverage."""
+    try:
+        if os.waitpid(pid, os.WNOHANG)[0]:
+            return
+        os.kill(pid, signal.SIGTERM)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if os.waitpid(pid, os.WNOHANG)[0]:
+                return
+            time.sleep(0.01)
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+    except (ChildProcessError, ProcessLookupError):
+        return
 
 
 def _plan(tmp_path: Path, command=None) -> runner.RunPlan:
@@ -69,6 +97,7 @@ def supervised(tmp_path, monkeypatch):
                 monkeypatch.setattr(runner.ports, "listeners", lambda *a: [])
                 status = supervisor.serve(spec)
             finally:
+                _save_coverage()
                 os._exit(status)
         children.append(pid)
         session.pid = pid
@@ -77,11 +106,7 @@ def supervised(tmp_path, monkeypatch):
 
     yield start
     for pid in children:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            continue
-        os.waitpid(pid, 0)
+        _stop_child(pid)
 
 
 class _Connection:
@@ -523,3 +548,179 @@ def test_logs_keep_colour_but_not_cursor_movement() -> None:
     raw = "\x1b[2J\x1b[H\x1b[32mgreen\x1b[0m\r\n\x1b[?25lnext\x1b]0;title\x07\n"
 
     assert _readable_log(raw) == "\x1b[32mgreen\x1b[0m\nnext\n"
+
+
+@pytest.fixture
+def server(tmp_path):
+    """A server that nothing is driving, so each path can be taken directly."""
+    master, terminal = os.openpty()
+    listener = socket.socket(socket.AF_UNIX)
+    built = supervisor._Server(master, listener, tmp_path / "demo.log", "id", "demo")
+    yield built
+    listener.close()
+    os.close(master)
+    os.close(terminal)
+
+
+def _client_of(server) -> tuple[socket.socket, supervisor._Client]:
+    theirs, ours = socket.socketpair()
+    ours.setblocking(False)
+    client = supervisor._Client(ours)
+    server._clients[ours] = client
+    return theirs, client
+
+
+def test_the_log_rotates_at_its_limit(server, tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(supervisor, "_LOG_LIMIT", 4)
+
+    server._write_log(b"first")
+    server._write_log(b"x")
+
+    assert (tmp_path / "demo.log.1").read_bytes() == b"first"
+    assert (tmp_path / "demo.log").read_bytes() == b"x"
+
+
+def test_a_client_too_far_behind_is_dropped_not_waited_for(
+    server, monkeypatch
+) -> None:
+    monkeypatch.setattr(supervisor, "_CLIENT_BACKLOG", 8)
+    theirs, client = _client_of(server)
+    # Nothing reads it, and it can't take any more.
+    client.connection.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1)
+    while True:
+        try:
+            client.connection.send(b"x" * 65536)
+        except BlockingIOError:
+            break
+
+    server._send(client, b"y" * 64)
+
+    assert client.connection not in server._clients
+    theirs.close()
+
+
+def test_a_full_socket_keeps_output_for_later(server) -> None:
+    theirs, client = _client_of(server)
+    while True:
+        try:
+            client.connection.send(b"x" * 65536)
+        except BlockingIOError:
+            break
+
+    server._send(client, b"later")
+
+    assert bytes(client.backlog) == b"later"
+    theirs.close()
+
+
+def test_a_client_sending_nonsense_is_dropped(server) -> None:
+    theirs, client = _client_of(server)
+    theirs.sendall(supervisor._HEADER.pack(b"o", 1 << 30))
+    _eventually(lambda: select.select([client.connection], [], [], 0)[0])
+
+    server._read_client(client.connection)
+
+    assert client.connection not in server._clients
+    theirs.close()
+
+
+def test_the_last_client_leaving_marks_the_run_detached(server, tmp_path) -> None:
+    session = sessions.create(
+        mode="host", name="demo", port=1, cwd=tmp_path, command=(), log=None,
+        pid=1, detached=False,
+    )  # fmt: skip
+    server._session_id = session.id
+    first, one = _client_of(server)
+    second, other = _client_of(server)
+
+    server._drop(one)
+    assert sessions._read(session.id).detached is False
+    server._drop(other)
+
+    assert sessions._read(session.id).detached is True
+    first.close()
+    second.close()
+
+
+def test_leaving_as_the_run_ends_is_not_detaching(server, tmp_path) -> None:
+    session = sessions.create(
+        mode="host", name="demo", port=1, cwd=tmp_path, command=(), log=None,
+        pid=1, detached=False,
+    )  # fmt: skip
+    server._session_id = session.id
+    theirs, client = _client_of(server)
+    server.finish(0, None)
+
+    server._drop(client)
+
+    assert sessions._read(session.id).detached is False
+    theirs.close()
+
+
+def test_replay_starts_at_a_clean_line_once_it_has_been_cut(server) -> None:
+    server._replay = bytearray(
+        b"partial\x1b[3" + b"\n" + b"x" * supervisor._REPLAY_BYTES
+    )
+
+    assert server._replayable().startswith(b"xxx")
+
+
+def test_the_replay_is_whole_until_then(server) -> None:
+    server._replay = bytearray(b"line one\nline two")
+
+    assert server._replayable() == b"line one\nline two"
+
+
+def test_saying_goodbye_flushes_what_a_slow_client_is_owed(server) -> None:
+    theirs, client = _client_of(server)
+    client.backlog += b"owed"
+    server.finish(5, "why")
+
+    server._say_goodbye()
+
+    assert server.attached_at_exit is True
+    received = theirs.recv(65536)
+    assert received.startswith(b"owed")
+    frames = supervisor.FrameReader().feed(received[len(b"owed") :])
+    assert frames[-1][0] == supervisor.EXIT
+    assert json.loads(frames[-1][1]) == {"status": 5, "message": "why"}
+    theirs.close()
+
+
+def test_main_reads_its_spec_from_stdin(monkeypatch) -> None:
+    served = []
+    monkeypatch.setattr(supervisor, "serve", lambda spec: served.append(spec) or 4)
+    monkeypatch.setattr(sys, "stdin", io.StringIO('{"plan": {}}'))
+
+    assert supervisor.main() == 4
+    assert served == [{"plan": {}}]
+
+
+def test_an_unreadable_record_is_left_alone(tmp_path) -> None:
+    sessions.state_dir().mkdir(parents=True, exist_ok=True)
+    (sessions.state_dir() / "bad.json").write_text("not json")
+
+    sessions.mark_detached("bad", True)
+    sessions.mark_ended("bad")
+
+    assert (sessions.state_dir() / "bad.json").read_text() == "not json"
+
+
+def test_a_socket_prefers_the_runtime_directory(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("LOCALGHOST_STATE_DIR", raising=False)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+
+    path = Path(sessions.socket_path_for("demo"))
+
+    assert path.parent == tmp_path / "localghost"
+    assert path.parent.stat().st_mode & 0o777 == 0o700
+
+
+def test_an_explicit_state_directory_keeps_the_socket_with_it(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "runtime"))
+
+    assert Path(sessions.socket_path_for("demo")).parent == tmp_path / "sessions"

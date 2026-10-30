@@ -86,14 +86,6 @@ def _relay(connection: socket.socket, *, bar: bool) -> Outcome:
     size = _terminal_rows_cols(bar)
     sys.stdout.flush()
     sys.stderr.flush()
-    connection.sendall(
-        supervisor.control(
-            supervisor.HELLO,
-            version=supervisor.PROTOCOL_VERSION,
-            rows=size[0],
-            cols=size[1],
-        )
-    )
     # Signals from elsewhere mean what they did: `kill` on the run ends the run.
     requested: list[str] = []
 
@@ -109,6 +101,14 @@ def _relay(connection: socket.socket, *, bar: bool) -> Outcome:
     saved = termios.tcgetattr(stdin)
     tty.setraw(stdin, termios.TCSADRAIN)
     try:
+        connection.sendall(
+            supervisor.control(
+                supervisor.HELLO,
+                version=supervisor.PROTOCOL_VERSION,
+                rows=size[0],
+                cols=size[1],
+            )
+        )
         while True:
             while requested:
                 connection.sendall(
