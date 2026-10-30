@@ -12,6 +12,7 @@ import pytest
 from click.testing import CliRunner
 
 from localghost import attach, registry, runner, sessions, supervisor
+from localghost import cli as cli_module
 from localghost.cli import cli
 
 # Reports what it can see of its terminal, echoes a line, and reports signals.
@@ -451,6 +452,69 @@ def test_a_port_held_by_something_else_is_still_a_conflict(
 
     assert result.exit_code != 0
     assert "already running" not in result.output
+
+
+def test_detaching_offers_plain_run_where_it_would_attach(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    registry.record("demo", tmp_path, "html", detached=True)
+
+    cli_module._report_detached("demo", attachable=True)
+
+    output = capsys.readouterr().out
+    assert "Bring it back: localghost run, or from anywhere" in output
+    assert "sessions attach demo" in output
+
+
+def test_detaching_offers_only_attach_after_explicit_flags(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    registry.record(
+        "demo", tmp_path, "custom", detached=True,
+        flags=registry.RunFlags(port=4567, command=("serve",)),
+    )  # fmt: skip
+
+    cli_module._report_detached("demo", attachable=True)
+
+    output = capsys.readouterr().out
+    assert "Bring it back: localghost sessions attach demo" in output
+
+
+def test_detaching_offers_only_attach_from_another_directory(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    project = tmp_path / "demo"
+    project.mkdir()
+    monkeypatch.chdir(tmp_path)
+    registry.record("demo", project, "html", detached=True)
+
+    cli_module._report_detached("demo", attachable=True)
+
+    output = capsys.readouterr().out
+    assert "Bring it back: localghost sessions attach demo" in output
+
+
+def test_plain_run_attaches_to_a_detected_project_it_detached_from(
+    tmp_path, monkeypatch
+) -> None:
+    project = tmp_path / "blog"
+    project.mkdir()
+    (project / "index.html").write_text("hi")
+    monkeypatch.chdir(project)
+    session = sessions.create(
+        mode="host", name="blog", port=4567, cwd=project, command=("serve",),
+        log=None, pid=os.getpid(), detached=True, socket="/nowhere",
+    )  # fmt: skip
+    monkeypatch.setattr(cli_module, "supervised_run_available", lambda: True)
+    attached = []
+    monkeypatch.setattr(cli_module, "_attach_session", attached.append)
+
+    result = CliRunner().invoke(cli, ["run"])
+
+    assert result.exit_code == 0, result.output
+    assert [item.id for item in attached] == [session.id]
 
 
 def test_logs_keep_colour_but_not_cursor_movement() -> None:

@@ -2456,6 +2456,20 @@ def _settle_detached_compose(
     return settled.stderr.strip() if settled.returncode else None
 
 
+def _plain_run_would_attach(project: str) -> bool:
+    """Only from its directory, and only if it needed no flags to start.
+
+    Without them a project may have nothing to detect, and repeating them is
+    refused, as they could be asking for something other than what is running.
+    """
+    entry = next((item for item in registry.entries() if item.name == project), None)
+    return (
+        entry is not None
+        and entry.flags == registry.RunFlags()
+        and Path(entry.directory).resolve() == Path.cwd().resolve()
+    )
+
+
 def _report_detached(
     project: str, *, attachable: bool = False, problem: str | None = None
 ) -> None:
@@ -2467,7 +2481,12 @@ def _report_detached(
         )
         info(f"Follow its output: {COMMAND} sessions logs {project} -f")
         if attachable:
-            info(f"Bring it back here: {COMMAND} sessions attach {project}")
+            attach_command = f"{COMMAND} sessions attach {project}"
+            info(
+                f"Bring it back: {COMMAND} run, or from anywhere: {attach_command}"
+                if _plain_run_would_attach(project)
+                else f"Bring it back: {attach_command}"
+            )
         info(f"Stop it: {COMMAND} sessions stop {project}")
         if problem:
             warning("Compose could not finish starting the stack", [problem])
