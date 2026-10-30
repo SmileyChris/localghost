@@ -5,6 +5,8 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [4.6.0] - 2026-10-30
+
 ### Added
 
 - Ctrl+Z detaches a foreground `run`: the application keeps running and is then
