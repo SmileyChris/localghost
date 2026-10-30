@@ -2477,17 +2477,20 @@ def _report_detached(
     with suppress(OSError):
         sign_off()
         success(
-            f"Detached from {project}; it keeps running at {_proxy_origin(project)}."
+            f"Detached from {project}; it's still running at {_proxy_origin(project)}."
         )
-        info(f"Follow its output: {COMMAND} sessions logs {project} -f")
+        action("Follow its output", f"{COMMAND} sessions logs {project} -f")
         if attachable:
             attach_command = f"{COMMAND} sessions attach {project}"
-            info(
-                f"Bring it back: {COMMAND} run, or from anywhere: {attach_command}"
-                if _plain_run_would_attach(project)
-                else f"Bring it back: {attach_command}"
-            )
-        info(f"Stop it: {COMMAND} sessions stop {project}")
+            if _plain_run_would_attach(project):
+                action(
+                    "Bring it back",
+                    f"{COMMAND} run",
+                    ((", or from anywhere: ", "default"), (attach_command, LIME)),
+                )
+            else:
+                action("Bring it back", attach_command)
+        action("Stop it", f"{COMMAND} sessions stop {project}")
         if problem:
             warning("Compose could not finish starting the stack", [problem])
 
