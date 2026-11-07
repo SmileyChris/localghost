@@ -269,15 +269,23 @@ def build_plan(
         working_directory = cwd
         if port is None:
             raise click.ClickException("a custom command requires --port")
+        public_name = name or resolve_name(project_root)
+        validate_name(public_name)
         selected_type = "custom"
         wanted_port = port
         # A command that takes {port} runs wherever it is told, so a busy
         # port can be walked past; one that names its own port cannot move.
         # Isolated, the namespace is its own, so the port is always free.
         flexible = any("{port}" in part for part in command)
-        app_port = port if isolated else ports.select_port(port, strict=not flexible)
+        app_port = (
+            port
+            if isolated
+            else ports.select_port(
+                port, strict=not flexible, name=public_name, root=project_root
+            )
+        )
         if app_port != port:
-            _report_skipped_port(port, app_port)
+            _report_skipped_port(port, app_port, name=public_name, root=project_root)
         selected_command = tuple(
             part.replace("{port}", str(app_port)) for part in command
         )
@@ -289,6 +297,8 @@ def build_plan(
         else:
             selected_type, project_root = discover_type(cwd, framework)
         working_directory = project_root
+        public_name = name or resolve_name(project_root)
+        validate_name(public_name)
         if selected_type == "django":
             default_port, selected_command = django_command(project_root, port)
         elif selected_type == "vite":
@@ -313,10 +323,17 @@ def build_plan(
         app_port = (
             wanted_port
             if isolated
-            else ports.select_port(wanted_port, strict=port is not None)
+            else ports.select_port(
+                wanted_port,
+                strict=port is not None,
+                name=public_name,
+                root=project_root,
+            )
         )
         if app_port != wanted_port:
-            _report_skipped_port(wanted_port, app_port)
+            _report_skipped_port(
+                wanted_port, app_port, name=public_name, root=project_root
+            )
         selected_command = tuple(
             part.format(port=app_port) for part in selected_command
         )
@@ -324,8 +341,6 @@ def build_plan(
     # takes a port from the ephemeral range rather than one a dev server
     # elsewhere might want.
     selected_port = ports.ephemeral_port() if isolated else app_port
-    public_name = name or resolve_name(project_root)
-    validate_name(public_name)
     project = _session_project(project_root)
     return RunPlan(
         public_name,
@@ -989,7 +1004,11 @@ def execute(
                 # Starting anyway would leave the readiness probe unable to
                 # tell the squatter apart from the application, so the run
                 # ends here rather than at a URL serving the wrong thing.
-                raise click.ClickException(ports.in_use_message(plan.port))
+                raise click.ClickException(
+                    ports.in_use_message(
+                        plan.port, name=plan.name, root=plan.project_root
+                    )
+                )
             if plan.app_port is not None and not forwarder.hub_reaches_loopback():
                 # pasta always takes host loopback, and hides its sockets
                 # from /proc, so the relay cannot wait to be discovered.
@@ -1494,7 +1513,9 @@ def _package_json_with_dev_script_and_dep(
     return value
 
 
-def _report_skipped_port(wanted: int, selected: int) -> None:
+def _report_skipped_port(
+    wanted: int, selected: int, *, name: str, root: Path | None
+) -> None:
     """Say which port was passed over, and to whom.
 
     Walking on silently hides the one fact that explains a dev server coming
@@ -1511,6 +1532,9 @@ def _report_skipped_port(wanted: int, selected: int) -> None:
         detail += "."
         if held.directory:
             detail += f" Working directory: {held.directory}."
+    hint = ports.forward_hint(held, wanted, name, root)
+    if hint:
+        detail += f" {hint}"
     if ports.isolation_available():
         detail += f" Retry with --isolate to keep {wanted}."
     warning("Port in use", [detail])

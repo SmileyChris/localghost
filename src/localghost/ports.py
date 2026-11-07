@@ -11,8 +11,11 @@ import socket
 import subprocess
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 import click
+
+from .feedback import COMMAND
 
 # Treated as "this host has no IPv6" rather than as a busy port.
 _NO_IPV6 = frozenset({errno.EAFNOSUPPORT, errno.EADDRNOTAVAIL, errno.EPROTONOSUPPORT})
@@ -54,11 +57,17 @@ def port_available(port: int) -> bool:
 WALK = 100
 
 
-def select_port(port: int, strict: bool) -> int:
+def select_port(
+    port: int,
+    strict: bool,
+    *,
+    name: str | None = None,
+    root: Path | None = None,
+) -> int:
     if port_available(port):
         return port
     if strict:
-        raise PortInUse(in_use_message(port))
+        raise PortInUse(in_use_message(port, name=name, root=root))
     for candidate in range(port + 1, min(port + WALK, 65536)):
         if port_available(candidate):
             return candidate
@@ -89,7 +98,24 @@ def isolation_available() -> bool:
     return sys.platform.startswith("linux") and shutil.which("pasta") is not None
 
 
-def in_use_message(port: int) -> str:
+def forward_hint(
+    found: Holder | None, port: int, name: str | None, root: Path | None
+) -> str | None:
+    """Suggest `forward` when the holder is the project's own server."""
+    if found is None or not found.directory or name is None or root is None:
+        return None
+    try:
+        inside = Path(found.directory).resolve().is_relative_to(root.resolve())
+    except OSError:
+        return None
+    if not inside:
+        return None
+    return f"Already running it yourself? {COMMAND} forward {name} {port}"
+
+
+def in_use_message(
+    port: int, *, name: str | None = None, root: Path | None = None
+) -> str:
     """Say a port is taken, naming its holder whenever the host will tell us.
 
     Naming the holder only diagnoses the dead end, so the way out is always
@@ -108,6 +134,9 @@ def in_use_message(port: int) -> str:
         detail.append(held)
         if found.directory:
             detail.append(f"  working directory: {found.directory}")
+    hint = forward_hint(found, port, name, root)
+    if hint:
+        detail.append(hint)
     if not detail:
         return f"{taken}; {remedy}"
     return "\n".join([f"{taken}:", *detail, remedy])

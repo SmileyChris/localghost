@@ -2411,11 +2411,11 @@ def test_a_busy_port_suggests_isolation_only_where_it_works(monkeypatch):
     )
 
     monkeypatch.setattr(ports, "isolation_available", lambda: True)
-    runner._report_skipped_port(8000, 8001)
+    runner._report_skipped_port(8000, 8001, name="demo", root=None)
     assert "--isolate" in ports.in_use_message(8000)
 
     monkeypatch.setattr(ports, "isolation_available", lambda: False)
-    runner._report_skipped_port(8000, 8001)
+    runner._report_skipped_port(8000, 8001, name="demo", root=None)
     assert "--isolate" not in ports.in_use_message(8000)
 
     assert "Retry with --isolate to keep 8000." in said[0]
@@ -2469,3 +2469,41 @@ def test_html_command_binds_wide_only_without_a_relay(monkeypatch):
 
     assert runner.html_command(9001)[1][-1] == "0.0.0.0"
     assert runner.html_command(9001)[0] == 9001
+
+
+def _busy_holder(monkeypatch, directory):
+    monkeypatch.setattr(
+        ports,
+        "holder",
+        lambda port: ports.Holder(pid=1, command="vite", directory=str(directory)),
+    )
+
+
+def test_skipped_port_warning_offers_forward(monkeypatch, tmp_path):
+    _busy_holder(monkeypatch, tmp_path / "web")
+    said = []
+    monkeypatch.setattr(
+        runner, "warning", lambda title, messages: said.extend(messages)
+    )
+
+    runner._report_skipped_port(8000, 8001, name="gulch", root=tmp_path)
+
+    assert "Already running it yourself? localghost forward gulch 8000" in said[0]
+
+
+def test_hint_uses_explicit_name(monkeypatch, tmp_path):
+    _busy_holder(monkeypatch, tmp_path)
+    monkeypatch.setattr(ports, "port_available", lambda port: False)
+
+    with pytest.raises(ports.PortInUse, match="forward api 8000"):
+        runner.build_plan(tmp_path, "api", None, 8000, ("just", "dev"))
+
+
+def test_build_plan_validates_name_before_selecting_port(monkeypatch, tmp_path):
+    _busy_holder(monkeypatch, tmp_path)
+    monkeypatch.setattr(ports, "port_available", lambda port: False)
+
+    with pytest.raises(click.ClickException) as caught:
+        runner.build_plan(tmp_path, "Bad Name!", None, 8000, ("just", "dev"))
+
+    assert not isinstance(caught.value, ports.PortInUse)

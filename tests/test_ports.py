@@ -103,6 +103,45 @@ def test_an_unidentifiable_holder_still_says_what_to_do(monkeypatch):
     assert ":\n" not in message
 
 
+def _holder_in(monkeypatch, directory):
+    monkeypatch.setattr(
+        ports,
+        "holder",
+        lambda port: ports.Holder(pid=1, command="vite", directory=str(directory)),
+    )
+
+
+def test_in_use_message_offers_forward_for_a_holder_inside_the_root(
+    monkeypatch, tmp_path
+):
+    _holder_in(monkeypatch, tmp_path / "web")
+
+    message = ports.in_use_message(5173, name="gulch", root=tmp_path)
+
+    assert "Already running it yourself? localghost forward gulch 5173" in message
+    lines = message.splitlines()
+    assert lines.index(
+        next(line for line in lines if "Already running" in line)
+    ) < lines.index(next(line for line in lines if "--port" in line))
+
+
+def test_in_use_message_no_hint_outside_the_root(monkeypatch, tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    _holder_in(monkeypatch, tmp_path / "other")
+
+    assert "forward" not in ports.in_use_message(5173, name="gulch", root=root)
+    assert "forward" not in ports.in_use_message(5173)
+
+
+def test_select_port_carries_the_hint(monkeypatch, tmp_path):
+    _holder_in(monkeypatch, tmp_path)
+    monkeypatch.setattr(ports, "port_available", lambda port: False)
+
+    with pytest.raises(ports.PortInUse, match="forward gulch 5173"):
+        ports.select_port(5173, True, name="gulch", root=tmp_path)
+
+
 def _reap(child):
     """Stop a test child's whole group, and collect it so nothing leaks.
 
