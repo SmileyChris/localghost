@@ -21,7 +21,7 @@ from pathlib import Path
 
 import click
 
-from . import statusbar, supervisor
+from . import registry, statusbar, supervisor
 from .runner import (
     RunPlan,
     _claim_detach_key,
@@ -31,7 +31,15 @@ from .runner import (
     _TerminationSignal,
     detach_key_available,
 )
-from .sessions import Session, alive, create, socket_path_for, state_dir
+from .sessions import (
+    Session,
+    alive,
+    create,
+    mark_detached,
+    socket_path_for,
+    state_dir,
+)
+from .sessions import read as read_session
 from .sessions import stop as stop_session
 
 _CTRL_C = 0x03
@@ -293,10 +301,67 @@ def attach(
         return _follow_log(session)
 
 
-def _follow_log(session: Session) -> Outcome:
-    """Attach to a `run --detach` application, which only has a log to offer.
+def follow_forward(
+    session: Session,
+    *,
+    bar: bool,
+    public_origin: str,
+    secondary_origin: str | None,
+) -> Outcome:
+    """Connect this terminal to a forward's leader until it ends or is left.
 
-    Nothing can be typed into it. Ctrl+C stops it, Ctrl+Z leaves it running.
+    The leader writes events to the log and the state of the route to the
+    session record; the bar shows the latter. Ctrl+C stops the forward,
+    Ctrl+Z leaves it running.
+    """
+    mark_detached(session.id, False)
+    registry.update(session.name, detached=False)
+    try:
+        with statusbar.pinned(
+            public_origin,
+            secondary_url=secondary_origin,
+            stream=sys.stdout,
+            enabled=bar,
+            probe=None,
+            message="starting",
+            detachable=True,
+        ) as pinned:
+            shown: str | None = None
+
+            def on_poll() -> None:
+                # Redrawn only on a change: the record is read every poll.
+                nonlocal shown
+                record = read_session(session.id)
+                if record is None or record.route == shown:
+                    return
+                shown = record.route
+                _show_route(pinned, record.route, session.port)
+
+            return _follow_log(session, on_poll=on_poll)
+    finally:
+        mark_detached(session.id, True)
+        registry.update(session.name, detached=True)
+
+
+def _show_route(bar, route: str, port: int) -> None:
+    """Draw a forward's `route` field: where it leads, or why it does not yet."""
+    if route == "up":
+        bar.ready(f"→ {port}")
+    elif route.startswith("up: "):
+        bar.ready(f"→ {port} ({route.removeprefix('up: ')})")
+    else:
+        _, _, reason = route.partition(": ")
+        bar.status(reason or "starting", waiting=True)
+
+
+def _follow_log(
+    session: Session, *, on_poll: Callable[[], None] | None = None
+) -> Outcome:
+    """Attach to a process that only has a log to offer.
+
+    That is a `run --detach` application or a forward's leader. Nothing can
+    be typed into it. Ctrl+C stops it, Ctrl+Z leaves it running. `on_poll`
+    runs each time the log has nothing new, once per idle poll.
     """
     old_handlers = _install_termination_handlers()
     try:
@@ -308,6 +373,8 @@ def _follow_log(session: Session) -> Outcome:
                 if data:
                     _write_all(sys.stdout.fileno(), data)
                     continue
+                if on_poll is not None:
+                    on_poll()
                 if not alive(session):
                     return Outcome(0)
                 pressed, key = _detach_key_pressed(key)

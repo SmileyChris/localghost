@@ -25,7 +25,13 @@ from typing import NoReturn
 import click
 
 from . import forwarder, picker, registry, statusbar
-from .attach import Outcome, attach, run_supervised, supervised_run_available
+from .attach import (
+    Outcome,
+    attach,
+    follow_forward,
+    run_supervised,
+    supervised_run_available,
+)
 from .compose import resolve_compose, routing_problem
 from .config import (
     CONFIG_NAME,
@@ -815,7 +821,8 @@ def sessions_attach(target: str) -> None:
             f"{session.name} is not running; start it with: "
             f"{COMMAND} restart {session.name}"
         )
-    if not session.socket and not session.detached:
+    # A forward never has a socket: its terminal only ever follows a log.
+    if session.mode != "forward" and not session.socket and not session.detached:
         raise click.ClickException(
             f"{session.name} is running in another terminal without a "
             f"background process to attach to; stop it with: "
@@ -826,6 +833,17 @@ def sessions_attach(target: str) -> None:
             f"attaching needs a terminal; read its output with: "
             f"{COMMAND} sessions logs {session.name}"
         )
+    if session.mode == "forward":
+        _finish_attached(
+            session.name,
+            follow_forward(
+                session,
+                bar=True,
+                public_origin=_proxy_origin(session.name),
+                secondary_origin=_tailnet_origin(session.name),
+            ),
+        )
+        return
     _attach_session(session)
 
 

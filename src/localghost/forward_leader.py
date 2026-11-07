@@ -150,7 +150,7 @@ def _load(
     """The leader's record; the CLI may still be writing it."""
     deadline = clock() + _RECORD_WAIT
     while True:
-        session = sessions._read(session_id)
+        session = sessions.read(session_id)
         if session is not None or clock() >= deadline:
             return session
         sleep(_RECORD_POLL)

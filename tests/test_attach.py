@@ -489,3 +489,204 @@ def test_a_failed_write_counts_as_leaving(terminal, no_signal_handlers) -> None:
     client.close()
 
     assert attach._relay(client, bar=False).status is None
+
+
+# A forward: a background leader with only a log, under a bar that reads the
+# session record's `route`.
+
+
+@pytest.fixture
+def forward_state(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path / "state"))
+
+
+def _forward(tmp_path: Path, **overrides) -> sessions.Session:
+    from localghost import registry
+
+    registry.record_forward("api", 5173, detached=True)
+    values = {
+        "mode": "forward", "name": "api", "port": 5173, "cwd": None,
+        "command": (), "log": tmp_path / "api.log", "pid": os.getpid(),
+        "detached": True,
+    }  # fmt: skip
+    values.update(overrides)
+    (tmp_path / "api.log").write_bytes(b"forwarding api.localhost\n")
+    return sessions.create(**values)
+
+
+class _FakeBar:
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+        self.stopped = False
+
+    def ready(self, note=None) -> None:
+        self.calls.append(("ready", note))
+
+    def status(self, message, *, waiting=False) -> None:
+        self.calls.append(("status", message, waiting))
+
+
+@pytest.fixture
+def fake_bar(monkeypatch):
+    import contextlib
+
+    opened: dict = {}
+
+    @contextlib.contextmanager
+    def pinned(url, **kwargs):
+        bar = _FakeBar()
+        opened.update(url=url, kwargs=kwargs, bar=bar)
+        try:
+            yield bar
+        finally:
+            bar.stopped = True
+
+    monkeypatch.setattr(attach.statusbar, "pinned", pinned)
+    return opened
+
+
+def _set_route(session: sessions.Session, route: str) -> None:
+    sessions.set_route(session.id, route, bridge_project=None, bridge_yaml="")
+
+
+def _follow(session: sessions.Session, *, bar: bool = True) -> attach.Outcome:
+    return attach.follow_forward(
+        session,
+        bar=bar,
+        public_origin="http://api.localhost",
+        secondary_origin=None,
+    )
+
+
+def test_follow_forward_marks_attached_then_detached(
+    terminal, forward_state, fake_bar, tmp_path, monkeypatch
+) -> None:
+    from localghost import registry
+
+    session = _forward(tmp_path)
+    seen = []
+
+    def alive(item):
+        record = sessions.read(session.id)
+        entry = next(e for e in registry.entries() if e.name == "api")
+        seen.append((record.detached, entry.detached))
+        return False
+
+    monkeypatch.setattr(attach, "alive", alive)
+
+    _follow(session)
+
+    assert seen == [(False, False)]
+    assert sessions.read(session.id).detached is True
+    assert next(e for e in registry.entries() if e.name == "api").detached is True
+
+
+def test_follow_forward_bar_tracks_route_changes(
+    terminal, forward_state, fake_bar, tmp_path, monkeypatch
+) -> None:
+    session = _forward(tmp_path)
+    routes = [
+        "",
+        "up: ~/dev/lab/gulch",
+        "up: ~/dev/lab/gulch",
+        "waiting: nothing listening on 5173",
+        "failing: no relay possible",
+        "up",
+    ]
+    polls = iter(routes[1:])
+
+    def alive(item):
+        following = next(polls, None)
+        if following is None:
+            return False
+        _set_route(session, following)
+        return True
+
+    monkeypatch.setattr(attach, "alive", alive)
+    monkeypatch.setattr(attach, "_FOLLOW_SECONDS", 0.0)
+    monkeypatch.setattr(attach, "_detach_key_pressed", lambda key: (False, key))
+
+    outcome = _follow(session)
+
+    assert outcome.status == 0
+    assert fake_bar["url"] == "http://api.localhost"
+    assert fake_bar["kwargs"]["probe"] is None
+    assert fake_bar["kwargs"]["detachable"] is True
+    assert fake_bar["bar"].calls == [
+        ("status", "starting", True),
+        ("ready", "→ 5173 (~/dev/lab/gulch)"),
+        ("status", "nothing listening on 5173", True),
+        ("status", "no relay possible", True),
+        ("ready", "→ 5173"),
+    ]
+
+
+def test_follow_forward_returns_when_leader_dies(
+    terminal, forward_state, tmp_path, monkeypatch
+) -> None:
+    # The real bar, on the test's terminal: the scroll region must be released.
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setattr(statusbar, "_terminal_size", lambda: (120, 30))
+    session = _forward(tmp_path)
+    _set_route(session, "up: ~/dev/lab/gulch")
+    polls = []
+
+    def alive(item):
+        polls.append(item)
+        return len(polls) < 3
+
+    monkeypatch.setattr(attach, "alive", alive)
+
+    outcome = _follow(session)
+    shown = terminal.shown()
+
+    assert outcome.status == 0
+    assert len(polls) == 3
+    assert b"\x1b[1;29r" in shown  # the region was taken
+    assert shown.rindex(b"\x1b[r") > shown.rindex(b"\x1b[1;29r")  # and released
+    assert "→ 5173 (~/dev/lab/gulch)".encode() in shown
+
+
+def test_follow_forward_without_bar_still_follows(
+    terminal, forward_state, tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setattr(statusbar, "_terminal_size", lambda: (120, 30))
+    session = _forward(tmp_path)
+    _set_route(session, "up")
+    monkeypatch.setattr(attach, "alive", lambda item: False)
+
+    outcome = _follow(session, bar=False)
+    shown = terminal.shown()
+
+    assert outcome.status == 0
+    assert b"forwarding api.localhost" in shown
+    assert b"\x1b[1;29r" not in shown
+
+
+def test_sessions_attach_follows_a_forward(
+    forward_state, tmp_path, monkeypatch
+) -> None:
+    from click.testing import CliRunner
+
+    from localghost import cli
+
+    # Attached in another terminal: a forward has no socket, but is followable.
+    _forward(tmp_path, detached=False)
+    followed = []
+
+    def follow_forward(session, *, bar, public_origin, secondary_origin):
+        followed.append((session.name, bar, public_origin, secondary_origin))
+        return attach.Outcome(None)
+
+    monkeypatch.setattr(cli, "session_alive", lambda item: True)
+    monkeypatch.setattr(sessions, "alive", lambda item: True)
+    monkeypatch.setattr(cli, "supervised_run_available", lambda: True)
+    monkeypatch.setattr(cli, "follow_forward", follow_forward)
+    monkeypatch.setattr(cli, "_proxy_origin", lambda name: f"http://{name}.localhost")
+    monkeypatch.setattr(cli, "_tailnet_origin", lambda name: None)
+
+    result = CliRunner().invoke(cli.cli, ["sessions", "attach", "api"])
+
+    assert result.exit_code == 0, result.output
+    assert followed == [("api", True, "http://api.localhost", None)]

@@ -196,7 +196,8 @@ def discard(session: Session) -> None:
     _path(session.id).unlink(missing_ok=True)
 
 
-def _read(session_id: str) -> Session | None:
+def read(session_id: str) -> Session | None:
+    """The record for `session_id` as now saved, or None once it is gone."""
     try:
         payload = json.loads(_path(session_id).read_text(encoding="utf-8"))
         return Session(**payload)
@@ -206,7 +207,7 @@ def _read(session_id: str) -> Session | None:
 
 def mark_detached(session_id: str, detached: bool) -> None:
     """Note whether a terminal is attached; a stopped record stays gone."""
-    session = _read(session_id)
+    session = read(session_id)
     if session is not None:
         session.detached = detached
         save(session)
@@ -214,7 +215,7 @@ def mark_detached(session_id: str, detached: bool) -> None:
 
 def mark_ended(session_id: str) -> None:
     """Keep a finished run's record, with its log, once its route has gone."""
-    session = _read(session_id)
+    session = read(session_id)
     if session is not None:
         session.pid = None
         session.bridge_project = None

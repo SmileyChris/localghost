@@ -82,7 +82,7 @@ def _run(session, script, **overrides) -> int:
 
 
 def _record(session) -> sessions.Session:
-    return sessions._read(session.id)
+    return sessions.read(session.id)
 
 
 def _state_of(name=NAME):

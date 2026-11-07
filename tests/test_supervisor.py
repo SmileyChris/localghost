@@ -215,7 +215,7 @@ def test_a_stop_signals_the_application_and_reports_its_status(supervised) -> No
 
     assert client.wait_for_exit()["status"] == 130
     assert b"SIGNAL SIGINT" in client.output
-    _eventually(lambda: sessions._read(session.id) is None)
+    _eventually(lambda: sessions.read(session.id) is None)
 
 
 def test_leaving_keeps_the_application_and_marks_it_detached(
@@ -228,14 +228,14 @@ def test_leaving_keeps_the_application_and_marks_it_detached(
 
     first.close()
 
-    _eventually(lambda: sessions._read(session.id).detached)
+    _eventually(lambda: sessions.read(session.id).detached)
     assert registry.entries()[0].detached is True
     assert sessions.alive(session)
 
     second = _Connection(path)
     # What it missed is replayed, and input still works.
     second.wait_for_output(b"CTTY ok")
-    _eventually(lambda: not sessions._read(session.id).detached)
+    _eventually(lambda: not sessions.read(session.id).detached)
     assert registry.entries()[0].detached is False
     second.socket.sendall(supervisor.frame(supervisor.INPUT, b"back\n"))
     second.wait_for_output(b"GOT back")
@@ -292,11 +292,11 @@ def test_an_application_ending_unattended_leaves_its_record_and_log(
     _Connection(path).close()
 
     def ended() -> bool:
-        record = sessions._read(session.id)
+        record = sessions.read(session.id)
         return record is not None and record.pid is None
 
     _eventually(ended)
-    assert not sessions.alive(sessions._read(session.id))
+    assert not sessions.alive(sessions.read(session.id))
     assert b"bye" in (tmp_path / "demo.log").read_bytes()
 
 
@@ -317,9 +317,9 @@ def test_stop_ends_a_supervised_run_through_its_process(supervised) -> None:
     client = _Connection(path)
     client.wait_for_output(b"CTTY ok")
     client.close()
-    _eventually(lambda: sessions._read(session.id).detached)
+    _eventually(lambda: sessions.read(session.id).detached)
 
-    stopping = sessions._read(session.id)
+    stopping = sessions.read(session.id)
     pid = stopping.pid
     deadline = time.monotonic() + 15
     os.kill(pid, signal.SIGTERM)
@@ -651,10 +651,10 @@ def test_the_last_client_leaving_marks_the_run_detached(server, tmp_path) -> Non
     second, other = _client_of(server)
 
     server._drop(one)
-    assert sessions._read(session.id).detached is False
+    assert sessions.read(session.id).detached is False
     server._drop(other)
 
-    assert sessions._read(session.id).detached is True
+    assert sessions.read(session.id).detached is True
     first.close()
     second.close()
 
@@ -670,7 +670,7 @@ def test_leaving_as_the_run_ends_is_not_detaching(server, tmp_path) -> None:
 
     server._drop(client)
 
-    assert sessions._read(session.id).detached is False
+    assert sessions.read(session.id).detached is False
     theirs.close()
 
 

@@ -626,3 +626,24 @@ def test_a_disabled_bar_draws_nothing():
         pass
 
     assert stream.text == ""
+
+
+def test_a_ready_bar_shows_its_note():
+    drawn = visible(statusbar._bar_line(URL, 100, note="→ 5173 (~/dev/lab/gulch)"))
+
+    assert "→ 5173 (~/dev/lab/gulch)" in drawn
+    assert len(drawn) <= 99
+
+
+def test_waiting_again_brings_back_the_spinner_and_drops_the_note():
+    stream = Stream()
+
+    with statusbar.pinned(URL, stream=stream) as bar:
+        bar.ready("→ 5173")
+        assert "→ 5173" in visible(stream.chunks[-1])
+        bar.status("nothing listening on 5173", waiting=True)
+        latest = visible(stream.chunks[-1])
+        assert not bar.ready_event.is_set()
+
+    assert "nothing listening on 5173" in latest
+    assert "→ 5173" not in latest

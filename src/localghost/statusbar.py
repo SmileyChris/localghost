@@ -73,6 +73,7 @@ def _bar_line(
     spinner: str | None = None,
     message: str = "starting",
     detachable: bool = False,
+    note: str | None = None,
 ) -> str:
     """Render the bar, budgeted to stay a cell short of the row's width.
 
@@ -82,7 +83,9 @@ def _bar_line(
     A `spinner` frame marks the application as still starting: the URL is
     dimmed until it actually answers, so the bar doubles as the readiness
     signal rather than inviting a click that would 502. `message` names the
-    step being waited on, and is shown only while the spinner is.
+    step being waited on, and is shown only while the spinner is. A `note`
+    takes its place once ready, for a fact worth keeping on screen (where a
+    forward's hostname leads).
 
     A `secondary` URL (the mirrored tailnet route) rides beside the primary
     when the row has room. As the window narrows, the hints go first, detaching
@@ -90,7 +93,8 @@ def _bar_line(
     """
     budget = width - 1
     wordmark = " localghost  "
-    status = f"{spinner} {message}  " if spinner else ""
+    shown_note = f"{note}  " if note else ""
+    status = f"{spinner} {message}  " if spinner else shown_note
     room = budget - len(wordmark) - len(status)
     if secondary is not None and room < len(url) + len(_SEPARATOR) + len(secondary):
         secondary = None
@@ -108,9 +112,10 @@ def _bar_line(
     )
     shown = url[: max(0, room - len(hint))] if len(base) + len(hint) > room else url
     padding = " " * max(0, room - len(shown) - len(hint) - (len(base) - len(url)))
-    rendered_status = (
-        f"{_fg(MINT)}{spinner}{_RESET} {_DIM}{message}{_RESET}  " if spinner else ""
-    )
+    if spinner:
+        rendered_status = f"{_fg(MINT)}{spinner}{_RESET} {_DIM}{message}{_RESET}  "
+    else:
+        rendered_status = f"{_DIM}{note}{_RESET}  " if note else ""
     rendered_hint = f"{_DIM}{hint}{_RESET}" if hint else ""
     url_style = _DIM if spinner else _fg(MINT)
     rendered_secondary = (
@@ -227,6 +232,7 @@ class _Bar:
         self._stream = stream
         self._probe = probe
         self._message = message
+        self._note: str | None = None
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._previous_winch: object = None
@@ -260,19 +266,30 @@ class _Bar:
             spinner=spinner,
             message=self._message,
             detachable=self._detachable,
+            note=self._note,
         )
         self._emit(
             f"{_SAVE_CURSOR}\x1b[{height};1H\x1b[2K{line}{_RESET}{_RESTORE_CURSOR}"
         )
 
-    def ready(self) -> None:
-        """Mark the application as answering and repaint without the spinner."""
+    def ready(self, note: str | None = None) -> None:
+        """Mark the application as answering and repaint without the spinner.
+
+        A `note` is shown beside the URL while it stays ready.
+        """
+        self._note = note
         self.ready_event.set()
         self.draw()
 
-    def status(self, message: str) -> None:
-        """Name the step now being waited on, without ending the wait."""
+    def status(self, message: str, *, waiting: bool = False) -> None:
+        """Name the step now being waited on, without ending the wait.
+
+        `waiting` starts the wait again on a bar that was ready, spinner and
+        all: a forward's server can go away and come back.
+        """
         self._message = message
+        if waiting:
+            self.ready_event.clear()
         self.draw()
 
     def resize(self) -> None:
@@ -355,10 +372,10 @@ class _Disabled:
     def resize(self) -> None:
         pass
 
-    def ready(self) -> None:
+    def ready(self, note: str | None = None) -> None:
         pass
 
-    def status(self, message: str) -> None:
+    def status(self, message: str, *, waiting: bool = False) -> None:
         pass
 
     def stop(self) -> None:
