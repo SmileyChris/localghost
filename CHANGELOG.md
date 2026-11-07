@@ -5,6 +5,26 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `localghost forward NAME PORT` gives a hostname to a server Localghost did not
+  start, such as a debugger session or a `docker run -p` container. The route
+  follows the port: it goes down (to the ghost page) when nothing listens and
+  returns when a server does. Options are `--detach` and `--no-status-bar`;
+  `forward NAME` reuses a remembered forward's port. `restart`, `sessions list`,
+  `sessions logs`, `sessions attach` and `sessions stop` work on forwards.
+- `run` suggests `forward` when its port is held by a server started from inside
+  the project.
+
+### Changed
+
+- `sessions list --json` can now report `mode: "forward"` and `type: "forward"`
+  with `directory: null`. Consumers that assume a directory string need to handle
+  it. Session records gain a `route` field and registry entries an optional
+  `forward_state`, so an older Localghost may list new ones as unreadable.
+- The hub's ghost page for a forward shows its port instead of a directory, so
+  the hub image is rebuilt with the release.
+
 ## [4.6.0] - 2026-10-30
 
 ### Added

@@ -10,16 +10,22 @@ PROJECT_A=${TEST_PROJECT_A:-localghost-fixture-a}
 PROJECT_B=${TEST_PROJECT_B:-localghost-fixture-b}
 HOST_PROJECT=${TEST_HOST_PROJECT:-localghost-fixture-host}
 DOCKERFILE_PROJECT=${TEST_DOCKERFILE_PROJECT:-localghost-fixture-dockerfile}
+FORWARD_NAME=lg-forward-fixture
+FORWARD_BRIDGE_PROJECT="localghost-forward-${FORWARD_NAME}"
 DEFAULT_PORT=${TEST_DEFAULT_PORT:-80}
 ALTERNATE_PORT=${TEST_ALTERNATE_PORT:-18080}
 HOST_APP_PORT=${TEST_HOST_APP_PORT:-19090}
 HTTPS_PORT=${TEST_HTTPS_PORT:-18443}
+FORWARD_APP_PORT=${TEST_FORWARD_APP_PORT:-19091}
 ACTIVE_PORT=${DEFAULT_PORT}
 OWNS_RESOURCES=0
 HOST_DIR=''
 DOCKERFILE_DIR=''
 HOST_SERVER_PID=''
 HOST_RUN_PID=''
+FORWARD_DIR=''
+FORWARD_SERVER_PID=''
+FORWARD_STARTED=0
 PUBLIC_ROOT_FILE=''
 GHOST_REGISTRY_FILE=''
 LOCALGHOST_IMAGE_TAG="v$(uv run --frozen localghost --version)"
@@ -63,6 +69,44 @@ dockerfile_app() {
     docker compose -f "${DOCKERFILE_DIR}/compose.yaml" "$@"
 }
 
+forward_cli() {
+  LOCALGHOST_HTTP_PORT="${ACTIVE_PORT}" \
+    uv run --frozen --project "${ROOT_DIR}" localghost "$@"
+}
+
+start_forward_server() {
+  (
+    cd "${FORWARD_DIR}"
+    exec python3 -m http.server "${FORWARD_APP_PORT}" --bind 127.0.0.1
+  ) >>"${FORWARD_DIR}/server.log" 2>&1 &
+  FORWARD_SERVER_PID=$!
+}
+
+stop_forward_server() {
+  kill "${FORWARD_SERVER_PID}" >/dev/null 2>&1 || true
+  wait "${FORWARD_SERVER_PID}" >/dev/null 2>&1 || true
+  FORWARD_SERVER_PID=''
+}
+
+# Poll the forward's hostname for an HTTP status (and, optionally, a body
+# fragment), since the route takes a second or two to come up or go down.
+wait_for_forward_status() {
+  local expected_status=$1
+  local expected_body=${2:-}
+  local attempt body status
+  for attempt in $(seq 1 30); do
+    body=$(curl --noproxy '*' --silent --max-time 2 \
+      --header 'Accept: text/html' --header "Host: ${FORWARD_NAME}.localhost" \
+      --write-out '\n%{http_code}' "http://127.0.0.1:${ACTIVE_PORT}/" 2>/dev/null || true)
+    status=${body##*$'\n'}
+    if [[ ${status} == "${expected_status}" && ${body} == *"${expected_body}"* ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+  fail "${FORWARD_NAME}.localhost did not return ${expected_status} containing '${expected_body}'"
+}
+
 cleanup() {
   local exit_code=$?
   trap - EXIT INT TERM
@@ -79,6 +123,16 @@ cleanup() {
     if [[ -n ${DOCKERFILE_DIR} && -f ${DOCKERFILE_DIR}/compose.yaml ]]; then
       dockerfile_app down --remove-orphans --volumes >/dev/null 2>&1 || true
     fi
+    if [[ ${FORWARD_STARTED} == 1 ]]; then
+      forward_cli sessions stop "${FORWARD_NAME}" >/dev/null 2>&1 || true
+      forward_bridge_ids=$(docker ps -aq \
+        --filter "label=com.docker.compose.project=${FORWARD_BRIDGE_PROJECT}" \
+        2>/dev/null || true)
+      if [[ -n ${forward_bridge_ids} ]]; then
+        # shellcheck disable=SC2086
+        docker rm -f ${forward_bridge_ids} >/dev/null 2>&1 || true
+      fi
+    fi
     app "${PROJECT_A}" down --remove-orphans --volumes >/dev/null 2>&1 || true
     app "${PROJECT_B}" down --remove-orphans --volumes >/dev/null 2>&1 || true
     if [[ -n ${PUBLIC_ROOT_FILE} ]]; then
@@ -90,6 +144,13 @@ cleanup() {
   if [[ -n ${HOST_SERVER_PID} ]]; then
     kill "${HOST_SERVER_PID}" >/dev/null 2>&1 || true
     wait "${HOST_SERVER_PID}" >/dev/null 2>&1 || true
+  fi
+  if [[ -n ${FORWARD_SERVER_PID} ]]; then
+    kill "${FORWARD_SERVER_PID}" >/dev/null 2>&1 || true
+    wait "${FORWARD_SERVER_PID}" >/dev/null 2>&1 || true
+  fi
+  if [[ -n ${FORWARD_DIR} ]]; then
+    rm -rf "${FORWARD_DIR}"
   fi
   if [[ -n ${HOST_DIR} ]]; then
     rm -rf "${HOST_DIR}"
@@ -226,7 +287,7 @@ export LOCALGHOST_REGISTRY_DIR
 mkdir -p "${LOCALGHOST_REGISTRY_DIR}"
 
 for project in localghost "${PROJECT_A}" "${PROJECT_B}" "${HOST_PROJECT}" \
-  "${DOCKERFILE_PROJECT}"; do
+  "${DOCKERFILE_PROJECT}" "${FORWARD_BRIDGE_PROJECT}"; do
   if [[ -n $(docker ps -aq --filter "label=com.docker.compose.project=${project}") ]]; then
     fail "Compose project '${project}' already exists; remove it before running this destructive integration test"
   fi
@@ -482,5 +543,44 @@ alternate_proxy_id=$(proxy ps -q traefik)
 assert_loopback_publication "${alternate_proxy_id}" "${ALTERNATE_PORT}"
 assert_equal "${b_web_id}" "$(app "${PROJECT_B}" ps -q web)" 'Consumer ID after port change'
 wait_for_body "${PROJECT_B}.localhost" "Hostname: ${b_web_hostname}" >/dev/null
+
+log 'Forward a server that localghost did not start'
+FORWARD_DIR=$(mktemp -d)
+start_forward_server
+for attempt in $(seq 1 20); do
+  if curl --noproxy '*' --silent --max-time 1 --output /dev/null \
+    "http://127.0.0.1:${FORWARD_APP_PORT}/"; then
+    break
+  fi
+  [[ ${attempt} != 20 ]] || fail 'Forward fixture server did not start'
+  sleep 0.5
+done
+FORWARD_STARTED=1
+forward_cli forward "${FORWARD_NAME}" "${FORWARD_APP_PORT}" --detach
+wait_for_forward_status 200
+
+# Nothing listening: the bridge goes down after its grace period and the
+# hostname answers with the ghost page.
+stop_forward_server
+sleep 7
+wait_for_forward_status 503 'is waiting'
+
+# The same server returning brings the route back without any command.
+start_forward_server
+wait_for_forward_status 200
+
+forward_cli sessions stop "${FORWARD_NAME}"
+kill -0 "${FORWARD_SERVER_PID}" 2>/dev/null || \
+  fail 'sessions stop on a forward must leave the forwarded server running'
+for attempt in $(seq 1 20); do
+  if [[ -z $(docker ps -aq --filter "label=com.docker.compose.project=${FORWARD_BRIDGE_PROJECT}") ]]; then
+    break
+  fi
+  [[ ${attempt} != 20 ]] || fail 'Forward bridge container was not removed by sessions stop'
+  sleep 1
+done
+if docker ps --format '{{.Names}}' | grep -q "^${FORWARD_BRIDGE_PROJECT}"; then
+  fail 'A localghost-forward container is still running after sessions stop'
+fi
 
 log 'All integration checks passed'

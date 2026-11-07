@@ -239,6 +239,9 @@ starts, Localghost refuses to start rather than launching an application onto
 a URL that would serve whatever was already there. On Linux the error names
 the process holding the port and its working directory, and it always says
 how to get past it: stop that process, or choose another port with `--port`.
+When that process is in your project (a dev server you started yourself), it also
+suggests `localghost forward NAME PORT` to give the running server its hostname
+instead; see [Forwarding a running server](#forwarding-a-running-server).
 
 The bar is drawn with a terminal scrolling region that covers every row except
 the last, which leaves the terminal's own scrollback intact: scrolling up
@@ -323,6 +326,75 @@ continues to control only the hub.
 
 The app is available at `https://my-django-project.localhost`. Press Ctrl+C to
 stop it.
+
+### Forwarding a running server
+
+`run` starts the application itself. When something else has to own the process,
+such as a debugger, an IDE run configuration, a process manager or a plain
+`docker run`, give its port a hostname instead:
+
+```sh
+localghost forward api 5173            # api.localhost -> this host's port 5173
+localghost forward api 5173 --detach   # leave it running in the background
+localghost forward api                 # a forward Localghost remembers: its last port
+```
+
+Both the name and the port are required the first time, because nothing ties a
+listening port to the current directory. `forward NAME` alone reuses the port of
+a forward Localghost remembers. `--no-status-bar` turns the status bar off, as
+for `run`. A forward has no directory and starts nothing: Localghost owns only
+its own small background process and the bridge, and never signals your server.
+
+In a terminal, `forward` follows the forward's log under the same status bar as
+`run`, showing the URL and the port it reaches. Ctrl+C stops the forward and
+leaves your server alone. Ctrl+Z, or closing the terminal, disconnects and the
+forward keeps running; `localghost sessions attach NAME`, or plain
+`localghost forward NAME`, reconnects. Without a terminal, such as in a script,
+`forward` behaves as `--detach`.
+
+The route is up while a matching server listens on the port, and the forward
+lasts until you stop it. Five seconds after nothing is listening the route goes
+down and the hostname shows its ghost page ("is waiting"), then comes back on its
+own when a server returns, so stopping and restarting a debugger needs nothing
+from you. If nothing is listening when the forward starts, it says so:
+
+```text
+nothing is listening on 5173 yet; api.localhost will serve it once something does
+```
+
+On Linux the forward pins the working directory of the first process it sees
+holding the port, so a different project that later takes the port is not
+served under this name:
+
+```text
+port 5173 is held by ~/dev/other (pid 41022); not routing api
+```
+
+Where the holder cannot be read (another user's process, `docker run -p`, or a
+platform without `/proc`), it follows the port instead and says so:
+
+```text
+cannot tell which process owns 5173; api.localhost will serve whatever listens there
+```
+
+A loopback-only server is reached through the same relay a host run uses; see
+[Loopback-bound servers](#loopback-bound-servers).
+
+`forward` refuses ports Localghost already routes: the hub's own HTTP and HTTPS
+ports, the port of a running `run` or of another forward
+(`5173 is blog's port; it is already at blog.localhost`), and any port published
+by a container on the `localghost` network. It also refuses a name that a
+remembered project already uses; pick another name, or drop the project with
+`localghost sessions forget NAME`. A running forward asked for a different port
+refuses too; use `restart` or `sessions stop` first.
+
+`localghost restart NAME` restarts a forward, and `sessions list` shows it with
+mode `forward` and `→ port N` in place of a directory. While the route is down
+it reads `running (waiting)`, or `running (failing)` when no route can be made,
+for example because the server listens only on loopback and no relay is
+possible. In `sessions list --json` a forward has `mode: "forward"`,
+`type: "forward"` and `directory: null`. `sessions stop NAME` signals only the
+forward's own process.
 
 ### Custom port
 

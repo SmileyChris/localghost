@@ -80,12 +80,15 @@ Add `--detach` to `run` to keep an application going in the background, then
 use `sessions`, `sessions logs NAME -f`, `sessions attach NAME`, `restart NAME`, and
 `sessions stop NAME` to manage it.
 
+Already running the server yourself, from a debugger or another tool? Use
+`localghost forward NAME PORT` to give its port a hostname.
+
 ## Documentation
 
 Start at the [documentation home](docs/index.md), or jump straight in:
 
 - [Run host applications](docs/running-host-apps.md): project types, ports,
-  detached sessions, and `.localghost.toml`.
+  detached sessions, forwarding a running server, and `.localghost.toml`.
 - [Save project setup](docs/saving-setup.md): what `save` writes and how to
   update it safely.
 - [Integrate applications](docs/integrating-applications.md): the Compose

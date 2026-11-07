@@ -53,7 +53,8 @@ Both are opt-in; the ordinary `.localhost` routes stay loopback-only.
 **Use localghost**
 
 - [Run host applications](running-host-apps.md): the project types localghost
-  detects, default ports, `--type`, detached sessions, and `.localghost.toml`.
+  detects, default ports, `--type`, detached sessions, forwarding a server you
+  started yourself, and `.localghost.toml`.
 - [Save project setup](saving-setup.md): what `save` writes, custom commands,
   and updating a saved setup safely.
 - [Integrate applications](integrating-applications.md): the Compose contract

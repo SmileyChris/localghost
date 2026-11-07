@@ -210,6 +210,29 @@ one it skipped; a dev server that then ignores
 `--port` and comes up on its own default is the wrapper-script case described
 in [Wrapper scripts](running-host-apps.md#wrapper-scripts).
 
+## A forward says the port is held by another directory
+
+```text
+port 5173 is held by ~/dev/other (pid 41022); not routing api
+```
+
+On Linux, `localghost forward` pins the working directory of the first server it
+sees on the port, and will not serve a different project under the same name. The
+route stays down (the hostname shows its ghost page) until a matching server
+listens again. If the first holder was the wrong one, run
+`localghost sessions stop api` and forward again once the right server is up.
+
+A port published with `docker run -p` is held by a root-owned `docker-proxy`
+process, so its identity is always unknown. The forward follows the port and
+says so:
+
+```text
+cannot tell which process owns 5173; api.localhost will serve whatever listens there
+```
+
+The same applies to another user's process and to platforms without `/proc`.
+See [Forwarding a running server](running-host-apps.md#forwarding-a-running-server).
+
 ## The application is listening on another port
 
 ```
