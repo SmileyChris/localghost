@@ -374,3 +374,90 @@ func TestTailnetReaderGetsNoGhostPageForAStoppedProject(t *testing.T) {
 		t.Fatalf("not-found page should link running projects and the index:\n%s", body)
 	}
 }
+
+func writeForward(t *testing.T, dir, name, state string) {
+	t.Helper()
+	payload := `{
+  "hostname": "` + name + `.localhost",
+  "name": "` + name + `",
+  "directory": null,
+  "type": "forward",
+  "last_started": "` + time.Now().Add(-26*time.Hour).Format(time.RFC3339) + `",
+  "detached": false,
+  "isolated": false,
+  "flags": {"type": null, "root": null, "port": 5173, "config": null, "isolate": false, "command": []},
+  "forward_state": ` + state + `
+}`
+	if err := os.WriteFile(filepath.Join(dir, name+".json"), []byte(payload), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestForwardWaitingPage(t *testing.T) {
+	dir := t.TempDir()
+	writeForward(t, dir, "api", `"waiting"`)
+	body := get(handler(t, dir), "api.localhost", "text/html").Body.String()
+	for _, want := range []string{"api", "is waiting", "Forwarding to port 5173; nothing is serving it.", "uvx localghost sessions forget api"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body missing %q:\n%s", want, body)
+		}
+	}
+	for _, unwanted := range []string{"restart api", "is offline"} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("body has %q:\n%s", unwanted, body)
+		}
+	}
+}
+
+func TestForwardStoppedPage(t *testing.T) {
+	dir := t.TempDir()
+	writeForward(t, dir, "api", `"stopped"`)
+	body := get(handler(t, dir), "api.localhost", "text/html").Body.String()
+	for _, want := range []string{"is offline", "A forward to port 5173, last started 26 hours ago", "uvx localghost restart api", "uvx localghost sessions forget api"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "is waiting") {
+		t.Fatalf("stopped forward reads as waiting:\n%s", body)
+	}
+}
+
+func TestForwardNullDirectory(t *testing.T) {
+	dir := t.TempDir()
+	writeForward(t, dir, "api", `null`)
+	h := handler(t, dir)
+	rec := get(h, "api.localhost", "text/html")
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "<code></code>") {
+		t.Fatalf("empty code element:\n%s", body)
+	}
+	if !strings.Contains(body, "A forward to port 5173") {
+		t.Fatalf("null state should read as stopped:\n%s", body)
+	}
+	list := get(h, "other.localhost", "text/html").Body.String()
+	if !strings.Contains(list, "→ port 5173") {
+		t.Fatalf("list row missing port:\n%s", list)
+	}
+}
+
+func TestProjectEntryUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	writeEntry(t, dir, "blog", "blog.localhost")
+	h := handler(t, dir)
+	body := get(h, "blog.localhost", "text/html").Body.String()
+	for _, want := range []string{"is offline", "A django project last started 26 hours ago from", "<code>/home/dev/blog</code>", "uvx localghost restart blog"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "is waiting") || strings.Contains(body, "A forward") {
+		t.Fatalf("project reads as a forward:\n%s", body)
+	}
+	if list := get(h, "other.localhost", "text/html").Body.String(); strings.Contains(list, "→ port") {
+		t.Fatalf("project row has a port:\n%s", list)
+	}
+}

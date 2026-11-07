@@ -47,6 +47,12 @@ type entry struct {
 	LastStarted string `json:"last_started"`
 	Detached    bool   `json:"detached"`
 	Isolated    bool   `json:"isolated"`
+	// ForwardState is "waiting" or "stopped" for a forward, empty otherwise
+	// (and for a forward whose route is up, which never reaches a ghost page).
+	ForwardState string `json:"forward_state"`
+	Flags        struct {
+		Port int `json:"port"`
+	} `json:"flags"`
 }
 
 type Fallback struct {
@@ -382,11 +388,20 @@ const pageTemplate = `<!doctype html>
   {{end}}
   {{end}}
 {{else if .Ghost}}
+  {{if .Ghost.Waiting}}
+  <h1><img class="ghost-inline" src="{{.Icon}}" alt="">{{.Ghost.Name}} <span class="quiet">is waiting</span></h1>
+  <p>Forwarding to port {{.Ghost.Port}}; nothing is serving it.</p>
+  {{else}}
   <h1><img class="ghost-inline" src="{{.Icon}}" alt="">{{.Ghost.Name}} <span class="quiet">is offline</span></h1>
+  {{if .Ghost.Forward}}
+  <p>A forward to port {{.Ghost.Port}}, last started {{.Ghost.Relative}}.</p>
+  {{else}}
   <p>A {{.Ghost.Type}} project last started {{.Ghost.Relative}} from
      <code>{{.Ghost.Directory}}</code>.</p>
+  {{end}}
   <p>Bring it back:</p>
   <p><button class="cmd" data-cmd="uvx localghost restart {{.Ghost.Name}}">uvx localghost restart {{.Ghost.Name}}</button></p>
+  {{end}}
   <p class="muted">Or lay it to rest:
      <button class="cmd cmd-quiet" data-cmd="uvx localghost sessions forget {{.Ghost.Name}}">uvx localghost sessions forget {{.Ghost.Name}}</button></p>
 {{else}}
@@ -426,7 +441,7 @@ for (const chip of document.querySelectorAll(".cmd")) {
     <li class="project{{if not .Running}} idle{{end}}">
       <a class="project-name" href="//{{.Hostname}}{{if $.Port}}:{{$.Port}}{{end}}">{{.Hostname}}</a>
       <span class="project-type">{{.Type}}</span>
-      {{if .Directory}}<span class="project-dir">{{.Directory}}</span>{{end}}
+      {{if .Directory}}<span class="project-dir">{{.Directory}}</span>{{else if .Forward}}<span class="project-dir">→ port {{.Port}}</span>{{end}}
       {{if .Running}}<span class="project-when running">Running {{.Mode}}</span>
       {{else}}<span class="project-when">Last started {{.Relative}}</span>{{end}}
     </li>
@@ -442,6 +457,9 @@ type pageEntry struct {
 	Relative  string
 	Running   bool
 	Mode      string // "in the foreground" or "detached", then ", isolated"
+	Forward   bool
+	Waiting   bool // a forward whose port nothing is serving yet
+	Port      int
 }
 
 // The view's values are copied in rather than embedded: Yaegi, which
@@ -500,6 +518,8 @@ func pageEntries(entries []entry, online map[string]bool, v view) []pageEntry {
 			Relative:  relativeTime(e.LastStarted),
 			Running:   online[e.Hostname],
 			Mode:      mode(e.Detached, e.Isolated),
+			Forward:   e.Type == "forward",
+			Port:      e.Flags.Port,
 		})
 	}
 	return known
@@ -550,16 +570,30 @@ func (f *Fallback) respondGhost(rw http.ResponseWriter, e entry, wantsHTML bool)
 	if !wantsHTML {
 		rw.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		rw.WriteHeader(http.StatusServiceUnavailable)
-		fmt.Fprintf(rw, "%s is offline. Last started %s from %s.\nRun: uvx localghost restart %s\n",
-			e.Name, relative, e.Directory, e.Name)
+		switch {
+		case e.Type == "forward" && e.ForwardState == "waiting":
+			fmt.Fprintf(rw, "%s is waiting. Forwarding to port %d; nothing is serving it.\n", e.Name, e.Flags.Port)
+		case e.Type == "forward":
+			fmt.Fprintf(rw, "%s is offline. A forward to port %d, last started %s.\nRun: uvx localghost restart %s\n",
+				e.Name, e.Flags.Port, relative, e.Name)
+		default:
+			fmt.Fprintf(rw, "%s is offline. Last started %s from %s.\nRun: uvx localghost restart %s\n",
+				e.Name, relative, e.Directory, e.Name)
+		}
 		return
 	}
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 	rw.WriteHeader(http.StatusServiceUnavailable)
+	forward := e.Type == "forward"
+	waiting := forward && e.ForwardState == "waiting"
+	title := e.Name + " is offline"
+	if waiting {
+		title = e.Name + " is waiting"
+	}
 	_ = page.Execute(rw, pageData{
 		Suffix: "localhost",
 		Home:   "localhost",
-		Title:  e.Name + " is offline",
+		Title:  title,
 		Icon:   ghostURL,
 		Ghost: &pageEntry{
 			Hostname:  e.Hostname,
@@ -567,6 +601,9 @@ func (f *Fallback) respondGhost(rw http.ResponseWriter, e entry, wantsHTML bool)
 			Directory: e.Directory,
 			Type:      e.Type,
 			Relative:  relative,
+			Forward:   forward,
+			Waiting:   waiting,
+			Port:      e.Flags.Port,
 		},
 	})
 }
