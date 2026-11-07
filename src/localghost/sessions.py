@@ -8,15 +8,17 @@ then says whether a terminal is attached to.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import signal
 import subprocess
 import time
 import uuid
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import suppress
-from dataclasses import dataclass
+from contextlib import contextmanager, suppress
+from dataclasses import dataclass, fields
 from pathlib import Path
 
 import click
@@ -63,13 +65,56 @@ def _path(session_id: str) -> Path:
     return state_dir() / f"{session_id}.json"
 
 
+def _lock_path(session_id: str) -> Path:
+    return state_dir() / f"{session_id}.lock"
+
+
 def save(session: Session) -> None:
+    """Write a whole record; changes to an existing one go through `update`."""
     state_dir().mkdir(parents=True, exist_ok=True)
-    temporary = _path(session.id).with_suffix(".tmp")
-    temporary.write_text(
-        json.dumps(session.as_dict(), indent=2) + "\n", encoding="utf-8"
-    )
-    temporary.replace(_path(session.id))
+    # A name of its own per writer, so two writers never share a temp file.
+    temporary = state_dir() / f"{session.id}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+    try:
+        temporary.write_text(
+            json.dumps(session.as_dict(), indent=2) + "\n", encoding="utf-8"
+        )
+        temporary.replace(_path(session.id))
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+@contextmanager
+def _locked(session_id: str) -> Iterator[None]:
+    state_dir().mkdir(parents=True, exist_ok=True)
+    with _lock_path(session_id).open("a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+_FIELDS = frozenset(item.name for item in fields(Session)) - {"id"}
+
+
+def update(session_id: str, **changes: object) -> Session | None:
+    """Change only `changes` in a record, or do nothing once it is gone.
+
+    The CLI and a forward's leader both change the same record: one its pid,
+    the other its route. Each re-reads under the record's lock and writes
+    back only its own fields, so neither loses the other's.
+    """
+    unknown = set(changes) - _FIELDS
+    if unknown:
+        raise TypeError(f"not session fields: {', '.join(sorted(unknown))}")
+    with _locked(session_id):
+        session = read(session_id)
+        if session is None:
+            return None
+        for key, value in changes.items():
+            setattr(session, key, value)
+        save(session)
+        return session
 
 
 def sessions() -> list[Session]:
@@ -133,13 +178,9 @@ def set_route(
     bridge_yaml: str,
 ) -> None:
     """Record a forward's route and bridge in one atomic save."""
-    session = next((item for item in sessions() if item.id == session_id), None)
-    if session is None:
-        return
-    session.route = route
-    session.bridge_project = bridge_project
-    session.bridge_yaml = bridge_yaml
-    save(session)
+    update(
+        session_id, route=route, bridge_project=bridge_project, bridge_yaml=bridge_yaml
+    )
 
 
 def alive(session: Session) -> bool:
@@ -193,7 +234,7 @@ def recorded_at(session: Session) -> float:
 
 def discard(session: Session) -> None:
     """Drop a record whose application has already shut itself down."""
-    _path(session.id).unlink(missing_ok=True)
+    discard_by_id(session.id)
 
 
 def read(session_id: str) -> Session | None:
@@ -207,33 +248,33 @@ def read(session_id: str) -> Session | None:
 
 def mark_detached(session_id: str, detached: bool) -> None:
     """Note whether a terminal is attached; a stopped record stays gone."""
-    session = read(session_id)
-    if session is not None:
-        session.detached = detached
-        save(session)
+    update(session_id, detached=detached)
 
 
 def mark_ended(session_id: str) -> None:
     """Keep a finished run's record, with its log, once its route has gone."""
-    session = read(session_id)
-    if session is not None:
-        session.pid = None
-        session.bridge_project = None
-        session.bridge_yaml = ""
-        session.socket = ""
-        session.detached = True
-        save(session)
+    update(
+        session_id,
+        pid=None,
+        bridge_project=None,
+        bridge_yaml="",
+        socket="",
+        detached=True,
+    )
 
 
 def _remove(session: Session) -> None:
     # A supervisor that was killed outright left its socket behind.
     if session.socket:
         Path(session.socket).unlink(missing_ok=True)
-    _path(session.id).unlink(missing_ok=True)
+    discard_by_id(session.id)
 
 
 def discard_by_id(session_id: str) -> None:
     _path(session_id).unlink(missing_ok=True)
+    # Best-effort: a writer still holding it finds the record gone and stops.
+    with suppress(OSError):
+        _lock_path(session_id).unlink(missing_ok=True)
 
 
 def socket_path_for(name: str) -> str:
@@ -347,9 +388,7 @@ def reap() -> int:
     with ThreadPoolExecutor() as pool:
         list(pool.map(_stop_bridge, stale))
     for session in stale:
-        session.bridge_project = None
-        session.bridge_yaml = ""
-        save(session)
+        update(session.id, bridge_project=None, bridge_yaml="")
         if session.mode == "forward":
             registry.set_forward_state(session.name, "stopped")
     if len(names) == 1:

@@ -2321,10 +2321,14 @@ def _start_forward(name: str, port: int, *, detach: bool) -> Session:
     # Reap it when it exits, or a terminal following it would keep seeing a
     # zombie as alive.
     threading.Thread(target=child.wait, daemon=True).start()
-    # Re-read: the leader may already have written its route.
-    record = session_records.read(session.id) or session
-    record.pid = child.pid
-    session_records.save(record)
+    # Only the pid: the leader may already be writing its route.
+    record = session_records.update(session.id, pid=child.pid)
+    if record is None:
+        # Removed meanwhile (`sessions clean` takes a pid-less record for
+        # dead): put it back, so `sessions stop` can still find the leader.
+        session.pid = child.pid
+        session_records.save(session)
+        return session
     return record
 
 
