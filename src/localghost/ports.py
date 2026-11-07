@@ -126,8 +126,9 @@ class Holder:
 _LISTEN = "0A"
 
 
-def _listening_inodes(port: int) -> set[str]:
-    inodes = set()
+def _listening_rows() -> list[tuple[str, int, str]]:
+    """Every listening TCP socket as (host, port, inode), from /proc/net/tcp{,6}."""
+    found = []
     for table in ("/proc/net/tcp", "/proc/net/tcp6"):
         try:
             with open(table, encoding="ascii") as handle:
@@ -136,16 +137,65 @@ def _listening_inodes(port: int) -> set[str]:
             continue
         for row in rows:
             fields = row.split()
-            if (
-                len(fields) > 9
-                and fields[3] == _LISTEN
-                and int(fields[1].rsplit(":", 1)[1], 16) == port
-            ):
-                inodes.add(fields[9])
-    return inodes
+            if len(fields) > 9 and fields[3] == _LISTEN:
+                packed, port = fields[1].rsplit(":", 1)
+                found.append((_decode_address(packed), int(port, 16), fields[9]))
+    return found
 
 
-def holder(port: int) -> Holder | None:
+def _listening_inodes(port: int) -> dict[str, str]:
+    """Inode -> host for every socket listening on `port`."""
+    return {inode: host for host, p, inode in _listening_rows() if p == port}
+
+
+def _socket_owners(inodes: set[str]) -> dict[str, list[int]]:
+    """Inode -> pids holding it open, as far as /proc will show."""
+    owners: dict[str, list[int]] = {}
+    for descriptor in glob.glob("/proc/[0-9]*/fd/*"):
+        try:
+            target = os.readlink(descriptor)
+        except OSError:
+            # Another user's process, or one that exited mid-scan.
+            continue
+        if target.startswith("socket:[") and target[8:-1] in inodes:
+            owners.setdefault(target[8:-1], []).append(int(descriptor.split("/")[2]))
+    return owners
+
+
+@dataclass(frozen=True)
+class PortListener:
+    """A socket listening on a particular port."""
+
+    host: str
+    port: int
+    inode: str
+
+
+def listeners_on(
+    port: int,
+    *,
+    exclude_pids: frozenset[int] = frozenset(),
+    exclude_hosts: frozenset[str] = frozenset(),
+) -> list[PortListener]:
+    """Sockets listening on `port`, minus those of `exclude_pids` or `exclude_hosts`."""
+    if not _proc_available():
+        return []
+    found = [
+        PortListener(host, port, inode)
+        for inode, host in _listening_inodes(port).items()
+        if host not in exclude_hosts
+    ]
+    if exclude_pids and found:
+        owners = _socket_owners({item.inode for item in found})
+        found = [
+            item
+            for item in found
+            if not exclude_pids.intersection(owners.get(item.inode, ()))
+        ]
+    return found
+
+
+def holder(port: int, inodes: set[str] | None = None) -> Holder | None:
     """Name the process listening on `port`, as far as this host will say.
 
     Purely diagnostic, and only ever called on a path that is already about
@@ -154,24 +204,27 @@ def holder(port: int) -> Holder | None:
     process hides its descriptors, and a platform without /proc tells us
     nothing at all -- so every step degrades to a vaguer answer rather than
     to an error.
+
+    `inodes` narrows the question to particular sockets. When several
+    processes match, the one owning a loopback socket wins: it is the one a
+    forward would be talking to.
     """
     if not sys.platform.startswith("linux"):
         return None
-    inodes = _listening_inodes(port)
-    if not inodes:
+    hosts = _listening_inodes(port)
+    if inodes is not None:
+        hosts = {inode: host for inode, host in hosts.items() if inode in inodes}
+    if not hosts:
         return None
-    for descriptor in glob.glob("/proc/[0-9]*/fd/*"):
-        try:
-            target = os.readlink(descriptor)
-        except OSError:
-            # Another user's process, or one that exited mid-scan.
-            continue
-        if not target.startswith("socket:[") or target[8:-1] not in inodes:
-            continue
-        pid = int(descriptor.split("/")[2])
-        return Holder(pid=pid, command=_command(pid), directory=_directory(pid))
-    # Listening, but owned by somebody we cannot inspect.
-    return Holder()
+    candidates: dict[int, bool] = {}
+    for inode, pids in _socket_owners(set(hosts)).items():
+        for pid in pids:
+            candidates[pid] = candidates.get(pid, False) or _is_loopback(hosts[inode])
+    if not candidates:
+        # Listening, but owned by somebody we cannot inspect.
+        return Holder()
+    pid = next((p for p, loop in candidates.items() if loop), next(iter(candidates)))
+    return Holder(pid=pid, command=_command(pid), directory=_directory(pid))
 
 
 def _command(pid: int) -> str | None:
@@ -282,19 +335,11 @@ def listeners(pgid: int) -> list[Listener]:
     inodes = _group_socket_inodes(pgid)
     if not inodes:
         return []
-    found = []
-    for table in ("/proc/net/tcp", "/proc/net/tcp6"):
-        try:
-            with open(table, encoding="ascii") as handle:
-                rows = handle.read().splitlines()[1:]
-        except OSError:
-            continue
-        for row in rows:
-            fields = row.split()
-            if len(fields) > 9 and fields[3] == _LISTEN and fields[9] in inodes:
-                packed, port = fields[1].rsplit(":", 1)
-                found.append(Listener(_decode_address(packed), int(port, 16)))
-    return found
+    return [
+        Listener(host, port)
+        for host, port, inode in _listening_rows()
+        if inode in inodes
+    ]
 
 
 def loopback_only(pgid: int, port: int) -> Listener | None:

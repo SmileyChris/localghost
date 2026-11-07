@@ -225,3 +225,96 @@ def test_ephemeral_port_is_free_and_outside_the_dev_server_defaults():
     port = ports.ephemeral_port()
 
     assert port >= 1024 and ports.port_available(port)
+
+
+def _bound(family, host, port=0, v6only=False):
+    sock = socket.socket(family, socket.SOCK_STREAM)
+    try:
+        if v6only:
+            sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        sock.bind((host, port))
+        sock.listen(5)
+    except OSError:
+        sock.close()
+        raise
+    return sock
+
+
+def _bound_v6_or_skip(host, port=0, v6only=True):
+    try:
+        return _bound(socket.AF_INET6, host, port, v6only)
+    except OSError:
+        pytest.skip("this host has no usable IPv6")
+
+
+def _child_binding(family_name, host, port, v6only=False):
+    code = (
+        "import socket, time;"
+        f"s = socket.socket(socket.{family_name});"
+        + (
+            "s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1);"
+            if v6only
+            else ""
+        )
+        + f"s.bind(({host!r}, {port})); s.listen(5); print('up', flush=True);"
+        "time.sleep(30)"
+    )
+    child = subprocess.Popen(
+        [sys.executable, "-c", code], stdout=subprocess.PIPE, start_new_session=True
+    )
+    child.stdout.readline()
+    return child
+
+
+@LINUX_ONLY
+def test_listeners_on_finds_ipv4_and_ipv6_loopback():
+    with _bound(socket.AF_INET, "127.0.0.1") as v4:
+        port = v4.getsockname()[1]
+        with _bound_v6_or_skip("::1", port):
+            found = ports.listeners_on(port)
+
+    assert {item.host for item in found} == {"127.0.0.1", "::1"}
+    assert all(item.port == port and item.inode for item in found)
+
+
+@LINUX_ONLY
+def test_listeners_on_excludes_own_pid():
+    with _bound(socket.AF_INET, "127.0.0.1") as sock:
+        port = sock.getsockname()[1]
+        assert ports.listeners_on(port, exclude_pids=frozenset({os.getpid()})) == []
+        assert ports.listeners_on(port)
+
+
+@LINUX_ONLY
+def test_listeners_on_excludes_hosts():
+    with _bound(socket.AF_INET, "127.0.0.1") as sock:
+        port = sock.getsockname()[1]
+        assert ports.listeners_on(port, exclude_hosts=frozenset({"127.0.0.1"})) == []
+
+
+@LINUX_ONLY
+def test_holder_restricted_to_given_inodes():
+    port = ports.ephemeral_port()
+    child = _child_binding("AF_INET", "127.0.0.1", port)
+    try:
+        with _bound_v6_or_skip("::1", port):
+            theirs = ports.listeners_on(port, exclude_pids=frozenset({os.getpid()}))
+            assert len(theirs) == 1
+            found = ports.holder(port, inodes={theirs[0].inode})
+    finally:
+        _reap(child)
+
+    assert found is not None and found.pid == child.pid
+
+
+@LINUX_ONLY
+def test_holder_prefers_the_loopback_owner():
+    port = ports.ephemeral_port()
+    child = _child_binding("AF_INET6", "::", port, v6only=True)
+    try:
+        with _bound(socket.AF_INET, "127.0.0.1", port):
+            found = ports.holder(port)
+    finally:
+        _reap(child)
+
+    assert found is not None and found.pid == os.getpid()
