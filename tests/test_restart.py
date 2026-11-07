@@ -343,3 +343,87 @@ def test_a_save_leaves_the_saved_config_in_charge(tmp_path) -> None:
     registry.record("blog", tmp_path, "html")
 
     assert registry.entries()[0].flags == registry.RunFlags()
+
+
+@pytest.fixture
+def forwarded(monkeypatch, tmp_path) -> list:
+    """Fake the launch a forward restart ends in."""
+    calls: list = []
+
+    def launch(name, port, *, background, bar):
+        calls.append((name, port, background, bar))
+
+    monkeypatch.setattr(cli_module, "_launch_forward", launch)
+    monkeypatch.setattr(cli_module, "_stdout_is_terminal", lambda: True)
+    return calls
+
+
+def test_restart_starts_a_stopped_forward_on_its_port(
+    forwarded, captured, stopped
+) -> None:
+    registry.record_forward("api", 5173, detached=True)
+
+    result = CliRunner().invoke(cli, ["restart", "api"])
+
+    assert result.exit_code == 0, result.output
+    assert forwarded == [("api", 5173, True, True)]
+    assert stopped == [] and captured == {}
+
+
+@pytest.mark.parametrize(
+    ("flag", "background"), [("--foreground", False), ("--detach", True)]
+)
+def test_restart_forward_mode_flags_override_the_remembered_mode(
+    forwarded, stopped, flag, background
+) -> None:
+    registry.record_forward("api", 5173, detached=not background)
+
+    result = CliRunner().invoke(cli, ["restart", "api", flag, "--no-status-bar"])
+
+    assert result.exit_code == 0, result.output
+    assert forwarded == [("api", 5173, background, False)]
+
+
+def test_restart_stops_and_restarts_a_running_forward(
+    forwarded, stopped, tmp_path
+) -> None:
+    registry.record_forward("api", 5173, detached=True)
+    running = _session(tmp_path, mode="forward", name="api", port=5173, cwd=None,
+                       command=(), pid=os.getpid())
+
+    result = CliRunner().invoke(cli, ["restart", "api"])
+
+    assert result.exit_code == 0, result.output
+    assert [item.id for item in stopped] == [running.id]
+    assert forwarded == [("api", 5173, True, True)]
+
+
+def test_restart_confirms_before_taking_over_a_foreground_forward(
+    forwarded, stopped, tmp_path, monkeypatch
+) -> None:
+    registry.record_forward("api", 5173, detached=False)
+    _session(tmp_path, mode="forward", name="api", port=5173, cwd=None,
+             command=(), pid=os.getpid(), detached=False)
+    monkeypatch.setattr(cli_module, "_restart_interactive", lambda: True)
+
+    declined = CliRunner().invoke(cli, ["restart", "api"], input="n\n")
+    assert declined.exit_code == 1
+    assert stopped == [] and forwarded == []
+
+    result = CliRunner().invoke(cli, ["restart", "api"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert len(stopped) == 1
+    assert forwarded == [("api", 5173, False, True)]
+
+
+@pytest.mark.parametrize(
+    "args", [["--type", "django"], ["--port", "8000"], ["--name", "other"]]
+)
+def test_restart_refuses_project_options_for_a_forward(forwarded, args) -> None:
+    registry.record_forward("api", 5173, detached=True)
+
+    result = CliRunner().invoke(cli, ["restart", "api", *args])
+
+    assert result.exit_code == 2
+    assert "forward" in result.output
+    assert forwarded == []

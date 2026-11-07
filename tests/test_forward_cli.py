@@ -1,8 +1,10 @@
 """The `forward` command: checks, start-up and how it ends in the terminal."""
 
+import json
 import os
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -411,3 +413,62 @@ def test_forward_name_completion_offers_only_forwards(tmp_path) -> None:
 
     assert cli_module._complete_forward_name(None, None, "a") == ["admin", "api"]
     assert cli_module._complete_project_name(None, None, "ap") == ["api", "app"]
+
+
+def _list(*args):
+    return CliRunner().invoke(cli, ["sessions", "list", *args])
+
+
+def test_sessions_list_shows_forwards(tmp_path) -> None:
+    registry.record_forward("api", 5173, detached=True)
+    _forward(tmp_path)
+
+    table = _list()
+    assert table.exit_code == 0, table.output
+    assert "api.localhost" in table.output
+    assert "forward" in table.output
+    assert "→ port 5173" in table.output
+
+    as_json = _list("--json")
+    (project,) = json.loads(as_json.output)
+    assert project["directory"] is None
+    assert project["type"] == "forward"
+    assert project["directory_exists"] is False
+    assert project["session"]["port"] == 5173
+
+
+def test_sessions_list_shows_a_stopped_forward(tmp_path) -> None:
+    registry.record_forward("api", 5173, detached=True)
+
+    result = _list("--stopped")
+
+    assert result.exit_code == 0, result.output
+    assert "→ port 5173" in result.output
+    assert "(missing)" not in result.output
+
+
+def test_sessions_list_marks_a_waiting_forward(tmp_path) -> None:
+    registry.record_forward("api", 5173, detached=True)
+    live = _forward(tmp_path)
+    sessions.set_route(
+        live.id, "waiting: nothing is listening", bridge_project=None, bridge_yaml=""
+    )
+    assert "running (waiting)" in _list().output
+
+    sessions.set_route(live.id, "up", bridge_project=None, bridge_yaml="")
+    assert "waiting" not in _list().output
+
+
+def test_run_replaces_a_stopped_forward_with_a_note(tmp_path, monkeypatch) -> None:
+    registry.record_forward("api", 5173, detached=True)
+    resolved = types.SimpleNamespace(
+        selected_type="compose", name="api", root=tmp_path, plan=None
+    )
+    messages: list = []
+    monkeypatch.setattr(cli_module, "info", messages.append)
+
+    cli_module._record_registry(resolved, detached=False)
+
+    assert messages == ["Replacing the stopped forward api (port 5173)."]
+    (entry,) = registry.entries()
+    assert entry.type == "compose"

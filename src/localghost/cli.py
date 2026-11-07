@@ -285,7 +285,7 @@ def _proxy_status(as_json: bool = False) -> None:
         # A detached app outlives a stopped hub, which is no longer routing it.
         click.echo()
         details(
-            [(str(p["hostname"]), str(p["directory"])) for p in live],
+            [(str(p["hostname"]), _project_where(p)) for p in live],
             title="Running without the hub",
             label_style="default",
         )
@@ -296,7 +296,8 @@ def _proxy_status(as_json: bool = False) -> None:
         (
             project
             for project in remembered
-            if project["state"] == "stopped" and project["directory_exists"]
+            if project["state"] == "stopped"
+            and (project["directory_exists"] or _is_forward_project(project))
         ),
         key=_started_at,
         reverse=True,
@@ -304,7 +305,7 @@ def _proxy_status(as_json: bool = False) -> None:
     if recent:
         click.echo()
         details(
-            [(str(p["hostname"]), str(p["directory"])) for p in recent],
+            [(str(p["hostname"]), _project_where(p)) for p in recent],
             title="Recent projects",
             label_style="default",
         )
@@ -477,6 +478,9 @@ def _restart_target(
             type=session.mode,
             last_started="",
             detached=session.detached,
+            flags=registry.RunFlags(port=session.port)
+            if session.mode == "forward"
+            else registry.RunFlags(),
         )
     _no_such_project(target, (entry.name for entry in entries))
 
@@ -501,8 +505,58 @@ def _choose_entry(
     if _restart_interactive():
         return picker.pick(entries, forget=registry.forget, restore=registry.restore)
     for entry in entries:
-        click.echo(f"{entry.hostname}  {entry.type}  {entry.directory}")
+        where = (
+            _forward_target(entry.flags.port)
+            if registry.is_forward(entry)
+            else entry.directory
+        )
+        click.echo(f"{entry.hostname}  {entry.type}  {where}")
     return None
+
+
+def _restart_forward(
+    entry: registry.RegistryEntry, *, foreground: bool, **overrides: object
+) -> None:
+    """Stop a forward if it is running, then start it on its port again."""
+    for option, value in (
+        ("--type", overrides["selected_type"]),
+        ("--project-root", overrides["root"]),
+        ("--port", overrides["port"]),
+        ("--config", overrides["config"]),
+        ("--name", overrides["name"] not in (None, entry.name)),
+    ):
+        if value:
+            raise click.UsageError(
+                f"{option} does not apply to {entry.name}, a forward; "
+                f"change its port with: {COMMAND} forward {entry.name} PORT"
+            )
+    port = entry.flags.port
+    if port is None:
+        raise click.ClickException(
+            f"{entry.name} has no remembered port; start it with: "
+            f"{COMMAND} forward {entry.name} PORT"
+        )
+    if overrides["dry_run"]:
+        info(f"Would forward {entry.name}.localhost to port {port}.")
+        return
+    running = live_session(entry.name)
+    if running is not None:
+        if not running.detached:
+            message = f"{entry.name} is running in the foreground in another terminal"
+            if not _restart_interactive():
+                raise click.ClickException(
+                    f"{message}; stop it with: {COMMAND} sessions stop {entry.name}"
+                )
+            click.confirm(f"{message}. Stop it and run it here?", abort=True)
+        stop_session(running)
+        info(f"Stopped {entry.name}.")
+    detach = bool(overrides["detach"]) or (not foreground and entry.detached)
+    _launch_forward(
+        entry.name,
+        port,
+        background=detach or not _stdout_is_terminal(),
+        bar=not overrides["no_status_bar"],
+    )
 
 
 def _restart_entry(
@@ -512,6 +566,9 @@ def _restart_entry(
     foreground: bool,
     **overrides: object,
 ) -> None:
+    if registry.is_forward(entry):
+        _restart_forward(entry, foreground=foreground, **overrides)
+        return
     directory = Path(entry.directory)
     if not directory.is_dir():
         raise click.ClickException(
@@ -674,15 +731,57 @@ def _projects() -> list[dict[str, object]]:
         running = next((item for item in named if session_alive(item)), None)
         latest = running or (find_session(str(project["name"])) if named else None)
         project["state"] = "running" if running else "stopped"
-        project["directory_exists"] = Path(str(project["directory"])).is_dir()
+        project["directory_exists"] = (
+            project["directory"] is not None
+            and Path(str(project["directory"])).is_dir()
+        )
         project["session"] = latest.as_dict() if latest else None
     return projects
+
+
+def _forward_target(port: object) -> str:
+    return f"\u2192 port {port}"
+
+
+def _project_state(project: dict[str, object]) -> str:
+    """running or stopped; a live forward whose route is not up says why not."""
+    state = str(project["state"])
+    session = project["session"]
+    forwarding = _is_forward_project(project) and isinstance(session, dict)
+    if state == "running" and forwarding:
+        route = str(session.get("route") or "")  # type: ignore[union-attr]
+        if route.startswith("failing"):
+            return "running (failing)"
+        if not route.startswith("up"):
+            return "running (waiting)"
+    return state
+
+
+def _project_port(project: dict[str, object]) -> object:
+    session = project["session"]
+    if isinstance(session, dict) and session.get("port"):
+        return session["port"]
+    flags = project.get("flags")
+    return flags.get("port") if isinstance(flags, dict) else None
+
+
+def _project_where(project: dict[str, object]) -> str:
+    """The directory a project runs from, or the port a forward points at."""
+    if _is_forward_project(project):
+        return _forward_target(_project_port(project))
+    return str(project["directory"])
+
+
+def _is_forward_project(project: dict[str, object]) -> bool:
+    return project.get("type") == "forward"
 
 
 def _project_mode(project: dict[str, object]) -> str:
     session = project["session"]
     if project["state"] != "running" or not isinstance(session, dict):
         return ""
+    if _is_forward_project(project):
+        return "forward"
     mode = "detached" if session["detached"] else "foreground"
     return f"{mode} isolated" if session.get("isolated") else mode
 
@@ -710,7 +809,7 @@ def _sessions_list(as_json: bool, state: str | None = None) -> None:
         quiet = "dim" if state is None and not running else "default"
         cells = [(str(project["hostname"]), quiet)]
         if state is None:
-            cells.append((str(project["state"]), LIME if running else quiet))
+            cells.append((_project_state(project), LIME if running else quiet))
         if state != "stopped":
             cells.append((_project_mode(project), quiet))
         rows.append((project, quiet, cells))
@@ -723,8 +822,8 @@ def _sessions_list(as_json: bool, state: str | None = None) -> None:
             (f"{text.ljust(width)}  ", style)
             for (text, style), width in zip(cells, widths, strict=True)
         ]
-        parts.append((str(project["directory"]), quiet))
-        if not project["directory_exists"]:
+        parts.append((_project_where(project), quiet))
+        if not _is_forward_project(project) and not project["directory_exists"]:
             parts.append((" (missing)", "yellow"))
         styled(parts)
 
@@ -2210,6 +2309,11 @@ def forward(name: str, port: int | None, detach: bool, no_status_bar: bool) -> N
             return
         _follow_forward(holder, bar=not no_status_bar)
         return
+    _launch_forward(name, port, background=background, bar=not no_status_bar)
+
+
+def _launch_forward(name: str, port: int, *, background: bool, bar: bool) -> None:
+    """Start a forward that nothing is serving yet, and follow it if asked."""
     entry = next((item for item in registry.entries() if item.name == name), None)
     if entry is not None and not registry.is_forward(entry):
         raise click.ClickException(
@@ -2252,7 +2356,7 @@ def forward(name: str, port: int | None, detach: bool, no_status_bar: bool) -> N
         success(f"Forwarding {name}.localhost to port {port} in the background.")
         return
     info("Press Ctrl+C to stop the forward, or Ctrl+Z to leave it running.")
-    _follow_forward(session, bar=not no_status_bar)
+    _follow_forward(session, bar=bar)
 
 
 def _stdout_is_terminal() -> bool:
@@ -3199,6 +3303,16 @@ def _state_directory() -> Path:
     return state_directory()
 
 
+def _note_replaced_forward(name: str) -> None:
+    """Say so when a run takes the name of a stopped forward.
+
+    A live forward never gets this far: `_already_serving` refuses it.
+    """
+    previous = next((item for item in registry.entries() if item.name == name), None)
+    if previous is not None and registry.is_forward(previous):
+        info(f"Replacing the stopped forward {name} (port {previous.flags.port}).")
+
+
 def _record_registry(
     resolved: ResolvedApplication,
     *,
@@ -3211,8 +3325,11 @@ def _record_registry(
     save passes neither.
     """
     if resolved.selected_type == "compose":
+        name = resolved.name or _local_project_name(resolved.root)
+        if detached is not None:
+            _note_replaced_forward(name)
         registry.record(
-            resolved.name or _local_project_name(resolved.root),
+            name,
             resolved.root,
             "compose",
             detached=detached,
@@ -3220,6 +3337,8 @@ def _record_registry(
             flags=flags,
         )
     elif resolved.plan is not None:
+        if detached is not None:
+            _note_replaced_forward(resolved.plan.name)
         registry.record(
             resolved.plan.name,
             resolved.cwd,
