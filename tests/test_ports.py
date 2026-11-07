@@ -262,7 +262,9 @@ def _child_binding(family_name, host, port, v6only=False):
     child = subprocess.Popen(
         [sys.executable, "-c", code], stdout=subprocess.PIPE, start_new_session=True
     )
-    child.stdout.readline()
+    if not child.stdout.readline():
+        _reap(child)
+        pytest.skip("the child could not bind; this host has no usable IPv6")
     return child
 
 
@@ -308,13 +310,21 @@ def test_holder_restricted_to_given_inodes():
 
 
 @LINUX_ONLY
-def test_holder_prefers_the_loopback_owner():
+@pytest.mark.parametrize("child_is_loopback", [False, True])
+def test_holder_prefers_the_loopback_owner(child_is_loopback):
+    # Both arrangements, so the answer cannot come from pid or scan order.
     port = ports.ephemeral_port()
-    child = _child_binding("AF_INET6", "::", port, v6only=True)
+    if child_is_loopback:
+        child = _child_binding("AF_INET", "127.0.0.1", port)
+        other = _bound_v6_or_skip("::", port)
+    else:
+        child = _child_binding("AF_INET6", "::", port, v6only=True)
+        other = _bound(socket.AF_INET, "127.0.0.1", port)
     try:
-        with _bound(socket.AF_INET, "127.0.0.1", port):
-            found = ports.holder(port)
+        found = ports.holder(port)
     finally:
+        other.close()
         _reap(child)
 
-    assert found is not None and found.pid == os.getpid()
+    assert found is not None
+    assert found.pid == (child.pid if child_is_loopback else os.getpid())
