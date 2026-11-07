@@ -239,9 +239,9 @@ starts, Localghost refuses to start rather than launching an application onto
 a URL that would serve whatever was already there. On Linux the error names
 the process holding the port and its working directory, and it always says
 how to get past it: stop that process, or choose another port with `--port`.
-When that process is in your project (a dev server you started yourself), it also
-suggests `localghost forward NAME PORT` to give the running server its hostname
-instead; see [Forwarding a running server](#forwarding-a-running-server).
+When that process is in your project (a dev server you started yourself), it
+also suggests `localghost forward NAME PORT` to give the running server its
+hostname instead; see [Forwarding a running server](#forwarding-a-running-server).
 
 The bar is drawn with a terminal scrolling region that covers every row except
 the last, which leaves the terminal's own scrollback intact: scrolling up
@@ -381,8 +381,9 @@ A loopback-only server is reached through the same relay a host run uses; see
 [Loopback-bound servers](#loopback-bound-servers).
 
 `forward` refuses ports Localghost already routes: the hub's own HTTP and HTTPS
-ports, the port of a running `run` or of another forward
-(`5173 is blog's port; it is already at blog.localhost`), and any port published
+ports, the port of a running `run`
+(`5173 is blog's port; it is already at blog.localhost`) or of another forward
+(`5173 is already forwarded as web.localhost`), and any port published
 by a container on the `localghost` network. It also refuses a name that a
 remembered project already uses; pick another name, or drop the project with
 `localghost sessions forget NAME`. A running forward asked for a different port

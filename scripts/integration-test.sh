@@ -69,6 +69,10 @@ dockerfile_app() {
     docker compose -f "${DOCKERFILE_DIR}/compose.yaml" "$@"
 }
 
+# Deliberately not isolated like the host run above: the hub mounts
+# "$(localghost_state_dir)/registry" read-only for ghost pages, so the forward
+# must write to that same state dir for the ghost-page step to see its entry.
+# Cleanup therefore forgets the entry as well as stopping the session.
 forward_cli() {
   LOCALGHOST_HTTP_PORT="${ACTIVE_PORT}" \
     uv run --frozen --project "${ROOT_DIR}" localghost "$@"
@@ -125,6 +129,7 @@ cleanup() {
     fi
     if [[ ${FORWARD_STARTED} == 1 ]]; then
       forward_cli sessions stop "${FORWARD_NAME}" >/dev/null 2>&1 || true
+      forward_cli sessions forget "${FORWARD_NAME}" >/dev/null 2>&1 || true
       forward_bridge_ids=$(docker ps -aq \
         --filter "label=com.docker.compose.project=${FORWARD_BRIDGE_PROJECT}" \
         2>/dev/null || true)
