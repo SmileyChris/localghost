@@ -387,7 +387,8 @@ ports, the port of a running `run`
 by a container on the `localghost` network. It also refuses a name that a
 remembered project already uses; pick another name, or drop the project with
 `localghost sessions forget NAME`. A running forward asked for a different port
-refuses too; use `restart` or `sessions stop` first.
+refuses too; `restart` keeps a forward's port, so to change it run
+`localghost sessions stop NAME` and then `localghost forward NAME PORT`.
 
 `localghost restart NAME` restarts a forward, and `sessions list` shows it with
 mode `forward` and `→ port N` in place of a directory. While the route is down

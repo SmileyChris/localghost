@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import types
 from pathlib import Path
 
@@ -43,7 +44,7 @@ def started(monkeypatch, tmp_path) -> list:
 
     def start(name, port, *, detach):
         calls.append((name, port, detach))
-        return sessions.create(
+        session = sessions.create(
             mode="forward",
             name=name,
             port=port,
@@ -52,6 +53,8 @@ def started(monkeypatch, tmp_path) -> list:
             log=tmp_path / f"{name}.log",
             pid=os.getpid(),
         )
+        # As a real leader does on its first apply.
+        return sessions.update(session.id, route=f"waiting: nothing on port {port}")
 
     monkeypatch.setattr(cli_module, "_start_forward", start)
     return calls
@@ -117,6 +120,19 @@ def test_forward_refuses_a_remembered_project_name(started, tmp_path) -> None:
     assert started == []
 
 
+def test_forward_without_a_port_refuses_a_remembered_project_name(
+    started, tmp_path
+) -> None:
+    registry.record("api", tmp_path, "node")
+
+    result = CliRunner().invoke(cli, ["forward", "api"])
+
+    assert result.exit_code != 0
+    assert "api is a remembered project" in result.output
+    assert "needs a port" not in result.output
+    assert started == []
+
+
 def test_forward_refuses_a_port_localghost_routes(started, tmp_path) -> None:
     sessions.create(
         mode="host",
@@ -163,9 +179,10 @@ def test_forward_refuses_another_port_while_running(started, tmp_path) -> None:
 
     assert result.exit_code != 0
     assert (
-        "api is already forwarded to port 5173; use localghost restart api "
-        "or localghost sessions stop api"
+        "api is already forwarded to port 5173; to change its port, run "
+        "localghost sessions stop api and then localghost forward api 8000"
     ) in result.output
+    assert "restart" not in result.output
     assert started == []
 
 
@@ -298,7 +315,7 @@ def test_second_forward_refuses_while_first_is_starting(started, tmp_path) -> No
     assert same.exit_code != 0
     assert "api is already forwarded to port 5173" in same.output
     assert other.exit_code != 0
-    assert "api is already forwarded to port 5173; use" in other.output
+    assert "api is already forwarded to port 5173; to change its port" in other.output
     assert started == []
 
 
@@ -342,6 +359,70 @@ def test_forward_gives_up_on_a_leader_that_never_starts(
     assert record.pid == 2**22 + 1
     (entry,) = registry.entries()
     assert entry.forward_state == "stopped"
+
+
+def _short_lived_leader(tmp_path, name, port):
+    """A real leader process that dies before it ever records a route."""
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(0.3)"])
+    # Reaped as `_start_forward` does, so its zombie never reads as alive.
+    threading.Thread(target=child.wait, daemon=True).start()
+    return _forward(tmp_path, name, port, pid=child.pid)
+
+
+def test_forward_fails_when_the_leader_dies_before_routing(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr(
+        cli_module,
+        "_start_forward",
+        lambda name, port, *, detach: _short_lived_leader(tmp_path, name, port),
+    )
+
+    result = CliRunner().invoke(cli, ["forward", "api", "5173"])
+
+    assert result.exit_code != 0
+    assert "the forward for api did not start" in result.output
+    assert "localghost sessions logs api" in result.output
+    (entry,) = registry.entries()
+    assert entry.forward_state == "stopped"
+
+
+def test_a_slow_but_live_leader_still_counts_as_started(
+    started, monkeypatch, tmp_path
+) -> None:
+    def start(name, port, *, detach):
+        return _forward(tmp_path, name, port)  # alive, never routes
+
+    monkeypatch.setattr(cli_module, "_start_forward", start)
+    monkeypatch.setattr(cli_module, "_LEADER_WAIT", 0.1)
+
+    result = CliRunner().invoke(cli, ["forward", "api", "5173"])
+
+    assert result.exit_code == 0, result.output
+    assert "Forwarding api.localhost to port 5173 in the background." in result.output
+
+
+@pytest.mark.parametrize("error", [KeyboardInterrupt(), OSError("disk full")])
+def test_start_forward_stops_the_leader_if_its_pid_cannot_be_saved(
+    monkeypatch, state, error
+) -> None:
+    terminated: list = []
+
+    class Child(_FakePopen):
+        def terminate(self) -> None:
+            terminated.append(self.pid)
+
+    def fail(*args, **kwargs):
+        raise error
+
+    _FakePopen.calls = []
+    monkeypatch.setattr(subprocess, "Popen", Child)
+    monkeypatch.setattr(sessions, "update", fail)
+
+    with pytest.raises(type(error)):
+        cli_module._start_forward("api", 5173, detach=True)
+
+    assert terminated == [4242]
 
 
 class _FakePopen:

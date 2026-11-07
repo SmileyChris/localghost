@@ -2281,6 +2281,9 @@ def forward(name: str, port: int | None, detach: bool, no_status_bar: bool) -> N
         if port is None and holder is not None and holder.mode == "forward":
             port = holder.port
         if port is None:
+            # A remembered project's name is refused whatever the port, so
+            # say that rather than ask for a port that would not help.
+            _refuse_project_name(name)
             raise click.UsageError(
                 f"forward needs a port: {COMMAND} forward {name} PORT"
             )
@@ -2291,8 +2294,9 @@ def forward(name: str, port: int | None, detach: bool, no_status_bar: bool) -> N
             )
         if holder.port != port:
             raise click.ClickException(
-                f"{name} is already forwarded to port {holder.port}; use "
-                f"{COMMAND} restart {name} or {COMMAND} sessions stop {name}"
+                f"{name} is already forwarded to port {holder.port}; to "
+                f"change its port, run {COMMAND} sessions stop {name} and then "
+                f"{COMMAND} forward {name} {port}"
             )
         if holder.pid is None:
             # Another `forward` has written the record and not yet its leader.
@@ -2314,12 +2318,7 @@ def forward(name: str, port: int | None, detach: bool, no_status_bar: bool) -> N
 
 def _launch_forward(name: str, port: int, *, background: bool, bar: bool) -> None:
     """Start a forward that nothing is serving yet, and follow it if asked."""
-    entry = next((item for item in registry.entries() if item.name == name), None)
-    if entry is not None and not registry.is_forward(entry):
-        raise click.ClickException(
-            f"{name} is a remembered project; choose another name or run "
-            f"{COMMAND} sessions forget {name}"
-        )
+    _refuse_project_name(name)
     owner = forwards.port_owner(port)
     if owner:
         raise click.ClickException(owner)
@@ -2357,6 +2356,15 @@ def _launch_forward(name: str, port: int, *, background: bool, bar: bool) -> Non
         return
     info("Press Ctrl+C to stop the forward, or Ctrl+Z to leave it running.")
     _follow_forward(session, bar=bar)
+
+
+def _refuse_project_name(name: str) -> None:
+    entry = next((item for item in registry.entries() if item.name == name), None)
+    if entry is not None and not registry.is_forward(entry):
+        raise click.ClickException(
+            f"{name} is a remembered project; choose another name or run "
+            f"{COMMAND} sessions forget {name}"
+        )
 
 
 def _stdout_is_terminal() -> bool:
@@ -2425,24 +2433,41 @@ def _start_forward(name: str, port: int, *, detach: bool) -> Session:
     # Reap it when it exits, or a terminal following it would keep seeing a
     # zombie as alive.
     threading.Thread(target=child.wait, daemon=True).start()
-    # Only the pid: the leader may already be writing its route.
-    record = session_records.update(session.id, pid=child.pid)
-    if record is None:
-        # Removed meanwhile (`sessions clean` takes a pid-less record for
-        # dead): put it back, so `sessions stop` can still find the leader.
-        session.pid = child.pid
-        session_records.save(session)
-        return session
+    try:
+        # Only the pid: the leader may already be writing its route.
+        record = session_records.update(session.id, pid=child.pid)
+        if record is None:
+            # Removed meanwhile (`sessions clean` takes a pid-less record for
+            # dead): put it back, so `sessions stop` can still find the leader.
+            session.pid = child.pid
+            session_records.save(session)
+            return session
+    except BaseException:
+        # Without its pid on record nothing could stop the leader, which
+        # would go on routing the name: stop it here instead.
+        child.terminate()
+        raise
     return record
 
 
 def _leader_started(session: Session) -> bool:
+    """Has the leader come up, judged by the route it records on first apply?
+
+    A live pid alone is not enough: Popen returns before the leader has
+    imported anything, so one that fails at once would pass. A leader still
+    alive at the deadline without a route counts as started -- it is slow,
+    not broken, and stopping it would only lose the forward.
+    """
     deadline = time.monotonic() + _LEADER_WAIT
-    while not session_alive(session):
-        if time.monotonic() >= deadline:
+    while True:
+        record = session_records.read(session.id)
+        if record is not None and record.route:
+            return True
+        if not session_alive(session):
             return False
+        if time.monotonic() >= deadline:
+            return True
         time.sleep(_LEADER_POLL)
-    return True
 
 
 def _follow_forward(session: Session, *, bar: bool) -> None:
