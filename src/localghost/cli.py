@@ -2474,6 +2474,7 @@ def _plain_run_would_attach(project: str) -> bool:
     entry = next((item for item in registry.entries() if item.name == project), None)
     return (
         entry is not None
+        and not registry.is_forward(entry)
         and entry.flags == registry.RunFlags()
         and Path(entry.directory).resolve() == Path.cwd().resolve()
     )

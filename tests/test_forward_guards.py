@@ -102,3 +102,14 @@ def test_picker_row_shows_a_forward_port() -> None:
     rows = "\n".join(picker.render_lines(model))
 
     assert "→ port 5173" in rows
+
+
+def test_plain_run_would_attach_is_false_for_a_forward(state) -> None:
+    registry.record_forward("api", 5173, detached=False)
+    # Default flags are what let a host entry reach the directory comparison.
+    path = state / "registry" / "api.json"
+    payload = json.loads(path.read_text())
+    payload["flags"]["port"] = None
+    path.write_text(json.dumps(payload))
+
+    assert cli_module._plain_run_would_attach("api") is False
