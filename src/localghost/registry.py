@@ -37,7 +37,8 @@ class RunFlags:
 class RegistryEntry:
     hostname: str
     name: str
-    directory: str
+    # None for a forward, which has no directory.
+    directory: str | None
     type: str
     last_started: str
     # How the project last ran, so `restart` can bring it back the same way.
@@ -45,6 +46,8 @@ class RegistryEntry:
     # Whether it last ran in its own network namespace, for the hub's page.
     isolated: bool = False
     flags: RunFlags = RunFlags()
+    # A forward only: None, "waiting" or "stopped".
+    forward_state: str | None = None
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -91,6 +94,41 @@ def record(
         _write(entry)
     except OSError as exc:
         warning("Could not record project for ghost pages", [str(exc)])
+
+
+def record_forward(name: str, port: int, *, detached: bool) -> None:
+    """Remember that `name.localhost` forwards to `port`. Best-effort."""
+    entry = RegistryEntry(
+        hostname=f"{name}.localhost",
+        name=name,
+        directory=None,
+        type="forward",
+        last_started=datetime.now(UTC)
+        .astimezone()
+        .isoformat(timespec="seconds"),
+        detached=detached,
+        flags=RunFlags(port=port),
+        forward_state=None,
+    )
+    try:
+        _write(entry)
+    except OSError as exc:
+        warning("Could not record forward for ghost pages", [str(exc)])
+
+
+def set_forward_state(name: str, state: str | None) -> None:
+    """Mark a remembered forward waiting or stopped; ignore anything else."""
+    entry = next((item for item in entries() if item.name == name), None)
+    if entry is None or not is_forward(entry):
+        return
+    try:
+        _write(replace(entry, forward_state=state))
+    except OSError as exc:
+        warning("Could not update forward for ghost pages", [str(exc)])
+
+
+def is_forward(entry: RegistryEntry) -> bool:
+    return entry.type == "forward"
 
 
 def update(name: str, *, detached: bool) -> None:
@@ -146,12 +184,13 @@ def entries() -> list[RegistryEntry]:
                 RegistryEntry(
                     hostname=payload["hostname"],
                     name=payload["name"],
-                    directory=payload["directory"],
+                    directory=payload.get("directory"),
                     type=payload["type"],
                     last_started=payload["last_started"],
                     detached=payload.get("detached") is True,
                     isolated=payload.get("isolated") is True,
                     flags=_read_flags(payload.get("flags") or {}),
+                    forward_state=payload.get("forward_state"),
                 )
             )
         except (OSError, ValueError, KeyError, TypeError):

@@ -33,7 +33,8 @@ class Session:
     mode: str
     name: str
     port: int
-    cwd: str
+    # None for a forward, which has no directory.
+    cwd: str | None
     pid: int | None
     log: str
     project: str | None = None
@@ -45,6 +46,9 @@ class Session:
     isolated: bool = False
     # Where a supervised run's terminal connects; empty for any other.
     socket: str = ""
+    # A forward's routing state: "", "up", "up: <dir>", "waiting: <why>" or
+    # "failing: <why>". Last, so older records without it still load.
+    route: str = ""
 
     def as_dict(self) -> dict[str, object]:
         return self.__dict__.copy()
@@ -87,7 +91,7 @@ def create(
     mode: str,
     name: str,
     port: int,
-    cwd: Path,
+    cwd: Path | None,
     command: tuple[str, ...],
     log: Path | None,
     pid: int | None,
@@ -97,13 +101,14 @@ def create(
     detached: bool = True,
     isolated: bool = False,
     socket: str = "",
+    route: str = "",
 ) -> Session:
     session = Session(
         uuid.uuid4().hex[:8],
         mode,
         name,
         port,
-        str(cwd),
+        str(cwd) if cwd is not None else None,
         pid,
         str(log) if log else "",
         project,
@@ -113,9 +118,27 @@ def create(
         detached,
         isolated,
         socket,
+        route,
     )
     save(session)
     return session
+
+
+def set_route(
+    session_id: str,
+    route: str,
+    *,
+    bridge_project: str | None,
+    bridge_yaml: str,
+) -> None:
+    """Record a forward's route and bridge in one atomic save."""
+    session = next((item for item in sessions() if item.id == session_id), None)
+    if session is None:
+        return
+    session.route = route
+    session.bridge_project = bridge_project
+    session.bridge_yaml = bridge_yaml
+    save(session)
 
 
 def alive(session: Session) -> bool:
