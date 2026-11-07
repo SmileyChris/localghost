@@ -215,12 +215,13 @@ def listeners_on(
         if host not in exclude_hosts
     ]
     if exclude_pids and found:
-        owners = _socket_owners({item.inode for item in found})
-        found = [
-            item
-            for item in found
-            if not exclude_pids.intersection(owners.get(item.inode, ()))
-        ]
+        # Only the excluded pids' own descriptors are read: a forward polls
+        # this twice a second, and walking every process's fds each time
+        # costs tens of milliseconds on a busy desktop.
+        theirs: set[str] = set()
+        for pid in exclude_pids:
+            theirs |= _pid_socket_inodes(pid)
+        found = [item for item in found if item.inode not in theirs]
     return found
 
 
@@ -298,16 +299,23 @@ def _pids_in_group(pgid: int) -> list[int]:
     return found
 
 
+def _pid_socket_inodes(pid: int) -> set[str]:
+    """Inodes of every socket `pid` holds open, as far as /proc will show."""
+    inodes = set()
+    for descriptor in glob.glob(f"/proc/{pid}/fd/*"):
+        try:
+            target = os.readlink(descriptor)
+        except OSError:
+            continue
+        if target.startswith("socket:["):
+            inodes.add(target[8:-1])
+    return inodes
+
+
 def _group_socket_inodes(pgid: int) -> set[str]:
     inodes = set()
     for pid in _pids_in_group(pgid):
-        for descriptor in glob.glob(f"/proc/{pid}/fd/*"):
-            try:
-                target = os.readlink(descriptor)
-            except OSError:
-                continue
-            if target.startswith("socket:["):
-                inodes.add(target[8:-1])
+        inodes |= _pid_socket_inodes(pid)
     return inodes
 
 

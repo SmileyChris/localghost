@@ -327,6 +327,27 @@ def test_listeners_on_excludes_own_pid():
 
 
 @LINUX_ONLY
+def test_listeners_on_exclusion_reads_only_the_excluded_pids(monkeypatch):
+    visited = []
+    real = ports._pid_socket_inodes
+
+    def spy(pid):
+        visited.append(pid)
+        return real(pid)
+
+    def no_full_scan(inodes):
+        raise AssertionError("the exclusion path must not walk every process")
+
+    monkeypatch.setattr(ports, "_pid_socket_inodes", spy)
+    monkeypatch.setattr(ports, "_socket_owners", no_full_scan)
+    with _bound(socket.AF_INET, "127.0.0.1") as sock:
+        port = sock.getsockname()[1]
+        assert ports.listeners_on(port, exclude_pids=frozenset({os.getpid()})) == []
+
+    assert visited == [os.getpid()]
+
+
+@LINUX_ONLY
 def test_listeners_on_excludes_hosts():
     with _bound(socket.AF_INET, "127.0.0.1") as sock:
         port = sock.getsockname()[1]
