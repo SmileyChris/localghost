@@ -29,6 +29,10 @@ from .paths import state_directory
 
 _STOP_GRACE_SECONDS = 10
 
+# The route a forward's leader records as it exits because it was asked to
+# stop, which is how a following terminal tells a stop from a crash.
+STOPPED_ROUTE = "stopped"
+
 
 @dataclass
 class Session:
@@ -50,7 +54,8 @@ class Session:
     # Where a supervised run's terminal connects; empty for any other.
     socket: str = ""
     # A forward's routing state: "", "up", "up: <dir>", "waiting: <why>" or
-    # "failing: <why>". Last, so older records without it still load.
+    # "failing: <why>"; STOPPED_ROUTE once its leader was asked to stop. Last,
+    # so older records without it still load.
     route: str = ""
 
     def as_dict(self) -> dict[str, object]:

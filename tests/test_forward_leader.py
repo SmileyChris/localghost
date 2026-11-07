@@ -130,6 +130,9 @@ def test_leader_lowers_bridge_after_grace_and_marks_waiting(tmp_path):
             (s.now, list(s.bridge), _state_of(), _record(session).bridge_project)
         ),
     )
+    routes = []
+    polled = script.on_poll
+    script.on_poll = lambda s: (polled(s), routes.append(_record(session).route))
     _run(session, script)
     assert states[0][1:] == (["up"], None, f"localghost-forward-{NAME}")
     # Inside the grace period the bridge stays up.
@@ -139,7 +142,7 @@ def test_leader_lowers_bridge_after_grace_and_marks_waiting(tmp_path):
     assert after[1] == ["up", "down"]
     assert after[2] == "waiting"
     assert after[3] is None
-    assert _record(session).route == f"waiting: nothing listening on {PORT}"
+    assert routes[-1] == f"waiting: nothing listening on {PORT}"
 
 
 def test_leader_survives_bridge_failure_and_reports_failing(tmp_path, capsys):
@@ -208,6 +211,8 @@ def test_leader_cleans_up_and_marks_stopped_on_sigterm(tmp_path, monkeypatch):
     assert _state_of() == "stopped"
     # sessions.stop removes the record, not the leader.
     assert _record(session) is not None
+    # Asked to stop, so a following terminal reports a stop, not a crash.
+    assert _record(session).route == sessions.STOPPED_ROUTE
     # The lowered bridge is off record, so `sessions stop` has none to lower.
     assert _record(session).bridge_project is None
     assert _record(session).bridge_yaml == ""
@@ -222,6 +227,21 @@ def test_leader_keeps_a_bridge_on_record_when_its_last_down_fails(tmp_path):
     assert _run(session, Script([GULCH, GULCH]), bridge_down=down) == 0
     assert _record(session).bridge_project == f"localghost-forward-{NAME}"
     assert _record(session).bridge_yaml
+    assert _state_of() == "stopped"
+
+
+def test_leader_that_crashes_does_not_record_a_stop(tmp_path):
+    session = _forward(tmp_path)
+
+    class Crash(Exception):
+        pass
+
+    def observe():
+        raise Crash
+
+    with pytest.raises(Crash):
+        _run(session, Script([GULCH]), observe=observe)
+    assert _record(session).route != sessions.STOPPED_ROUTE
     assert _state_of() == "stopped"
 
 

@@ -22,6 +22,7 @@ from pathlib import Path
 import click
 
 from . import registry, statusbar, supervisor
+from .feedback import COMMAND
 from .runner import (
     RunPlan,
     _claim_detach_key,
@@ -32,6 +33,7 @@ from .runner import (
     detach_key_available,
 )
 from .sessions import (
+    STOPPED_ROUTE,
     Session,
     alive,
     create,
@@ -337,10 +339,27 @@ def follow_forward(
                 shown = record.route
                 _show_route(pinned, record.route, session.port)
 
-            return _follow_log(session, on_poll=on_poll)
+            outcome = _follow_log(session, on_poll=on_poll)
     finally:
         mark_detached(session.id, True)
         registry.update(session.name, detached=True)
+    if outcome.status == 0 and not _forward_was_stopped(session):
+        return Outcome(
+            1,
+            f"the forward for {session.name} ended unexpectedly; see why with: "
+            f"{COMMAND} sessions logs {session.name}",
+        )
+    return outcome
+
+
+def _forward_was_stopped(session: Session) -> bool:
+    """Did the leader end because something asked it to, not on its own?
+
+    A leader that is asked to stop records so as it exits, and `sessions
+    stop` removes the record once it has; a crashed one leaves its last route.
+    """
+    record = read_session(session.id)
+    return record is None or record.route == STOPPED_ROUTE
 
 
 def _show_route(bar, route: str, port: int) -> None:
@@ -349,6 +368,8 @@ def _show_route(bar, route: str, port: int) -> None:
         bar.ready(f"→ {port}")
     elif route.startswith("up: "):
         bar.ready(f"→ {port} ({route.removeprefix('up: ')})")
+    elif route == STOPPED_ROUTE:
+        bar.status("stopping", waiting=True)
     else:
         _, _, reason = route.partition(": ")
         bar.status(reason or "starting", waiting=True)

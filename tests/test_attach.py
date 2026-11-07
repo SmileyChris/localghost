@@ -598,6 +598,7 @@ def test_follow_forward_bar_tracks_route_changes(
     def alive(item):
         following = next(polls, None)
         if following is None:
+            _set_route(session, sessions.STOPPED_ROUTE)  # asked to stop
             return False
         _set_route(session, following)
         return True
@@ -640,11 +641,36 @@ def test_follow_forward_returns_when_leader_dies(
     outcome = _follow(session)
     shown = terminal.shown()
 
-    assert outcome.status == 0
+    # It died on its own, with its last route still on record.
+    assert outcome.status == 1
+    assert outcome.message == (
+        "the forward for api ended unexpectedly; see why with: "
+        "localghost sessions logs api"
+    )
     assert len(polls) == 3
     assert b"\x1b[1;29r" in shown  # the region was taken
     assert shown.rindex(b"\x1b[r") > shown.rindex(b"\x1b[1;29r")  # and released
     assert "→ 5173 (~/dev/lab/gulch)".encode() in shown
+
+
+@pytest.mark.parametrize("removed", [False, True])
+def test_follow_forward_reports_a_requested_stop_as_stopped(
+    terminal, forward_state, fake_bar, tmp_path, monkeypatch, removed
+) -> None:
+    session = _forward(tmp_path)
+
+    def alive(item):
+        if removed:
+            sessions.discard(session)  # `sessions stop` from elsewhere
+        else:
+            _set_route(session, sessions.STOPPED_ROUTE)  # a leader told to stop
+        return False
+
+    monkeypatch.setattr(attach, "alive", alive)
+
+    outcome = _follow(session)
+
+    assert outcome == attach.Outcome(0)
 
 
 def test_follow_forward_without_bar_still_follows(
@@ -655,6 +681,8 @@ def test_follow_forward_without_bar_still_follows(
     session = _forward(tmp_path)
     _set_route(session, "up")
     monkeypatch.setattr(attach, "alive", lambda item: False)
+    # Stopped from elsewhere: `sessions stop` removes the record.
+    monkeypatch.setattr(attach, "_forward_was_stopped", lambda item: True)
 
     outcome = _follow(session, bar=False)
     shown = terminal.shown()

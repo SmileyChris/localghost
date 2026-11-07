@@ -304,23 +304,27 @@ class _Leader:
                 "routing carries on"
             )
 
-    def close(self) -> None:
+    def close(self, *, requested: bool = False) -> None:
+        """Take the route down; `requested` when a signal asked the leader to stop."""
         self.relays.close()
         self.relay_to = None
+        changes: dict[str, object] = {}
         if self.bridge_touched:
             self._lower_bridge()
             if not self.bridge_touched:
-                self._forget_bridge()
+                # Lowered: off record, so `sessions stop` skips its down. A
+                # bridge whose `down` failed stays for `sessions stop` to retry.
+                changes.update(bridge_project=None, bridge_yaml="")
+        if requested:
+            # Tells a following terminal this was a stop, not a crash.
+            changes["route"] = sessions.STOPPED_ROUTE
+        if changes:
+            self._record(changes)
         self.set_forward_state("stopped")
 
-    def _forget_bridge(self) -> None:
-        """Take a lowered bridge off record, so `sessions stop` skips its down.
-
-        A bridge whose `down` failed stays on record for `sessions stop` to
-        retry.
-        """
+    def _record(self, changes: dict[str, object]) -> None:
         try:
-            sessions.update(self.session.id, bridge_project=None, bridge_yaml="")
+            sessions.update(self.session.id, **changes)
         except OSError as exc:
             if not self._route_warned:
                 self._route_warned = True
@@ -342,6 +346,7 @@ def main(
         for signum in (signal.SIGTERM, signal.SIGINT)
     }
     leader: _Leader | None = None
+    requested = False
     try:
         session = _load(session_id, clock, sleep)
         if session is None:
@@ -378,6 +383,7 @@ def main(
             leader.apply(watcher.step(clock(), observe()))
             sleep(interval)
     except Stopped:
+        requested = True
         return 0
     finally:
         # A second signal must not cut the cleanup short.
@@ -385,7 +391,7 @@ def main(
             signal.signal(signum, signal.SIG_IGN)
         try:
             if leader is not None:
-                leader.close()
+                leader.close(requested=requested)
         finally:
             for signum, handler in previous.items():
                 signal.signal(signum, handler)

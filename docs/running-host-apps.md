@@ -350,7 +350,9 @@ In a terminal, `forward` follows the forward's log under the same status bar as
 leaves your server alone. Ctrl+Z, or closing the terminal, disconnects and the
 forward keeps running; `localghost sessions attach NAME`, or plain
 `localghost forward NAME`, reconnects. Without a terminal, such as in a script,
-`forward` behaves as `--detach`.
+`forward` behaves as `--detach`. If the forward's background process ends
+without being asked to, the following terminal says it ended unexpectedly and
+points at `localghost sessions logs NAME`.
 
 The route is up while a matching server listens on the port, and the forward
 lasts until you stop it. Five seconds after nothing is listening the route goes

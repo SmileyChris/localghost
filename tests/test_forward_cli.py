@@ -297,6 +297,27 @@ def test_forward_in_a_terminal_follows_the_leader(
     assert entry.detached is False
 
 
+def test_forward_reports_a_leader_that_ended_on_its_own(
+    started, monkeypatch
+) -> None:
+    def follow(session, *, bar, public_origin, secondary_origin):
+        return attach.Outcome(
+            1,
+            "the forward for api ended unexpectedly; see why with: "
+            "localghost sessions logs api",
+        )
+
+    monkeypatch.setattr(cli_module, "follow_forward", follow)
+    monkeypatch.setattr(cli_module, "_stdout_is_terminal", lambda: True)
+
+    result = CliRunner().invoke(cli, ["forward", "api", "5173"])
+
+    assert result.exit_code == 1
+    assert "ended unexpectedly" in result.output
+    assert "localghost sessions logs api" in result.output
+    assert "Stopped api." not in result.output
+
+
 def test_second_forward_refuses_while_first_is_starting(started, tmp_path) -> None:
     # The first `forward` has written its record but not yet its leader's pid.
     sessions.create(
