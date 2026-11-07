@@ -69,7 +69,7 @@ from .generator import (
     write_extended,
     write_new,
 )
-from .paths import state_directory
+from .paths import hub_http_port, hub_https_port, state_directory
 from .ports import PortInUse
 from .roots import discover_config, resolve_root
 from .routes import active_routes, proxy_is_running
@@ -369,7 +369,7 @@ def hub_logs(follow: bool, tail: str) -> None:
 )
 def hub_up(rebuild: bool) -> None:
     """Start the hub."""
-    _proxy_http_port()
+    hub_http_port()
     was_running = proxy_is_running()
     first_launch = not _managed_image_is_available()
     title(welcome=first_launch)
@@ -386,7 +386,7 @@ def hub_up(rebuild: bool) -> None:
     )
     reap_sessions()
     scheme = "https" if https_enabled else "http"
-    port = _proxy_https_port() if https_enabled else _proxy_http_port()
+    port = hub_https_port() if https_enabled else hub_http_port()
     default_port = 443 if https_enabled else 80
     suffix = "" if port == default_port else f":{port}"
     if was_running:
@@ -2603,7 +2603,7 @@ def _tailnet_forces_https() -> bool:
 
 def _proxy_origin(hostname: str) -> str:
     https_enabled = _https_configured() or _tailnet_forces_https()
-    port = _proxy_https_port() if https_enabled else _proxy_http_port()
+    port = hub_https_port() if https_enabled else hub_http_port()
     default_port = 443 if https_enabled else 80
     suffix = "" if port == default_port else f":{port}"
     scheme = "https" if https_enabled else "http"
@@ -3188,24 +3188,6 @@ def _copy_resource_tree(source, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     with source.open("rb") as input_stream, destination.open("wb") as output_stream:
         shutil.copyfileobj(input_stream, output_stream)
-
-
-def _proxy_http_port() -> int:
-    return _environment_port("LOCALGHOST_HTTP_PORT", 80)
-
-
-def _proxy_https_port() -> int:
-    return _environment_port("LOCALGHOST_HTTPS_PORT", 443)
-
-
-def _environment_port(name: str, default: int) -> int:
-    value = os.environ.get(name) or str(default)
-    if not value.isascii() or not value.isdecimal():
-        raise click.ClickException(f"{name} must be an integer from 1 to 65535")
-    port = int(value)
-    if not 1 <= port <= 65535:
-        raise click.ClickException(f"{name} must be an integer from 1 to 65535")
-    return port
 
 
 # Which `save` options each kind of project accepts. `--port`,
