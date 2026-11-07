@@ -73,3 +73,95 @@ def test_old_session_records_without_route_still_load():
     del record["route"]
     (sessions.state_dir() / "abc.json").write_text(json.dumps(record))
     assert sessions.sessions()[0].route == ""
+
+
+def _sleeper():
+    # A thread reaps the child, as init would a real leader, so it is not a
+    # zombie that still answers signal 0.
+    import subprocess
+    import threading
+
+    child = subprocess.Popen(["sleep", "60"])
+    threading.Thread(target=child.wait, daemon=True).start()
+    return child
+
+
+def _forward(pid, *, bridge=True):
+    created = sessions.create(
+        mode="forward",
+        name="api",
+        port=5173,
+        cwd=None,
+        command=(),
+        log=None,
+        pid=pid,
+        route="",
+    )
+    if bridge:
+        sessions.set_route(
+            created.id, "up", bridge_project="localghost-forward-api", bridge_yaml="y"
+        )
+    return sessions.sessions()[0]
+
+
+def test_stop_forward_signals_only_the_leader(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    killed_groups = []
+    monkeypatch.setattr(sessions.os, "killpg", lambda *a: killed_groups.append(a))
+    monkeypatch.setattr(sessions, "_stop_bridge", lambda session: None)
+    leader, target = _sleeper(), _sleeper()
+    try:
+        sessions.stop(_forward(leader.pid))
+        assert leader.poll() is not None
+        assert target.poll() is None
+        assert killed_groups == []
+        assert sessions.sessions() == []
+    finally:
+        target.kill()
+        leader.kill()
+
+
+def test_stop_forward_marks_stopped_and_removes_bridge(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    registry.record_forward("api", 5173, detached=True)
+    registry.set_forward_state("api", "waiting")
+    downed = []
+    monkeypatch.setattr(sessions, "_stop_bridge", downed.append)
+    leader = _sleeper()
+    try:
+        sessions.stop(_forward(leader.pid))
+    finally:
+        leader.kill()
+    assert [item.bridge_project for item in downed] == ["localghost-forward-api"]
+    assert registry.entries()[0].forward_state == "stopped"
+
+
+def test_reap_marks_a_killed_forward_with_bridge_stopped(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    registry.record_forward("api", 5173, detached=True)
+    registry.set_forward_state("api", "waiting")
+    downed = []
+    monkeypatch.setattr(sessions, "_stop_bridge", downed.append)
+    leader = _sleeper()
+    _forward(leader.pid)
+    leader.kill()
+    leader.wait()
+    assert sessions.reap() == 1
+    assert len(downed) == 1
+    assert registry.entries()[0].forward_state == "stopped"
+    assert sessions.sessions()[0].bridge_project is None
+
+
+def test_reap_marks_a_killed_forward_without_bridge_stopped(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    registry.record_forward("api", 5173, detached=True)
+    registry.set_forward_state("api", "waiting")
+    downed = []
+    monkeypatch.setattr(sessions, "_stop_bridge", downed.append)
+    leader = _sleeper()
+    _forward(leader.pid, bridge=False)
+    leader.kill()
+    leader.wait()
+    assert sessions.reap() == 0
+    assert downed == []
+    assert registry.entries()[0].forward_state == "stopped"

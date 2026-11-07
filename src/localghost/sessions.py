@@ -21,6 +21,7 @@ from pathlib import Path
 
 import click
 
+from . import registry
 from .feedback import COMMAND, info, warning
 from .paths import state_directory
 
@@ -272,6 +273,23 @@ def stop(session: Session) -> None:
                 f"session {session.id} did not stop; process {session.pid} "
                 "is still running"
             )
+    elif session.mode == "forward" and session.pid and alive(session):
+        # The record holds localghost's own leader, never the target server,
+        # so signal that one process and nothing else: no process group. The
+        # leader closes its relay and bridge on SIGTERM.
+        with suppress(ProcessLookupError, PermissionError):
+            os.kill(session.pid, signal.SIGTERM)
+        deadline = time.monotonic() + _STOP_GRACE_SECONDS
+        while alive(session) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if alive(session):
+            with suppress(ProcessLookupError, PermissionError):
+                os.kill(session.pid, signal.SIGKILL)
+        if alive(session):
+            raise click.ClickException(
+                f"session {session.id} did not stop; process {session.pid} "
+                "is still running"
+            )
     elif session.mode == "compose" and session.project:
         subprocess.run(
             ["docker", "compose", "--project-name", session.project, "down"],
@@ -280,6 +298,9 @@ def stop(session: Session) -> None:
         )
     if session.bridge_project:
         _stop_bridge(session)
+    if session.mode == "forward":
+        # The leader normally does this itself; a crashed or killed one cannot.
+        registry.set_forward_state(session.name, "stopped")
     _remove(session)
 
 
@@ -305,14 +326,16 @@ def reap() -> int:
     # ponytail: runs only when the CLI is used, so a crashed app shows as
     # running on the hub until then; supervise the detached process to close
     # that gap if it matters.
-    stale = [item for item in sessions() if item.bridge_project and not alive(item)]
+    dead = [item for item in sessions() if not alive(item)]
+    _mark_dead_forwards_stopped(dead)
+    stale = [item for item in dead if item.bridge_project]
     if not stale:
         return 0
     # `sessions stop` and `restart` remove their own bridges, so whatever is
     # left ended some other way: a crash, an exit, a kill, or a reboot.
     names = sorted({item.name for item in stale})
-    listed = names[0] if len(names) == 1 else (
-        f"{', '.join(names[:-1])} and {names[-1]}"
+    listed = (
+        names[0] if len(names) == 1 else (f"{', '.join(names[:-1])} and {names[-1]}")
     )
     routes = "route" if len(names) == 1 else "routes"
     info(
@@ -326,11 +349,30 @@ def reap() -> int:
         session.bridge_project = None
         session.bridge_yaml = ""
         save(session)
+        if session.mode == "forward":
+            registry.set_forward_state(session.name, "stopped")
     if len(names) == 1:
         info(f"Its log is kept: {COMMAND} sessions logs {names[0]}", err=True)
     else:
         info(f"Their logs are kept: {COMMAND} sessions logs NAME", err=True)
     return len(stale)
+
+
+def _mark_dead_forwards_stopped(dead: list[Session]) -> None:
+    """Mark a dead forward with no bridge stopped; its route is already down.
+
+    Quiet: there is nothing to take down, so there is nothing to announce. A
+    forward with a bridge is marked once that bridge is down, in `reap`.
+    """
+    names = {
+        item.name for item in dead if item.mode == "forward" and not item.bridge_project
+    }
+    names -= {item.name for item in sessions() if alive(item)}
+    if not names:
+        return
+    for entry in registry.entries():
+        if entry.name in names and entry.forward_state != "stopped":
+            registry.set_forward_state(entry.name, "stopped")
 
 
 def _stop_bridge(session: Session) -> None:
