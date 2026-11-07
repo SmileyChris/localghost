@@ -258,6 +258,23 @@ def run_plan(
     _labeled_block(rows, heading=heading, err=dry_run)
 
 
+def forward_plan(
+    *,
+    name: str,
+    port: int,
+    url: str,
+    background: bool,
+    tailnet_url: str | None = None,
+) -> None:
+    """The `forward` analogue of `run_plan`: where it routes, and how it runs."""
+    rows = [("Public URL", url)]
+    if tailnet_url:
+        rows.append(("Tailnet URL", tailnet_url))
+    rows.append(("Target", f"→ port {port}"))
+    rows.append(("Mode", "background" if background else "foreground"))
+    _labeled_block(rows, heading=f"Forwarding {name}", err=False)
+
+
 def compose_dry_run(*, project: str, url: str, tailnet_url: str | None = None) -> None:
     """The Compose analogue of `run_plan`'s dry-run block.
 

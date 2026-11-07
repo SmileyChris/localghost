@@ -181,10 +181,10 @@ def find(target: str) -> Session | None:
     running = next((item for item in named if alive(item)), None)
     if running is not None or not named:
         return running
-    return max(named, key=_recorded_at)
+    return max(named, key=recorded_at)
 
 
-def _recorded_at(session: Session) -> float:
+def recorded_at(session: Session) -> float:
     try:
         return _path(session.id).stat().st_mtime
     except OSError:

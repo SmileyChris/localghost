@@ -14,6 +14,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager, suppress
@@ -24,7 +25,8 @@ from typing import NoReturn
 
 import click
 
-from . import forwarder, picker, registry, statusbar
+from . import forwarder, forwards, picker, registry, statusbar
+from . import sessions as session_records
 from .attach import (
     Outcome,
     attach,
@@ -50,6 +52,7 @@ from .feedback import (
     compose_dry_run,
     details,
     failure,
+    forward_plan,
     info,
     next_actions,
     routes,
@@ -94,6 +97,7 @@ from .runner import (
     resolve_pinned_type,
     start_bridge,
     stop_bridge,
+    validate_name,
 )
 from .sessions import Session, sessions
 from .sessions import alive as session_alive
@@ -411,11 +415,27 @@ def _complete_project_name(
     ctx: click.Context, param: click.Parameter, incomplete: str
 ) -> list[str]:
     """Complete remembered project names; never raise into the shell."""
+    return _remembered_names(incomplete)
+
+
+def _complete_forward_name(
+    ctx: click.Context, param: click.Parameter, incomplete: str
+) -> list[str]:
+    """Complete remembered forwards only, for `forward NAME`."""
+    return _remembered_names(incomplete, forwards_only=True)
+
+
+def _remembered_names(incomplete: str, *, forwards_only: bool = False) -> list[str]:
     try:
         entries = registry.entries()
     except OSError:
         return []
-    return [entry.name for entry in entries if entry.name.startswith(incomplete)]
+    return [
+        entry.name
+        for entry in entries
+        if entry.name.startswith(incomplete)
+        and (not forwards_only or registry.is_forward(entry))
+    ]
 
 
 def _restart_interactive() -> bool:
@@ -2124,6 +2144,209 @@ def _run(
     _report_application_exit(plan.name, status)
     if status:
         raise click.exceptions.Exit(status)
+
+
+# How long a forward's leader has to come up, and how long a record it has not
+# yet claimed holds its name against a second `forward`.
+_LEADER_WAIT = 5.0
+_LEADER_POLL = 0.05
+_STARTING_GRACE = 5.0
+
+
+@cli.command()
+@click.argument("name", shell_complete=_complete_forward_name)
+@click.argument("port", required=False, type=click.IntRange(1, 65535))
+@click.option(
+    "detach",
+    "--detach",
+    is_flag=True,
+    help="Leave the forward running in the background.",
+)
+@click.option(
+    "no_status_bar",
+    "--no-status-bar",
+    is_flag=True,
+    help="Do not pin the public URL to the bottom of the terminal.",
+)
+def forward(name: str, port: int | None, detach: bool, no_status_bar: bool) -> None:
+    """Route NAME.localhost to a server already listening on PORT.
+
+    The server is yours to start and stop; the route follows it. PORT may be
+    left off for a forward localghost remembers.
+    """
+    validate_name(name)
+    background = detach or not _stdout_is_terminal()
+    holder = _forward_name_holder(name)
+    if port is None:
+        port = _remembered_forward_port(name)
+        if port is None and holder is not None and holder.mode == "forward":
+            port = holder.port
+        if port is None:
+            raise click.UsageError(
+                f"forward needs a port: {COMMAND} forward {name} PORT"
+            )
+    if holder is not None:
+        if holder.mode != "forward":
+            raise click.ClickException(
+                f"{name}.localhost is already served from {holder.cwd}"
+            )
+        if holder.port != port:
+            raise click.ClickException(
+                f"{name} is already forwarded to port {holder.port}; use "
+                f"{COMMAND} restart {name} or {COMMAND} sessions stop {name}"
+            )
+        if holder.pid is None:
+            # Another `forward` has written the record and not yet its leader.
+            raise click.ClickException(
+                f"{name} is already forwarded to port {port} and still "
+                f"starting; follow it with: {COMMAND} sessions attach {name}"
+            )
+        if background:
+            info(
+                f"{name} is already forwarded to port {port}; follow it with: "
+                f"{COMMAND} sessions attach {name}, or stop it with: "
+                f"{COMMAND} sessions stop {name}"
+            )
+            return
+        _follow_forward(holder, bar=not no_status_bar)
+        return
+    entry = next((item for item in registry.entries() if item.name == name), None)
+    if entry is not None and not registry.is_forward(entry):
+        raise click.ClickException(
+            f"{name} is a remembered project; choose another name or run "
+            f"{COMMAND} sessions forget {name}"
+        )
+    owner = forwards.port_owner(port)
+    if owner:
+        raise click.ClickException(owner)
+    title()
+    collision = find_route_collision(name)
+    if collision:
+        _reclaim_route(collision, name)
+    reap_sessions()
+    clean_sessions(name)
+    _run_proxy("up", https_enabled=_https_configured())
+    registry.record_forward(name, port, detached=background)
+    try:
+        session = _start_forward(name, port, detach=background)
+    except OSError as exc:
+        registry.set_forward_state(name, "stopped")
+        raise click.ClickException(
+            f"could not start the forward for {name}: {exc}"
+        ) from exc
+    if not _leader_started(session):
+        # The record stays, dead, so its log can still be read.
+        registry.set_forward_state(name, "stopped")
+        raise click.ClickException(
+            f"the forward for {name} did not start; see why with: "
+            f"{COMMAND} sessions logs {name}"
+        )
+    forward_plan(
+        name=name,
+        port=port,
+        url=_proxy_origin(name),
+        background=background,
+        tailnet_url=_tailnet_origin(name, warn=True),
+    )
+    if background:
+        success(f"Forwarding {name}.localhost to port {port} in the background.")
+        return
+    info("Press Ctrl+C to stop the forward, or Ctrl+Z to leave it running.")
+    _follow_forward(session, bar=not no_status_bar)
+
+
+def _stdout_is_terminal() -> bool:
+    return sys.stdout.isatty()
+
+
+def _forward_name_holder(name: str) -> Session | None:
+    """The session serving `name`, or a forward still starting under it.
+
+    A forward's record is written before its leader's pid, so for a moment
+    it looks dead to `live_session`; a second `forward` must not take it.
+    """
+    running = live_session(name)
+    if running is not None:
+        return running
+    now = time.time()
+    return next(
+        (
+            item
+            for item in sessions()
+            if item.name == name
+            and item.mode == "forward"
+            and item.pid is None
+            and now - session_records.recorded_at(item) < _STARTING_GRACE
+        ),
+        None,
+    )
+
+
+def _remembered_forward_port(name: str) -> int | None:
+    entry = next((item for item in registry.entries() if item.name == name), None)
+    if entry is None or not registry.is_forward(entry):
+        return None
+    return entry.flags.port
+
+
+def _start_forward(name: str, port: int, *, detach: bool) -> Session:
+    """Record a forward, then start its background leader on that record."""
+    log = _session_log_path(name)
+    log.parent.mkdir(parents=True, exist_ok=True)
+    # Written first, with no pid: the leader loads it by id.
+    session = create_session(
+        mode="forward",
+        name=name,
+        port=port,
+        cwd=None,
+        command=(),
+        log=log,
+        pid=None,
+        detached=detach,
+    )
+    try:
+        with log.open("ab") as handle:
+            # Its own session, so Ctrl+C here or a closed terminal never
+            # reaches it; `sessions stop` signals it by pid.
+            child = subprocess.Popen(
+                [sys.executable, "-I", "-m", "localghost.forward_leader", session.id],
+                stdin=subprocess.DEVNULL,
+                stdout=handle,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+    except OSError:
+        discard_session(session)
+        raise
+    # Reap it when it exits, or a terminal following it would keep seeing a
+    # zombie as alive.
+    threading.Thread(target=child.wait, daemon=True).start()
+    # Re-read: the leader may already have written its route.
+    record = session_records.read(session.id) or session
+    record.pid = child.pid
+    session_records.save(record)
+    return record
+
+
+def _leader_started(session: Session) -> bool:
+    deadline = time.monotonic() + _LEADER_WAIT
+    while not session_alive(session):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(_LEADER_POLL)
+    return True
+
+
+def _follow_forward(session: Session, *, bar: bool) -> None:
+    _finish_attached(
+        session.name,
+        follow_forward(
+            session,
+            bar=bar,
+            public_origin=_proxy_origin(session.name),
+            secondary_origin=_tailnet_origin(session.name),
+        ),
+    )
 
 
 def _finish_attached(name: str, outcome: Outcome) -> None:
