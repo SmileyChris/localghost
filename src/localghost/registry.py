@@ -9,6 +9,8 @@ an old date.
 from __future__ import annotations
 
 import json
+import os
+import uuid
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -163,11 +165,17 @@ def restore(entry: RegistryEntry) -> None:
 def _write(entry: RegistryEntry) -> None:
     registry_dir().mkdir(parents=True, exist_ok=True)
     path = registry_dir() / f"{entry.name}.json"
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(
-        json.dumps(asdict(entry), indent=2) + "\n", encoding="utf-8"
-    )
-    temporary.replace(path)
+    # A name of its own per writer: a forward's leader and the terminal
+    # following it both write the same entry, and a shared temp file lets one
+    # rename the other's half-written JSON into place.
+    temporary = registry_dir() / f"{entry.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+    try:
+        temporary.write_text(
+            json.dumps(asdict(entry), indent=2) + "\n", encoding="utf-8"
+        )
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _read_flags(payload: dict[str, object]) -> RunFlags:

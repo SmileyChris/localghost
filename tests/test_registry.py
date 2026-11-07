@@ -68,6 +68,24 @@ def test_forget_all(tmp_path, monkeypatch):
     assert registry.entries() == []
 
 
+def test_each_write_uses_its_own_temp_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    sources = []
+    real = Path.replace
+
+    def spy(self, target):
+        sources.append(self.name)
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "replace", spy)
+    registry.record("blog", tmp_path, "django")
+    registry.record("blog", tmp_path, "django")
+
+    assert len(sources) == 2 and len(set(sources)) == 2
+    assert "blog.tmp" not in sources
+    assert [p.name for p in (tmp_path / "registry").iterdir()] == ["blog.json"]
+
+
 def test_record_warns_instead_of_raising(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
     (tmp_path / "registry").write_text("a file, not a directory")
