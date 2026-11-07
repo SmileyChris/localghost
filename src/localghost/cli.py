@@ -424,7 +424,8 @@ def _entry_for_directory(
     containing = [
         entry
         for entry in entries
-        if cwd.is_relative_to(Path(entry.directory).resolve())
+        if not registry.is_forward(entry)
+        and cwd.is_relative_to(Path(entry.directory).resolve())
     ]
     return max(
         containing, key=lambda entry: len(Path(entry.directory).parts), default=None
@@ -884,7 +885,9 @@ def sessions_forget(name: str | None, forget_everything: bool, missing: bool) ->
         gone = sorted(
             entry.name
             for entry in registry.entries()
-            if entry.name not in running and not Path(entry.directory).is_dir()
+            if entry.name not in running
+            and not registry.is_forward(entry)
+            and not Path(entry.directory).is_dir()
         )
         for gone_name in gone:
             registry.forget(gone_name)
@@ -1958,6 +1961,7 @@ def _live_host_session_in(directory: Path) -> Session | None:
             item
             for item in sessions()
             if item.mode == "host"
+            and item.cwd is not None
             and Path(item.cwd).resolve() == directory.resolve()
             and session_alive(item)
         ),
@@ -2126,6 +2130,11 @@ def _already_serving(
     session = live_session(name)
     if session is None:
         return False
+    if session.mode == "forward":
+        raise click.ClickException(
+            f"{name}.localhost is forwarded to port {session.port}; stop it "
+            f"with: {COMMAND} sessions stop {name}"
+        )
     if Path(session.cwd).resolve() != directory.resolve():
         raise click.ClickException(
             f"{name}.localhost is already served from {session.cwd}; run this "

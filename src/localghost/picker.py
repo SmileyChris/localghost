@@ -147,9 +147,14 @@ def render_lines(model: PickerModel, width: int = 80) -> list[str]:
     host_width = max((len(e.hostname) for e in model.entries), default=0)
     type_width = max((len(e.type) for e in model.entries), default=0)
     for index, entry in enumerate(model.entries):
+        where = (
+            f"→ port {entry.flags.port}"
+            if entry.directory is None
+            else _tilde(entry.directory)
+        )
         row = (
             f"  {entry.hostname:<{host_width}}  {entry.type:<{type_width}}  "
-            f"{_tilde(entry.directory)}  ({_relative(entry.last_started)})"
+            f"{where}  ({_relative(entry.last_started)})"
         )
         # Clip before styling so a wrapped line never breaks the redraw's
         # cursor arithmetic, and style by index so the clip stays honest.

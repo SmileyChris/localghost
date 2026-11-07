@@ -148,7 +148,9 @@ def resolve_name(cwd: Path) -> str:
         # A project already remembered under its folder name keeps it, so
         # this naming never strands an existing route as a duplicate.
         if named != cwd and not any(
-            entry.name == value and Path(entry.directory) == cwd
+            entry.name == value
+            and not registry.is_forward(entry)
+            and Path(entry.directory) == cwd
             for entry in registry.entries()
         ):
             value = _folder_name(named)
