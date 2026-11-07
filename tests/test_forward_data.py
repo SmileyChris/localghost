@@ -136,6 +136,32 @@ def test_stop_forward_marks_stopped_and_removes_bridge(tmp_path, monkeypatch):
     assert registry.entries()[0].forward_state == "stopped"
 
 
+def test_stop_forward_skips_a_bridge_the_leader_already_lowered(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
+    registry.record_forward("api", 5173, detached=True)
+    downed = []
+    monkeypatch.setattr(sessions, "_stop_bridge", downed.append)
+    leader = _sleeper()
+    record = _forward(leader.pid)
+    real_kill = sessions.os.kill
+
+    def kill(pid, signum):
+        # The leader lowers its bridge and takes it off record as it exits.
+        if signum == sessions.signal.SIGTERM:
+            sessions.update(record.id, bridge_project=None, bridge_yaml="")
+        real_kill(pid, signum)
+
+    monkeypatch.setattr(sessions.os, "kill", kill)
+    try:
+        sessions.stop(record)
+    finally:
+        leader.kill()
+    assert downed == []
+    assert sessions.sessions() == []
+
+
 def test_reap_marks_a_killed_forward_with_bridge_stopped(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCALGHOST_STATE_DIR", str(tmp_path))
     registry.record_forward("api", 5173, detached=True)

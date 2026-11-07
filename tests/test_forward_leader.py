@@ -208,6 +208,21 @@ def test_leader_cleans_up_and_marks_stopped_on_sigterm(tmp_path, monkeypatch):
     assert _state_of() == "stopped"
     # sessions.stop removes the record, not the leader.
     assert _record(session) is not None
+    # The lowered bridge is off record, so `sessions stop` has none to lower.
+    assert _record(session).bridge_project is None
+    assert _record(session).bridge_yaml == ""
+
+
+def test_leader_keeps_a_bridge_on_record_when_its_last_down_fails(tmp_path):
+    session = _forward(tmp_path)
+
+    def down():
+        raise forward_leader.BridgeError("daemon busy")
+
+    assert _run(session, Script([GULCH, GULCH]), bridge_down=down) == 0
+    assert _record(session).bridge_project == f"localghost-forward-{NAME}"
+    assert _record(session).bridge_yaml
+    assert _state_of() == "stopped"
 
 
 def test_leader_signal_handler_raises_stopped():

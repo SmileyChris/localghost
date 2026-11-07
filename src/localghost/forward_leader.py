@@ -309,7 +309,22 @@ class _Leader:
         self.relay_to = None
         if self.bridge_touched:
             self._lower_bridge()
+            if not self.bridge_touched:
+                self._forget_bridge()
         self.set_forward_state("stopped")
+
+    def _forget_bridge(self) -> None:
+        """Take a lowered bridge off record, so `sessions stop` skips its down.
+
+        A bridge whose `down` failed stays on record for `sessions stop` to
+        retry.
+        """
+        try:
+            sessions.update(self.session.id, bridge_project=None, bridge_yaml="")
+        except OSError as exc:
+            if not self._route_warned:
+                self._route_warned = True
+                _say(f"localghost: could not record the route: {exc}")
 
 
 def main(

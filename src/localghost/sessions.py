@@ -332,6 +332,9 @@ def stop(session: Session) -> None:
                 f"session {session.id} did not stop; process {session.pid} "
                 "is still running"
             )
+        # A leader that lowered its bridge on the way out took it off record;
+        # only one that could not still needs its bridge brought down here.
+        session = read(session.id) or session
     elif session.mode == "compose" and session.project:
         subprocess.run(
             ["docker", "compose", "--project-name", session.project, "down"],
