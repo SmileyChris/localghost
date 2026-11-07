@@ -116,15 +116,25 @@ def record_forward(name: str, port: int, *, detached: bool) -> None:
         warning("Could not record forward for ghost pages", [str(exc)])
 
 
-def set_forward_state(name: str, state: str | None) -> None:
-    """Mark a remembered forward waiting or stopped; ignore anything else."""
+def set_forward_state(
+    name: str, state: str | None, *, warn: bool = True
+) -> OSError | None:
+    """Mark a remembered forward waiting or stopped; ignore anything else.
+
+    Best-effort: returns the error when the write failed, None otherwise.
+    `warn=False` leaves saying so to the caller, so a long-lived leader can
+    say it once rather than on every change.
+    """
     entry = next((item for item in entries() if item.name == name), None)
     if entry is None or not is_forward(entry):
-        return
+        return None
     try:
         _write(replace(entry, forward_state=state))
     except OSError as exc:
-        warning("Could not update forward for ghost pages", [str(exc)])
+        if warn:
+            warning("Could not update forward for ghost pages", [str(exc)])
+        return exc
+    return None
 
 
 def is_forward(entry: RegistryEntry) -> bool:
