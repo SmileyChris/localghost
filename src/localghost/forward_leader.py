@@ -190,6 +190,7 @@ class _Leader:
         self._forward_state: object = ()  # never a real state: first write goes
         self._registry_warned = False
         self._route_warned = False
+        self._down_failed = False
 
     def apply(self, decision: forwards.Decision) -> None:
         for event in decision.events:
@@ -202,6 +203,8 @@ class _Leader:
         elif not decision.bridge and self.wanted_bridge:
             self.failure = None
             self._lower_bridge()
+        elif not decision.bridge and self.bridge_is_up:
+            self._lower_bridge()  # an earlier `down` failed: try again
         self.wanted_bridge = decision.bridge
         route = decision.route
         if self.failure is not None and decision.bridge:
@@ -255,12 +258,20 @@ class _Leader:
         self.bridge_is_up = True
 
     def _lower_bridge(self) -> None:
-        self.bridge_is_up = False
         try:
             self._bridge_down()
         except BridgeError as exc:
-            _say(f"could not stop the bridge: {exc}")
+            # Its containers may still run: keep it on record, so the next
+            # poll and `sessions stop` can still find and lower it.
+            if not self.bridge_is_up or not self._down_failed:
+                _say(f"could not stop the bridge: {exc}")
+            self._down_failed = True
+            self.bridge_is_up = True
             return
+        if self._down_failed:
+            _say("stopped the bridge")
+        self._down_failed = False
+        self.bridge_is_up = False
         self.bridge_touched = False
 
     def _write(self, route: str) -> None:

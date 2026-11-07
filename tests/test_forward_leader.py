@@ -422,3 +422,30 @@ def test_leader_writes_state_only_on_change(tmp_path, monkeypatch):
     _run(session, Script([NOTHING] * 4 + [GULCH] * 4))
     assert routes == [f"waiting: nothing listening on {PORT}", "up: ~/dev/lab/gulch"]
     assert states == ["waiting", None, "stopped"]
+
+
+def test_leader_retries_a_failed_bridge_down(tmp_path, capsys):
+    session = _forward(tmp_path)
+    downs = []
+
+    def flaky_down():
+        downs.append("down")
+        if len(downs) == 1:
+            raise forward_leader.BridgeError("daemon busy")
+
+    seen = []
+    script = Script(
+        [GULCH] + [NOTHING] * 14,
+        on_poll=lambda s: seen.append(
+            (len(downs), _record(session).bridge_project, _state_of())
+        ),
+    )
+    assert _run(session, script, bridge_down=flaky_down) == 0
+    project = f"localghost-forward-{NAME}"
+    failed = seen.index(next(item for item in seen if item[0] == 1))
+    # The failed `down` leaves the bridge on record, not yet waiting.
+    assert seen[failed] == (1, project, None)
+    # Retried on the next poll; once it succeeds the record lets go.
+    assert seen[failed + 1] == (2, None, "waiting")
+    assert len(downs) == 2  # nothing left to lower on exit
+    assert capsys.readouterr().out.count("could not stop the bridge: daemon busy") == 1
