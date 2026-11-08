@@ -215,8 +215,13 @@ terminal, so it stays visible while the application's own output scrolls
 above it:
 
 ```
- localghost  ⠹ starting hub  https://my-django-project.localhost   Ctrl+C to stop  ·  Ctrl+Z to detach
+ localghost  ⠹ starting hub  my-django-project.localhost   Ctrl+C to stop  ·  Ctrl+Z to detach
 ```
+
+The bar shows each URL as its bare host to save room. In a terminal that
+supports hyperlinks (OSC 8), the host is a link to the full `https://`
+address. The full URLs are also printed above the bar before the application
+starts, and those are hyperlinks too.
 
 The bar appears immediately, before the hub is reconciled, and names the step
 it is waiting on — `starting hub` while the hub comes up, then `starting` once
