@@ -12,7 +12,9 @@ uses [Semantic Versioning](https://semver.org/).
   follows the port: it goes down (to the ghost page) when nothing listens and
   returns when a server does. Options are `--detach` and `--no-status-bar`;
   `forward NAME` reuses a remembered forward's port. `restart`, `sessions list`,
-  `sessions logs`, `sessions attach` and `sessions stop` work on forwards.
+  `sessions logs`, `sessions attach` and `sessions stop` work on forwards. A
+  forward has its own ghost page, showing its port, so the hub image is rebuilt
+  with the release.
 - `run` suggests `forward` when its port is held by a server started from inside
   the project.
 
@@ -22,8 +24,6 @@ uses [Semantic Versioning](https://semver.org/).
   with `directory: null`. Consumers that assume a directory string need to handle
   it. Session records gain a `route` field and registry entries an optional
   `forward_state`, so an older Localghost may list new ones as unreadable.
-- The hub's ghost page for a forward shows its port instead of a directory, so
-  the hub image is rebuilt with the release.
 - Printed URLs and the status bar's URLs are terminal hyperlinks (OSC 8) where
   the terminal supports them. The bar shows each URL as its bare host, such as
   `blog.localhost`, linked to the full address; the URLs printed above it keep
