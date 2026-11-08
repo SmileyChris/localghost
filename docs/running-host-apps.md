@@ -397,13 +397,22 @@ remembered project already uses; pick another name, or drop the project with
 refuses too; `restart` keeps a forward's port, so to change it run
 `localghost sessions stop NAME` and then `localghost forward NAME PORT`.
 
+The name works the other way too. `localghost run` refuses a name that a running
+forward serves (`blog.localhost is forwarded to port 5173; stop it with:
+localghost sessions stop blog`). It takes over the name of a stopped forward,
+saying `Replacing the stopped forward blog (port 5173).`, and the project's entry
+replaces the forward's, so `forward blog` then needs a port again.
+
 `localghost restart NAME` restarts a forward, and `sessions list` shows it with
 mode `forward` and `→ port N` in place of a directory. While the route is down
 it reads `running (waiting)`, or `running (failing)` when no route can be made,
 for example because the server listens only on loopback and no relay is
 possible. In `sessions list --json` a forward has `mode: "forward"`,
-`type: "forward"` and `directory: null`. `sessions stop NAME` signals only the
-forward's own process.
+`type: "forward"` and `directory: null`, and its session's `route` field says
+where the route stands: `up` (or `up: DIRECTORY` once a holder is pinned),
+`waiting: REASON`, `failing: REASON`, or `stopped` once the forward was asked to
+stop; it is empty for the moment before the forward first checks the port.
+`sessions stop NAME` signals only the forward's own process.
 
 ### Custom port
 
