@@ -5,6 +5,8 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [4.7.0] - 2026-11-08
+
 ### Added
 
 - `localghost forward NAME PORT` gives a hostname to a server Localghost did not
