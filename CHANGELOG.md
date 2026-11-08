@@ -24,6 +24,10 @@ uses [Semantic Versioning](https://semver.org/).
   `forward_state`, so an older Localghost may list new ones as unreadable.
 - The hub's ghost page for a forward shows its port instead of a directory, so
   the hub image is rebuilt with the release.
+- Printed URLs and the status bar's URLs are terminal hyperlinks (OSC 8) where
+  the terminal supports them. The bar shows each URL as its bare host, such as
+  `blog.localhost`, linked to the full address; the URLs printed above it keep
+  their scheme.
 
 ## [4.6.0] - 2026-10-30
 

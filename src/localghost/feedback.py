@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from rich.console import Console
+from rich.style import Style
 from rich.text import Text
 
 LIME = "#a3e635"
@@ -203,6 +204,13 @@ def warning(title: str, messages: Iterable[str]) -> None:
         _console(True).print(f"Warning: {title}: {message}", soft_wrap=True)
 
 
+def _value_style(value: str) -> Style:
+    """Mint, and a terminal hyperlink (OSC 8) when the value is a web URL."""
+    if value.startswith(("http://", "https://")):
+        return Style(color=MINT, link=value)
+    return Style(color=MINT)
+
+
 def _labeled_block(rows: list[tuple[str, str]], *, heading: str, err: bool) -> None:
     """Render label/value rows under a heading, marked by a mint accent bar."""
     if _rich_terminal(err):
@@ -213,7 +221,9 @@ def _labeled_block(rows: list[tuple[str, str]], *, heading: str, err: bool) -> N
         for label, value in rows:
             console.print(
                 Text.assemble(
-                    ("▌ ", MINT), (label.ljust(width) + " ", "bold"), (value, MINT)
+                    ("▌ ", MINT),
+                    (label.ljust(width) + " ", "bold"),
+                    (value, _value_style(value)),
                 ),
                 soft_wrap=True,
             )

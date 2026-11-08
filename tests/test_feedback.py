@@ -305,3 +305,26 @@ def test_command_prefix_follows_how_localghost_was_run(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "prefix", str(ephemeral))
     monkeypatch.delenv("UV")
     assert feedback._command() == "localghost"
+
+
+def test_url_rows_are_terminal_hyperlinks(monkeypatch):
+    console = Console()
+    monkeypatch.setattr(feedback, "_rich_terminal", lambda err: True)
+    monkeypatch.setattr(feedback, "_console", lambda err: console)
+
+    feedback.forward_plan(
+        name="demo",
+        port=5173,
+        url="https://demo.localhost",
+        background=False,
+        tailnet_url="https://demo.tail1234",
+    )
+
+    links = [
+        span.style.link
+        for line in console.items[1:]
+        for span in line.spans
+        if getattr(span.style, "link", None)
+    ]
+    # Each URL row links to its full address; the Target row is not a link.
+    assert links == ["https://demo.localhost", "https://demo.tail1234"]

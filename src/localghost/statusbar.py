@@ -65,6 +65,26 @@ def _terminal_size() -> tuple[int, int]:
 _SEPARATOR = "  ·  "
 
 
+def _host_label(url: str) -> str:
+    """What the bar shows for `url`: the host, its scheme left to the link.
+
+    The bar is short of room and every URL on it is a hyperlink to the full
+    address, so the scheme is noise there. Copyable full URLs are printed
+    above the bar before the application starts.
+    """
+    return url.split("://", 1)[-1].rstrip("/")
+
+
+def _link(url: str, text: str) -> str:
+    """Wrap `text` in an OSC 8 hyperlink to `url`.
+
+    Terminals without OSC 8 support draw `text` alone, so the link costs
+    nothing where it cannot be followed. The escapes take no cells, and the
+    width budget counts `text` only.
+    """
+    return f"\x1b]8;;{url}\x1b\\{text}\x1b]8;;\x1b\\"
+
+
 def _bar_line(
     url: str,
     width: int,
@@ -90,7 +110,12 @@ def _bar_line(
     A `secondary` URL (the mirrored tailnet route) rides beside the primary
     when the row has room. As the window narrows, the hints go first, detaching
     before stopping, then the secondary, and only then is the primary truncated.
+    Each URL is drawn as its host, linked to the full address.
     """
+    target, url = url, _host_label(url)
+    secondary_target = secondary
+    if secondary is not None:
+        secondary = _host_label(secondary)
     budget = width - 1
     wordmark = " localghost  "
     shown_note = f"{note}  " if note else ""
@@ -119,12 +144,15 @@ def _bar_line(
     rendered_hint = f"{_DIM}{hint}{_RESET}" if hint else ""
     url_style = _DIM if spinner else _fg(MINT)
     rendered_secondary = (
-        f"{_DIM}{_SEPARATOR}{_RESET}{url_style}{secondary}{_RESET}" if secondary else ""
+        f"{_DIM}{_SEPARATOR}{_RESET}{url_style}"
+        f"{_link(secondary_target, secondary)}{_RESET}"
+        if secondary and secondary_target
+        else ""
     )
     return (
         f"{_BOLD} local{_fg(LIME)}ghost{_RESET}  "
         f"{rendered_status}"
-        f"{url_style}{shown}{_RESET}"
+        f"{url_style}{_link(target, shown) if shown else ''}{_RESET}"
         f"{rendered_secondary}"
         f"{padding}"
         f"{rendered_hint}"

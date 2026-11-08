@@ -11,6 +11,7 @@ import pytest
 from localghost import statusbar
 
 URL = "http://demo.localhost"
+HOST = "demo.localhost"
 
 # CSI sequences the bar relies on, matched loosely so styling can change.
 SET_REGION = re.compile(r"\x1b\[(\d+);(\d+)r")
@@ -49,8 +50,9 @@ def terminal(monkeypatch):
 
 
 def visible(text: str) -> str:
-    """Strip CSI/charset escapes, leaving the cells a user would see."""
-    without_csi = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
+    """Strip CSI/charset/hyperlink escapes, leaving the cells a user would see."""
+    without_links = re.sub(r"\x1b\]8;;[^\x1b]*\x1b\\", "", text)
+    without_csi = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", without_links)
     return re.sub(r"\x1b[78]", "", without_csi)
 
 
@@ -95,7 +97,7 @@ def test_bar_shows_the_url():
     with statusbar.pinned(URL, stream=stream):
         pass
 
-    assert URL in visible(stream.text)
+    assert HOST in visible(stream.text)
 
 
 def test_bar_never_writes_the_final_column():
@@ -186,7 +188,7 @@ def test_ready_bar_drops_the_starting_state():
     drawn = visible(statusbar._bar_line(URL, 80))
 
     assert "starting" not in drawn
-    assert URL in drawn
+    assert HOST in drawn
 
 
 def test_starting_state_still_respects_the_width_budget():
@@ -257,7 +259,7 @@ def test_probe_success_flips_the_bar_to_ready():
         latest = stream.chunks[-1]
 
     assert "starting" not in visible(latest)
-    assert URL in visible(latest)
+    assert HOST in visible(latest)
 
 
 def test_a_probe_that_never_succeeds_leaves_the_bar_loading():
@@ -375,31 +377,57 @@ def test_disabled_bar_accepts_status_updates():
 
 
 TAILNET_URL = "https://demo.tail1234"
+TAILNET_HOST = "demo.tail1234"
 
 
 def test_bar_shows_a_secondary_url_beside_the_primary():
     drawn = visible(statusbar._bar_line(URL, 80, secondary=TAILNET_URL))
 
-    assert URL in drawn
-    assert TAILNET_URL in drawn
+    assert HOST in drawn
+    assert TAILNET_HOST in drawn
     assert "Ctrl+C" in drawn
     assert len(drawn) <= 79
 
 
-def test_hint_is_dropped_before_the_secondary_url():
-    drawn = visible(statusbar._bar_line(URL, 70, secondary=TAILNET_URL))
+# The bar's fixed cost: the wordmark, plus the cell it never writes.
+_FIXED = len(" localghost  ") + 1
+_BOTH = len(HOST) + len("  ·  ") + len(TAILNET_HOST)
 
-    assert TAILNET_URL in drawn
+
+def test_hint_is_dropped_before_the_secondary_url():
+    # One cell short of the stop hint and its spacing.
+    width = _FIXED + _BOTH + len("  Ctrl+C to stop ") - 1
+    drawn = visible(statusbar._bar_line(URL, width, secondary=TAILNET_URL))
+
+    assert TAILNET_HOST in drawn
     assert "Ctrl+C" not in drawn
-    assert len(drawn) <= 69
+    assert len(drawn) <= width - 1
 
 
 def test_secondary_url_is_dropped_before_the_primary():
-    drawn = visible(statusbar._bar_line(URL, 50, secondary=TAILNET_URL))
+    width = _FIXED + _BOTH - 1
+    drawn = visible(statusbar._bar_line(URL, width, secondary=TAILNET_URL))
 
-    assert URL in drawn
-    assert TAILNET_URL not in drawn
-    assert len(drawn) <= 49
+    assert HOST in drawn
+    assert TAILNET_HOST not in drawn
+    assert len(drawn) <= width - 1
+
+
+def test_bar_shows_hosts_linked_to_their_full_urls():
+    drawn = statusbar._bar_line(URL, 100, secondary=TAILNET_URL)
+
+    assert "http://" not in visible(drawn)
+    assert f"\x1b]8;;{URL}\x1b\\{HOST}\x1b]8;;\x1b\\" in drawn
+    assert f"\x1b]8;;{TAILNET_URL}\x1b\\{TAILNET_HOST}\x1b]8;;\x1b\\" in drawn
+
+
+def test_a_truncated_host_still_links_to_the_full_url():
+    long_url = "http://" + "a" * 200 + ".localhost"
+
+    drawn = statusbar._bar_line(long_url, 80)
+
+    assert f"\x1b]8;;{long_url}\x1b\\" in drawn
+    assert len(visible(drawn)) <= 79
 
 
 def test_pinned_shows_the_secondary_url():
@@ -408,7 +436,7 @@ def test_pinned_shows_the_secondary_url():
     with statusbar.pinned(URL, secondary_url=TAILNET_URL, stream=stream):
         pass
 
-    assert TAILNET_URL in visible(stream.text)
+    assert TAILNET_HOST in visible(stream.text)
 
 
 def test_fg_and_terminal_size_read_the_real_environment(monkeypatch):
