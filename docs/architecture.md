@@ -36,6 +36,18 @@ For a request to `http://my-project.localhost`:
 4. Traefik connects to the selected container over the shared
    `localghost` network and its explicitly labelled port.
 
+What sits behind Traefik depends on who owns the application:
+
+```mermaid
+flowchart TB
+    B["Browser<br/>my-project.localhost"] -->|"loopback port"| T["Traefik (the hub)"]
+    T -->|"Compose labels"| C["Compose container"]
+    T -->|"run bridge"| R["Caddy bridge"]
+    T -->|"forward bridge"| F["Caddy bridge"]
+    R -->|"host.docker.internal"| H1["Host process<br/>started by run"]
+    F -->|"host.docker.internal"| H2["Host process<br/>started by you"]
+```
+
 No application host port is needed in this path. Application containers may
 also retain their ordinary Compose default network for databases and other
 private dependencies.

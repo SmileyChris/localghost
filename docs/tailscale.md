@@ -47,6 +47,15 @@ A request from another device therefore flows: tailnet DNS → gateway →
 Traefik (certificate chosen by SNI from the suffix authority) → the same
 container or host bridge that serves the `.localhost` route.
 
+```mermaid
+flowchart TB
+    D["Tailnet device"] -->|"1. DNS for *.suffix<br/>(split DNS)"| G["Gateway<br/>(tailscale-gateway)"]
+    G -.->|"answers with its<br/>own tailnet address"| D
+    D -->|"2. HTTP or HTTPS"| G
+    G -->|"original Host header<br/>or PROXY protocol"| T["Traefik<br/>(cert chosen by SNI)"]
+    T --> A["The same container or<br/>host bridge as .localhost"]
+```
+
 ## Share it
 
 ```sh

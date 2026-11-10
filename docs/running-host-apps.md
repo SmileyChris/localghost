@@ -8,12 +8,13 @@ background sessions.
 
 ## Which command do I use?
 
-| You want to… | Use | Localghost starts the server? |
-|--------------|-----|-------------------------------|
-| Serve a checkout without writing any config | `localghost run` | Yes |
-| Keep that setup for next time | `localghost save` (or `save --run`) | Yes, on `run` |
-| Give a name to a server you already started | `localghost forward NAME PORT` | No: you own it |
-| Route a project that already has Compose labels | `docker compose up` | No: Compose does |
+| You want to… | Use | Who starts the app? |
+|--------------|-----|---------------------|
+| Serve a checkout without writing any config | `localghost run` | Localghost |
+| Keep that setup for next time | `localghost save` (or `save --run`) | Localghost, on `run` |
+| Give a name to a server you already started | `localghost forward NAME PORT` | You |
+| Run a Compose project that already has the [labels](integrating-applications.md#primary-service) | `localghost run` (starts the hub and runs `docker compose up` for you) | Localghost, through Compose |
+| Same, managing Compose yourself | `localghost hub up` once, then you run `docker compose up` | You, through Compose (the hub must already be running) |
 
 `run` and `forward` both produce a `NAME.localhost` route through the same
 Caddy bridge. The difference is ownership: `run` owns the process and the

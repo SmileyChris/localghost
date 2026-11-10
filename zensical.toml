@@ -9,9 +9,9 @@ extra_css = ["stylesheets/extra.css"]
 nav = [
   {"Home" = "index.md"},
   {"Use localghost" = [
-    {"Integrate applications" = "integrating-applications.md"},
-    {"Save project setup" = "saving-setup.md"},
     {"Run host applications" = "running-host-apps.md"},
+    {"Save project setup" = "saving-setup.md"},
+    {"Integrate applications" = "integrating-applications.md"},
     {"Host on a tailnet" = "tailscale.md"},
   ]},
   {"Operate localghost" = [
