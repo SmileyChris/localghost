@@ -6,6 +6,21 @@ file, and an existing Compose project is handed to `docker compose up` with
 the hub wired in first. This page covers detection, ports, options, and
 background sessions.
 
+## Which command do I use?
+
+| You want to… | Use | Localghost starts the server? |
+|--------------|-----|-------------------------------|
+| Serve a checkout without writing any config | `localghost run` | Yes |
+| Keep that setup for next time | `localghost save` (or `save --run`) | Yes, on `run` |
+| Give a name to a server you already started | `localghost forward NAME PORT` | No: you own it |
+| Route a project that already has Compose labels | `docker compose up` | No: Compose does |
+
+`run` and `forward` both produce a `NAME.localhost` route through the same
+Caddy bridge. The difference is ownership: `run` owns the process and the
+route, while `forward` owns only the route and follows whatever listens on the
+port. Details for forwards are under
+[Forwarding a running server](#forwarding-a-running-server).
+
 ## Project types
 
 Every project has a **type**. Detection runs automatically from the selected

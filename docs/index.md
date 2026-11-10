@@ -32,6 +32,18 @@ the detected setup (`.localghost.toml` for host apps, a Compose override for
 Compose projects) and `save --run` does both. See
 [Save project setup](saving-setup.md).
 
+## Already running the server?
+
+If you start the server yourself, from a debugger, an IDE, or another tool,
+give its port a hostname instead of letting localghost launch it:
+
+```sh
+uvx localghost forward api 5173   # http://api.localhost -> this host's port 5173
+```
+
+Localghost only routes to the port; it never starts or stops the server. See
+[Forwarding a running server](running-host-apps.md#forwarding-a-running-server).
+
 ## Optional extras
 
 HTTP is always available. For trusted HTTPS, install `mkcert` and run:

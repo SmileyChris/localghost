@@ -122,6 +122,17 @@ literal `<name>-app` Traefik objects disappear with the child process; the
 hub is retained. `save` records repeatable host run settings in
 `.localghost.toml`; it does not make the bridge itself persistent.
 
+`localghost forward NAME PORT` uses the same bridge for a server Localghost did
+not start. Only the process differs: a `run` session owns the application and
+its route, while a forward owns the route alone. The bridge targets
+`host.docker.internal` on the given port, and the forward's background process
+watches that port, bringing the route up while a matching server listens and
+reporting why it is down otherwise. It is recorded in the session registry with
+mode `forward` and no directory, so it appears in `sessions list`, survives
+`restart`. Stopping a forward removes the bridge and leaves the server
+running. See
+[Forwarding a running server](running-host-apps.md#forwarding-a-running-server).
+
 The hub is always started as the fixed `localghost` Compose project, even
 when a host application sets `COMPOSE_PROJECT_NAME` for its own route.
 

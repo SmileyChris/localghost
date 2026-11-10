@@ -81,7 +81,15 @@ use `sessions`, `sessions logs NAME -f`, `sessions attach NAME`, `restart NAME`,
 `sessions stop NAME` to manage it.
 
 Already running the server yourself, from a debugger or another tool? Use
-`localghost forward NAME PORT` to give its port a hostname.
+`localghost forward NAME PORT` to give its port a hostname:
+
+```sh
+npm run dev                      # you start the server (here on port 5173)
+uvx localghost forward api 5173  # http://api.localhost now reaches it
+```
+
+Localghost routes to the port and never starts or stops the server; Ctrl+C
+removes the route only. Add `--detach` to leave the forward in the background.
 
 ## Documentation
 
